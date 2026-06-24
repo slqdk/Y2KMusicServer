@@ -357,3 +357,27 @@ export function fmtTime(sec: number | null | undefined): string {
   const m = Math.floor(s / 60)
   return `${m}:${String(s % 60).padStart(2, '0')}`
 }
+
+
+// ── Network shares ─────────────────────────────────────────────────────
+export interface NetworkShare { host: string; username: string }
+
+export const getNetworkShares = () =>
+  req<NetworkShare[]>('/api/admin/network')
+
+// Connect reports failure in the body (not only via HTTP status), so read the
+// JSON either way and surface the server's plain-English error.
+export async function connectNetworkShare(body: { path: string; username: string; password: string }):
+  Promise<{ ok: boolean; host?: string; message?: string; error?: string }> {
+  const r = await fetch('/api/admin/network/connect', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const data = (await r.json().catch(() => ({}))) as { host?: string; message?: string; error?: string }
+  return { ok: r.ok, ...data }
+}
+
+export const forgetNetworkShare = (host: string) =>
+  req<{ removed: boolean; host: string }>(
+    `/api/admin/network/${encodeURIComponent(host)}`, { method: 'DELETE' })
