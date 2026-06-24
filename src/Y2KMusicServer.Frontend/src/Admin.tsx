@@ -38,9 +38,25 @@ export default function Admin() {
     return () => clearInterval(id)
   }, [refreshStatus])
 
-  const cueB = useCallback(
-    (trackId: number) => api.cueDeckB(trackId).then(refreshStatus),
-    [refreshStatus])
+  // "Play now" from a library row: if a track is on air and playing, cue the
+  // chosen track onto Deck B and crossfade to it immediately; if nothing is
+  // playing there's nothing to mix from, so load it on Deck A and start.
+  // Status is read fresh so the choice matches the engine, not a stale poll.
+  const playNow = useCallback(async (trackId: number) => {
+    let s: api.PlaybackStatus | null = null
+    try { s = await api.getStatus() } catch { /* fall back to load + play */ }
+    const onAir = s != null && s.state === 1 && s.trackId != null && !s.crossfading
+    try {
+      if (onAir) {
+        await api.cueDeckB(trackId)
+        await api.crossfadeNow()
+      } else {
+        await api.load(trackId)
+        await api.play()
+      }
+    } catch { /* surfaced by the status not changing */ }
+    refreshStatus()
+  }, [refreshStatus])
 
   const connClass =
     live.conn === 'connected' ? 'w-conn w-ok'
@@ -74,7 +90,7 @@ export default function Admin() {
       </div>
 
       <div className="w-cols">
-        <LibraryBrowser scan={live.scan} analysis={live.analysis} onCueB={cueB} />
+        <LibraryBrowser scan={live.scan} analysis={live.analysis} onPlayNow={playNow} />
         <div className="w-right-col">
           <DeckPanel live={live} status={status} refresh={refreshStatus} />
           <PlaylistPanel />

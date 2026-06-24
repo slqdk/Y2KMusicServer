@@ -193,6 +193,23 @@
 }
 .w-overlay { background: var(--w-overlay-bg, rgba(0, 0, 32, 0.35)); }
 
+/* Context menu (right-click in the library) — variable-driven so each skin
+   inherits its own bevel/edge/shadow exactly like .w-panel and .w-dialog. */
+.w-ctxmenu {
+  position: fixed; z-index: 60; min-width: 168px;
+  margin: 0; padding: 2px; list-style: none;
+  background: var(--w-face); color: var(--w-text, #000);
+  box-shadow: var(--w-raised), var(--w-dialog-shadow, 0 0 #0000);
+  border: var(--w-edge, 0 solid transparent);
+  border-radius: var(--w-radius, 0);
+}
+.w-ctxitem {
+  padding: 3px 18px 3px 12px; cursor: default; white-space: nowrap;
+  border-radius: var(--w-radius, 0);
+}
+.w-ctxitem:hover { background: var(--w-sel); color: #fff; }
+.w-ctxsep { height: 0; margin: 3px 4px; border-top: 1px solid var(--w-sh); border-bottom: 1px solid var(--w-hi); }
+
 /* Schedule timeline segment */
 .w-timeline .w-tl-seg {
   position: absolute; top: 12px; bottom: 2px;
@@ -378,9 +395,8 @@
 .w-listwrap { background: #fff; overflow: auto; }
 .w-table { width: 100%; border-collapse: collapse; background: #fff; }
 .w-table td { padding: 1px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.w-table tr { cursor: default; }
+.w-table tr { cursor: default; user-select: none; }
 .w-num { text-align: right; font-variant-numeric: tabular-nums; }
-.w-rowbtns button.w-btn { min-height: 17px; padding: 0 6px; margin-right: 2px; }
 
 .w-toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
 .w-spacer { flex: 1; }

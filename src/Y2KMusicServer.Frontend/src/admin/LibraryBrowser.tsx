@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import * as api from './api'
 import { fmtTime } from './api'
 import type { ScanInfo, AnalysisInfo } from './useHub'
@@ -8,7 +8,13 @@ import AnalyzeBar from './AnalyzeBar'
 
 const PAGE = 50
 
-export default function LibraryBrowser({ scan, analysis, onCueB }: { scan: ScanInfo | null; analysis: AnalysisInfo | null; onCueB: (trackId: number) => Promise<unknown> }) {
+// Right-click menu geometry, used only to keep it inside the viewport.
+const MENU_W = 184
+const MENU_H = 96
+
+type RowMenu = { x: number; y: number; track: api.TrackDto }
+
+export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: ScanInfo | null; analysis: AnalysisInfo | null; onPlayNow: (trackId: number) => Promise<unknown> | void }) {
   const [cats, setCats] = useState<api.CategoryDto[]>([])
   const [catErr, setCatErr] = useState<string | null>(null)
   const [q, setQ] = useState('')
@@ -18,6 +24,7 @@ export default function LibraryBrowser({ scan, analysis, onCueB }: { scan: ScanI
   const [selId, setSelId] = useState<number | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [dialogCat, setDialogCat] = useState<api.CategoryDto | null>(null)
+  const [menu, setMenu] = useState<RowMenu | null>(null)
   const debounce = useRef<number | undefined>(undefined)
 
   const refreshCats = () => api.getCategories().then(setCats).catch(() => {})
@@ -32,6 +39,25 @@ export default function LibraryBrowser({ scan, analysis, onCueB }: { scan: ScanI
     debounce.current = window.setTimeout(() => loadTracks(q, categoryId, skip), 250)
     return () => window.clearTimeout(debounce.current)
   }, [q, categoryId, skip])
+
+  // Dismiss the row menu on any click, scroll, resize, or Escape. The menu
+  // item's own onClick runs first (it bubbles to the React root before this
+  // window listener), so the action still fires.
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(null)
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenu(null) }
+    window.addEventListener('click', close)
+    window.addEventListener('resize', close)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('resize', close)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [menu])
 
   const catName = useMemo(() => {
     const m = new Map<number, string>()
@@ -52,6 +78,29 @@ export default function LibraryBrowser({ scan, analysis, onCueB }: { scan: ScanI
   const rowAct = async (id: number, fn: () => Promise<unknown>) => {
     setBusyId(id)
     try { await fn() } catch { /* ignore */ } finally { setBusyId(null) }
+  }
+
+  // Add the track to the playlist as a manual pick (it lands ahead of the
+  // auto-fill). Double-click and the "Play as next song" menu item share this.
+  const playNext = (id: number) => rowAct(id, () => api.addToPlaylist(id, 'Manual'))
+
+  // Crossfade to the track now (or load + play it if nothing is on air); the
+  // parent owns the decision because it has the live playback status.
+  const doPlayNow = (id: number) => rowAct(id, async () => { await onPlayNow(id) })
+
+  // Re-read tags + re-measure BPM/LUFS for one track, then refresh the page so
+  // the row shows the new values.
+  const rescanOne = (id: number) => rowAct(id, async () => {
+    await api.rescanTrack(id)
+    await loadTracks(q, categoryId, skip)
+  })
+
+  const openMenu = (e: ReactMouseEvent, t: api.TrackDto) => {
+    e.preventDefault()
+    setSelId(t.id)
+    const x = Math.max(4, Math.min(e.clientX, window.innerWidth - MENU_W - 4))
+    const y = Math.max(4, Math.min(e.clientY, window.innerHeight - MENU_H - 4))
+    setMenu({ x, y, track: t })
   }
 
   const total = page?.total ?? 0
@@ -106,39 +155,33 @@ export default function LibraryBrowser({ scan, analysis, onCueB }: { scan: ScanI
         )}
       </div>
 
-      {/* Track table */}
+      {/* Track table. Double-click a row to queue it as the next song; right-click
+          for the full action menu. */}
       <div className="w-listwrap w-sunken" style={{ flex: 1, minHeight: 0, marginTop: 6 }}>
         <table className="w-table">
           <thead>
             <tr>
               <th>Title</th><th>Artist</th><th>Category</th>
-              <th className="w-num">Dur</th><th className="w-num">BPM</th><th className="w-num">LUFS</th><th></th>
+              <th className="w-num">Dur</th><th className="w-num">BPM</th><th className="w-num">LUFS</th>
             </tr>
           </thead>
           <tbody>
             {items.map(t => (
-              <tr key={t.id} className={selId === t.id ? 'w-rowsel' : ''} onClick={() => setSelId(t.id)}>
-                <td title={t.title ?? ''}>{t.title ?? '(untitled)'}</td>
+              <tr key={t.id} className={selId === t.id ? 'w-rowsel' : ''}
+                onClick={() => setSelId(t.id)}
+                onDoubleClick={() => playNext(t.id)}
+                onContextMenu={e => openMenu(e, t)}
+                title="Double-click to queue as next · right-click for more">
+                <td title={t.title ?? ''}>{t.title ?? '(untitled)'}{busyId === t.id ? ' ⟳' : ''}</td>
                 <td title={t.artist ?? ''}>{t.artist ?? '---'}</td>
                 <td>{t.categoryId != null ? (catName.get(t.categoryId) ?? '?') : '---'}</td>
                 <td className="w-num">{fmtTime(t.durationSec)}</td>
                 <td className="w-num">{t.bpm != null ? Math.round(t.bpm) : '---'}</td>
                 <td className="w-num">{t.lufs != null ? t.lufs.toFixed(1) : '---'}</td>
-                <td className="w-rowbtns" onClick={e => e.stopPropagation()}>
-                  <button className="w-btn" disabled={busyId === t.id}
-                    title="Load + play now"
-                    onClick={() => rowAct(t.id, async () => { await api.load(t.id); await api.play() })}>▶</button>
-                  <button className="w-btn" disabled={busyId === t.id}
-                    title="Add to playlist"
-                    onClick={() => rowAct(t.id, () => api.addToPlaylist(t.id, 'Manual'))}>+</button>
-                  <button className="w-btn" disabled={busyId === t.id}
-                    title="Cue to Deck B (starts silent for beat-matching)"
-                    onClick={() => rowAct(t.id, () => onCueB(t.id))}>→B</button>
-                </td>
               </tr>
             ))}
             {items.length === 0 && (
-              <tr><td colSpan={7} className="w-muted" style={{ padding: 8 }}>No tracks. Assign a folder to a category; it scans and analyses automatically.</td></tr>
+              <tr><td colSpan={6} className="w-muted" style={{ padding: 8 }}>No tracks. Assign a folder to a category; it scans and analyses automatically.</td></tr>
             )}
           </tbody>
         </table>
@@ -151,6 +194,19 @@ export default function LibraryBrowser({ scan, analysis, onCueB }: { scan: ScanI
         <span className="w-spacer" />
         <span className="w-muted">{from}–{to} of {total}</span>
       </div>
+
+      {menu && (
+        <ul className="w-ctxmenu" role="menu" style={{ left: menu.x, top: menu.y }}
+          onContextMenu={e => e.preventDefault()}>
+          <li className="w-ctxitem" role="menuitem"
+            onClick={() => { playNext(menu.track.id); setMenu(null) }}>Play as next song</li>
+          <li className="w-ctxitem" role="menuitem"
+            onClick={() => { doPlayNow(menu.track.id); setMenu(null) }}>Play now</li>
+          <li className="w-ctxsep" role="separator" />
+          <li className="w-ctxitem" role="menuitem"
+            onClick={() => { rescanOne(menu.track.id); setMenu(null) }}>Rescan this song</li>
+        </ul>
+      )}
 
       {dialogCat && (
         <CategoryDialog

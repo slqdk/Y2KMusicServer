@@ -135,6 +135,11 @@ export const putBeatGrid = (trackId: number, body: { bpm: number; phaseOffsetSec
     `/api/admin/track/${trackId}/beatgrid`,
     { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 
+// Re-process one track from its file: re-reads tags + re-measures BPM/LUFS,
+// then clears that track's cached mix pairs and waveform/structure caches.
+export const rescanTrack = (trackId: number) =>
+  post(`/api/admin/track/${trackId}/rescan`)
+
 // ── Playback transport ─────────────────────────────────────────────────
 export const getStatus = () => req<PlaybackStatus>('/api/admin/playback/status')
 export const load = (trackId: number) => post(`/api/admin/playback/load?trackId=${trackId}`)

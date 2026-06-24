@@ -137,6 +137,137 @@ public sealed class AdminTrackController : ControllerBase
             mixCacheCleared = stale.Count
         });
     }
+
+    /// <summary>
+    /// Re-processes one track from its file: re-reads tags (title / artist /
+    /// album / genre / year / type / duration) via TagLib — the same read the
+    /// scanner does — and re-measures loudness + tempo (LUFS / BPM / beat
+    /// phase) with the same analysers the analyze pass uses. Then it drops every
+    /// cached mix pair that involves the track and its rebuildable on-disk
+    /// waveform + structure caches, so everything re-derives from the current
+    /// file. The decode runs off the request thread (a single file is roughly a
+    /// second or two). Measurements that fail to read leave the prior value
+    /// intact — a transient decode error never blanks a good BPM/LUFS. 404 if
+    /// the track is unknown, 422 if its file is missing on disk.
+    /// </summary>
+    [HttpPost("{id:int}/rescan")]
+    public async Task<IActionResult> Rescan(int id, CancellationToken ct)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+
+        var t = await db.Tracks.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (t is null) return NotFound(new { error = "track not found", trackId = id });
+
+        var path = t.FilePath;
+        if (!File.Exists(path))
+            return UnprocessableEntity(new { error = "file not found on disk", trackId = id });
+
+        // Decode / analyse off the request thread.
+        var probe = await Task.Run(() => ProbeFile(path), ct);
+
+        // Tags: keep the scanner's leniency — a blank title falls back to the
+        // file name so the row never goes nameless.
+        t.Title = probe.Title ?? Path.GetFileNameWithoutExtension(path);
+        t.Artist = probe.Artist;
+        t.Album = probe.Album;
+        t.Genre = probe.Genre;
+        t.Year = probe.Year;
+        t.Type = Path.GetExtension(path).TrimStart('.').ToUpperInvariant();
+        if (probe.DurationSec > 0) t.DurationSec = probe.DurationSec;
+
+        // Analysis: only overwrite when the measurement succeeded.
+        if (probe.Lufs is double lufs) t.LufsIntegrated = lufs;
+        if (probe.Bpm is double bpm)
+        {
+            t.Bpm = bpm;
+            t.BpmConfidence = probe.BpmConfidence;
+            t.BeatPhaseOffsetSec = probe.BeatPhase;
+        }
+        t.ScannedAt = DateTime.UtcNow;
+
+        // Grid / loudness may have changed: drop every cached mix pair that
+        // involves this track (same rule as a beat-grid edit) so mix points
+        // recompute on next use.
+        var stale = await db.MixCache
+            .Where(m => m.FromTrackId == id || m.ToTrackId == id)
+            .ToListAsync(ct);
+        db.MixCache.RemoveRange(stale);
+
+        await db.SaveChangesAsync(ct); // one transaction: track update + cache deletes
+
+        // Drop the rebuildable on-disk caches keyed by this id so the waveform
+        // and auto-mix structure re-derive from the current file. Best effort.
+        TryDeleteCache(DataPaths.PeaksDir(_cfg), id);
+        TryDeleteCache(DataPaths.StructureDir(_cfg), id);
+
+        return Ok(new
+        {
+            id,
+            title = t.Title,
+            artist = t.Artist,
+            album = t.Album,
+            durationSec = t.DurationSec,
+            bpm = t.Bpm,
+            lufs = t.LufsIntegrated,
+            type = t.Type,
+            mixCacheCleared = stale.Count
+        });
+    }
+
+    /// <summary>Reads tags + measures loudness/tempo for one file. Each step is
+    /// independently fault-tolerant: a failure leaves that field null so the
+    /// caller can preserve the prior stored value.</summary>
+    private static FileProbe ProbeFile(string path)
+    {
+        string? title = null, artist = null, album = null, genre = null;
+        int? year = null;
+        double duration = 0;
+        try
+        {
+            using var tf = TagLib.File.Create(path);
+            title = NullIfBlank(tf.Tag.Title);
+            artist = NullIfBlank(tf.Tag.FirstPerformer) ?? NullIfBlank(tf.Tag.FirstAlbumArtist);
+            album = NullIfBlank(tf.Tag.Album);
+            genre = NullIfBlank(tf.Tag.FirstGenre);
+            if (tf.Tag.Year > 0) year = (int)tf.Tag.Year;
+            duration = tf.Properties?.Duration.TotalSeconds ?? 0;
+        }
+        catch { /* unreadable tags — keep nulls; caller falls back to file name */ }
+
+        double? lufs = null;
+        try
+        {
+            var l = new LoudnessAnalyzer().AnalyzeFile(path);
+            if (l is double v && !double.IsNaN(v) && !double.IsInfinity(v)) lufs = v;
+        }
+        catch { /* unmeasurable — leave null, prior value kept */ }
+
+        double? bpm = null, conf = null, phase = null;
+        try
+        {
+            var b = new BpmDetector().AnalyzeFile(path);
+            if (b != null) { bpm = b.Bpm; conf = b.Confidence; phase = b.BeatPhaseOffsetSec; }
+        }
+        catch { /* leave null */ }
+
+        return new FileProbe(title, artist, album, genre, year, duration, lufs, bpm, conf, phase);
+    }
+
+    private static void TryDeleteCache(string dir, int id)
+    {
+        try
+        {
+            var file = Path.Combine(dir, id + ".json");
+            if (File.Exists(file)) File.Delete(file);
+        }
+        catch { /* best effort */ }
+    }
+
+    private static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
+
+    private sealed record FileProbe(
+        string? Title, string? Artist, string? Album, string? Genre, int? Year,
+        double DurationSec, double? Lufs, double? Bpm, double? BpmConfidence, double? BeatPhase);
 }
 
 /// <summary>Body for a beat-grid edit: tempo (BPM) and downbeat phase (seconds).</summary>
