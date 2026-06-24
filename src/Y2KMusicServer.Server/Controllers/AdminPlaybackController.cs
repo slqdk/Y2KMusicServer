@@ -90,6 +90,20 @@ public sealed class AdminPlaybackController : ControllerBase
             ? Ok(_engine.GetStatus())
             : Conflict(new { error = "nothing cued on Deck B, or already crossfading" });
 
+    /// <summary>Operator-forced crossfade using a specific auto-mix strategy, for
+    /// testing each transition type: ?strategy=PlainCrossfade|VocalTease|BassSwap|
+    /// BassBreakdown. Bypasses the auto-selection and the master enable flag. 400
+    /// on an unknown strategy; 409 when there is nothing to mix.</summary>
+    [HttpPost("mix")]
+    public IActionResult Mix([FromQuery] string strategy)
+    {
+        if (!Enum.TryParse<MixStrategy>(strategy, ignoreCase: true, out var s) || !Enum.IsDefined(s))
+            return BadRequest(new { error = "unknown strategy", strategy, allowed = Enum.GetNames<MixStrategy>() });
+        return _engine.ForceCrossfade(s)
+            ? Ok(_engine.GetStatus())
+            : Conflict(new { error = "nothing cued on Deck B, or already crossfading" });
+    }
+
     /// <summary>Set Deck A's EQ isolator: ?mode=none|bass|vocal|nobass.</summary>
     [HttpPost("iso-a")]
     public IActionResult IsoA([FromQuery] string mode) => SetIso(mode, deckA: true);

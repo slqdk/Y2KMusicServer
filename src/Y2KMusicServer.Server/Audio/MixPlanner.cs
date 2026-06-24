@@ -62,7 +62,8 @@ public static class MixPlanner
         MixPoints basePoints,
         double? aBpm, double? bBpm, double? bPhase,
         TrackStructureData? aStruct, TrackStructureData? bStruct,
-        MixRules rules)
+        MixRules rules,
+        MixStrategy? force = null)
     {
         bool bpmKnown = aBpm is double a && a > 0 && bBpm is double b && b > 0;
         double bpmDelta = bpmKnown ? FoldedDelta(aBpm!.Value, bBpm!.Value) : -1;
@@ -75,6 +76,14 @@ public static class MixPlanner
         double outSec = basePoints.OutPoint;
         double inSec = basePoints.InPoint;
         double fade = CapFade(basePoints.FadeDuration, beatmatch, aBpm, rules.MaxOverlapBars);
+
+        // Operator-forced strategy (the per-strategy test buttons): skip the
+        // auto-selection, the preconditions, and the per-strategy toggles, and
+        // build the requested transition directly. Structure data is used when
+        // present and falls back to safe defaults, so the chosen mix always runs.
+        if (force is MixStrategy forced)
+            return PlanForced(forced, outSec, inSec, fade, basePoints.BeatAligned,
+                bpmClose, bpmDelta, aBpm, bBpm, bPhase, aStruct, bStruct, rules);
 
         if (beatmatch)
         {
@@ -150,6 +159,68 @@ public static class MixPlanner
         return Build(MixStrategy.PlainCrossfade, outSec, inSec, fade, basePoints.BeatAligned, bpmClose, bpmDelta,
             Array.Empty<MixStep>(),
             bpmKnown ? $"plain: not beat-aligned (Δbpm {Fmt(bpmDelta)})" : "plain: BPM unknown");
+    }
+
+    /// <summary>Builds a specific strategy on demand for the operator's test
+    /// buttons — no precondition or toggle gates. Uses structure data when it is
+    /// available (B's vocal in-point, the bass-hold bars) and falls back to safe
+    /// defaults otherwise, so the requested transition always yields runnable
+    /// steps. A forced PlainCrossfade has empty steps, so the engine runs it
+    /// exactly like the hand-fired "Crossfade A -> B".</summary>
+    private static MixPlan PlanForced(
+        MixStrategy strategy, double outSec, double inSec, double fade,
+        bool beatAligned, bool bpmClose, double bpmDelta,
+        double? aBpm, double? bBpm, double? bPhase,
+        TrackStructureData? aStruct, TrackStructureData? bStruct, MixRules rules)
+    {
+        switch (strategy)
+        {
+            case MixStrategy.VocalTease:
+            {
+                double teaseIn = bStruct?.VocalStartSec is double v
+                    ? SnapToGrid(v, bBpm, bPhase) : inSec;
+                var steps = new[]
+                {
+                    new MixStep { At = "fadeStart", Deck = "B", Iso = "vocal", Vol = rules.DeckBEntryLevel,
+                                  Note = "forced vocal-tease: B vocal-only over A's tail" },
+                    new MixStep { At = "aSilent", Deck = "B", Iso = "none", Vol = 1.0,
+                                  Note = "A gone — drop B's vocal filter, B to full" },
+                };
+                return Build(MixStrategy.VocalTease, outSec, teaseIn, fade, beatAligned, bpmClose, bpmDelta, steps,
+                    $"forced vocal-tease: B vocal@{Fmt(teaseIn)}s; fade {Fmt(fade)}s");
+            }
+            case MixStrategy.BassSwap:
+            {
+                double holdSec = BarsToSec(rules.BassHoldBars, aBpm);
+                var steps = new[]
+                {
+                    new MixStep { At = "fadeStart", Deck = "B", Iso = "nobass", Vol = rules.DeckBEntryLevel,
+                                  Note = "forced bass-swap: B enters with bass killed" },
+                    new MixStep { At = "downbeat", Deck = "A", Iso = "nobass", Note = "swap: kill A's bass" },
+                    new MixStep { At = "downbeat", Deck = "B", Iso = "none", Vol = 1.0,
+                                  Note = "swap: restore B's bass and bring B to full" },
+                };
+                return Build(MixStrategy.BassSwap, outSec, inSec, fade, beatAligned, bpmClose, bpmDelta, steps,
+                    $"forced bass-swap: hold {rules.BassHoldBars} bar(s) then swap on a downbeat; fade {Fmt(fade)}s",
+                    swapHoldSec: holdSec);
+            }
+            case MixStrategy.BassBreakdown:
+            {
+                var steps = new[]
+                {
+                    new MixStep { At = "fadeStart", Deck = "A", Iso = "bass",
+                                  Note = "forced bass-breakdown: strip A to bass-only" },
+                    new MixStep { At = "fadeStart", Deck = "B", Vol = rules.DeckBEntryLevel,
+                                  Note = "B enters over A's bass-only outro" },
+                    new MixStep { At = "aSilent", Deck = "B", Vol = 1.0, Note = "A gone — B to full" },
+                };
+                return Build(MixStrategy.BassBreakdown, outSec, inSec, fade, beatAligned, bpmClose, bpmDelta, steps,
+                    $"forced bass-breakdown: A to bass-only outro under B; fade {Fmt(fade)}s");
+            }
+            default:
+                return Build(MixStrategy.PlainCrossfade, outSec, inSec, fade, beatAligned, bpmClose, bpmDelta,
+                    Array.Empty<MixStep>(), "forced plain crossfade");
+        }
     }
 
     private static MixPlan Build(MixStrategy s, double outSec, double inSec, double fade,

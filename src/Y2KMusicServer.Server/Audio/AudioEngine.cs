@@ -27,6 +27,11 @@ public sealed record PlaybackStatus
     public bool NextStarted { get; init; }   // cued Deck B's silent preview is running
     public IsoMode IsoA { get; init; } = IsoMode.None;   // Deck A EQ isolator mode
     public IsoMode IsoB { get; init; } = IsoMode.None;   // Deck B EQ isolator mode
+    // Auto-mix strategy for the next transition (or the one running during a
+    // crossfade). Null when there is no cued/active Deck B. PlannedReason is the
+    // planner's human-readable explanation.
+    public string? PlannedStrategy { get; init; }
+    public string? PlannedReason { get; init; }
 }
 
 /// <summary>
@@ -364,6 +369,11 @@ public sealed class AudioEngine
                     fromBpm > 0 ? fromBpm : (double?)null,
                     next.Bpm, next.BeatPhaseOffsetSec,
                     aStruct, bStruct, rules);
+
+                // Surface the decision now so the operator sees the planned
+                // transition ahead of the actual crossfade (and it lands in the log).
+                _log.LogInformation("Auto-mix planned: {Strategy} | {Reason}",
+                    plan.StrategyName, plan.Reason);
             }
         }
 
@@ -489,6 +499,31 @@ public sealed class AudioEngine
 
             var bDeck = _crossfading ? _deckB : _prepared?.DeckB;
 
+            // Planned (or active) auto-mix strategy for the readout/log. During a
+            // crossfade, report what is actually executing (_activePlan; null means
+            // a plain fade). Otherwise report the plan carried on the cued Deck B —
+            // or PlainCrossfade with a reason when no plan was attached (manual cue
+            // or auto-mix disabled).
+            string? plannedStrategy = null, plannedReason = null;
+            if (_crossfading)
+            {
+                plannedStrategy = (_activePlan?.Strategy ?? MixStrategy.PlainCrossfade).ToString();
+                plannedReason = _activePlan?.Reason ?? "plain crossfade";
+            }
+            else if (_prepared != null)
+            {
+                if (_prepared.Plan != null)
+                {
+                    plannedStrategy = _prepared.Plan.StrategyName;
+                    plannedReason = _prepared.Plan.Reason;
+                }
+                else
+                {
+                    plannedStrategy = MixStrategy.PlainCrossfade.ToString();
+                    plannedReason = _prepared.Manual ? "plain (manual cue)" : "plain (auto-mix off)";
+                }
+            }
+
             return new PlaybackStatus
             {
                 TrackId = _deckA.TrackId,
@@ -504,7 +539,9 @@ public sealed class AudioEngine
                 NextArtist = bDeck?.Artist,
                 NextStarted = _bManualStarted,
                 IsoA = _deckA.Iso.Mode,
-                IsoB = bDeck?.Iso.Mode ?? IsoMode.None
+                IsoB = bDeck?.Iso.Mode ?? IsoMode.None,
+                PlannedStrategy = plannedStrategy,
+                PlannedReason = plannedReason
             };
         }
     }
@@ -693,6 +730,43 @@ public sealed class AudioEngine
         return true;
     }
 
+    /// <summary>Operator-forced crossfade using a specific auto-mix strategy, for
+    /// testing each transition type. Builds the forced plan for the current
+    /// (Deck A -> cued Deck B) pair — bypassing the auto-selection, the
+    /// preconditions, the per-strategy toggles, and the master enable flag — and
+    /// runs it now. False when there is nothing to mix (no Deck A, no cued Deck B,
+    /// or a crossfade already running).</summary>
+    public bool ForceCrossfade(MixStrategy strategy)
+    {
+        TransitionInfo? tr = null;
+        lock (_gate)
+        {
+            if (_deckA == null || _crossfading || _prepared == null) return false;
+
+            var basePoints = new MixPoints
+            {
+                OutPoint = _prepared.OutPoint,
+                InPoint = _prepared.InPoint,
+                FadeDuration = _prepared.FadeSec,
+                BeatAligned = _prepared.BeatAligned
+            };
+            TrackStructureData? aStruct = TryStructure(_deckA.TrackId, _deckA.FilePath);
+            TrackStructureData? bStruct = TryStructure(_prepared.DeckB.TrackId, _prepared.DeckB.FilePath);
+            var forced = MixPlanner.Plan(
+                basePoints,
+                _deckA.Bpm > 0 ? _deckA.Bpm : (double?)null,
+                _prepared.DeckB.Bpm, _prepared.DeckB.BeatPhaseOffsetSec,
+                aStruct, bStruct, MixRules.Load(_cfg), force: strategy);
+
+            _log.LogInformation("Auto-mix (forced by operator): {Strategy} | {Reason}",
+                forced.StrategyName, forced.Reason);
+
+            tr = StartCrossfade_Locked(_prepared, fromNext: false, forcedPlan: forced);
+        }
+        if (tr != null) { TransitionStarted?.Invoke(tr); EmitTaps(); }
+        return true;
+    }
+
     /// <summary>Set Deck A's EQ isolator mode (None / Bass / Vocal). Affects the
     /// soundcard and the /stream tap alike (both read downstream of the fader);
     /// the FFT/VU upstream are untouched. False if no track is on Deck A.</summary>
@@ -721,7 +795,7 @@ public sealed class AudioEngine
 
     // ── Crossfade plumbing (callers hold _gate) ───────────────────────────────
 
-    private TransitionInfo StartCrossfade_Locked(PreparedNext p, bool fromNext)
+    private TransitionInfo StartCrossfade_Locked(PreparedNext p, bool fromNext, MixPlan? forcedPlan = null)
     {
         double triggerSec = 0;
         try { triggerSec = _deckA!.Reader.CurrentTime.TotalSeconds; } catch { }
@@ -764,7 +838,11 @@ public sealed class AudioEngine
         // The plan runs only on an auto-trigger, and only when it actually does
         // something (has steps) — a PlainCrossfade decision or a manual Next
         // (fromNext) falls through to today's behaviour, SmartBeat included.
-        _activePlan = (fromNext || p.Plan == null || p.Plan.Steps.Length == 0) ? null : p.Plan;
+        // A forced plan (operator test button) overrides the prepared plan for
+        // this run; otherwise the prepared (auto) plan is used. Either way an
+        // empty-step plan or a manual Next falls through to a plain crossfade.
+        var planForRun = forcedPlan ?? p.Plan;
+        _activePlan = (fromNext || planForRun == null || planForRun.Steps.Length == 0) ? null : planForRun;
         _planOwnsB = _activePlan != null && PlanOwnsB(_activePlan);
         _planASilentFired = false;
         _planDownbeatFired = false;

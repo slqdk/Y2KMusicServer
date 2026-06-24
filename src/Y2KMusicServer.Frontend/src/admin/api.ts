@@ -85,7 +85,12 @@ export interface PlaybackStatus {
   nextStarted: boolean
   isoA: IsoCode
   isoB: IsoCode
+  plannedStrategy: MixStrategy | null
+  plannedReason: string | null
 }
+
+// Auto-mix transition strategies (mirrors the server MixStrategy enum names).
+export type MixStrategy = 'PlainCrossfade' | 'VocalTease' | 'BassSwap' | 'BassBreakdown'
 
 export interface PlaylistItem {
   id: number
@@ -192,6 +197,9 @@ export const pauseDeckB = () => post('/api/admin/playback/pause-b')
 export const nudgeDeckB = (ms: number) => post(`/api/admin/playback/nudge-b?ms=${ms}`)
 export const ejectDeckB = () => post('/api/admin/playback/eject-b')
 export const crossfadeNow = () => post('/api/admin/playback/crossfade')
+// Force a specific auto-mix strategy now (operator test buttons).
+export const forceMix = (strategy: MixStrategy) =>
+  post(`/api/admin/playback/mix?strategy=${strategy}`)
 
 // Per-deck EQ isolator (DJ-mixer style — Bass = low-pass, Vocal = centre-band).
 export const setIsoA = (mode: Iso) => post(`/api/admin/playback/iso-a?mode=${mode}`)

@@ -4,6 +4,14 @@ import { fmtTime, isoFromCode, type Iso } from './api'
 import type { Live } from './useHub'
 import BeatClock from './BeatClock'
 
+// Human-readable names for the auto-mix strategies (server enum -> label).
+const MIX_LABEL: Record<api.MixStrategy, string> = {
+  PlainCrossfade: 'Plain crossfade',
+  VocalTease: 'Vocal tease',
+  BassSwap: 'Bass swap',
+  BassBreakdown: 'Bass breakdown',
+}
+
 // Album art for the on-air track (Deck A); placeholder glyph when none / 404.
 function CoverArt({ trackId }: { trackId: number | null }) {
   const [failed, setFailed] = useState(false)
@@ -99,6 +107,10 @@ export default function DeckPanel(
   const canIsoB = bId != null && !busy
   const bTag = bId == null ? 'EMPTY' : crossfading ? 'MIXING' : bStarted ? 'PLAYING' : 'LOADED'
 
+  // Auto-mix strategy planned for the next transition (or running during a mix).
+  const planned = status?.plannedStrategy ?? null
+  const plannedLabel = planned ? MIX_LABEL[planned] : '—'
+
   return (
     <div className="w-panel w-raised w-deckpanel">
       <div className="w-panelhead">Decks</div>
@@ -154,6 +166,16 @@ export default function DeckPanel(
         <button className="w-btn w-primary" disabled={!canCrossfade} onClick={() => run(api.crossfadeNow)}>
           Crossfade A → B
         </button>
+        <button className="w-btn" title="Force a vocal-tease transition now (test)" disabled={!canCrossfade}
+          onClick={() => run(() => api.forceMix('VocalTease'))}>Vocal Tease</button>
+        <button className="w-btn" title="Force a bass-swap transition now (test)" disabled={!canCrossfade}
+          onClick={() => run(() => api.forceMix('BassSwap'))}>Bass Swap</button>
+        <button className="w-btn" title="Force a bass-breakdown transition now (test)" disabled={!canCrossfade}
+          onClick={() => run(() => api.forceMix('BassBreakdown'))}>Bass Breakdown</button>
+        <span className="w-xfade-plan" title={status?.plannedReason ?? ''}>
+          {crossfading ? 'Mixing: ' : 'Next mix: '}<b>{plannedLabel}</b>
+        </span>
+        <span style={{ flex: 1 }} />
         <span className="w-xfade-state">
           {crossfading
             ? 'Mixing…'

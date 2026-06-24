@@ -549,6 +549,7 @@
 .w-nudge { display: inline-flex; gap: 2px; margin: 0 2px; }
 .w-nudge button.w-btn { padding: 1px 6px; }
 .w-deckpanel button.w-iso.w-iso-on { background: #c6e8c6; font-weight: bold; }
-.w-xfade-bar { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.w-xfade-bar { display: flex; align-items: center; gap: 8px; padding: 2px 0; flex-wrap: wrap; }
 .w-xfade-bar button.w-btn { min-height: 24px; }
 .w-xfade-state { font-size: 11px; }
+.w-xfade-plan { font-size: 11px; white-space: nowrap; }
