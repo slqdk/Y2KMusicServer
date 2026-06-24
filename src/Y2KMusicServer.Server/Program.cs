@@ -6,6 +6,7 @@ using Y2KMusicServer.Server.Audio;
 using Y2KMusicServer.Server.Data;
 using Y2KMusicServer.Server.Diagnostics;
 using Y2KMusicServer.Server.Hubs;
+using Y2KMusicServer.Server.Network;
 using Y2KMusicServer.Server.Playback;
 using Y2KMusicServer.Server.Scanning;
 using Y2KMusicServer.Server.Streaming;
@@ -98,6 +99,17 @@ public static class Program
             builder.Services.AddHttpClient();
             builder.Services.AddSingleton<GitHubUpdateChecker>();
             builder.Services.AddHostedService<UpdateCheckScheduler>();
+
+            // Network-share credentials + connector: lets the LocalSystem service
+            // authenticate to SMB shares (stored per host, DPAPI-encrypted on disk)
+            // so it can read music folders on a NAS. The connector wraps the Win32
+            // WNetAddConnection2 API; see NetworkShareConnector / NetworkShareStore.
+            builder.Services.AddSingleton<NetworkShareConnector>();
+
+            // On startup, re-authenticate to the servers behind any network
+            // category folders (sessions don't survive a restart), so playback /
+            // analysis / scanning can read network-stored tracks from boot.
+            builder.Services.AddHostedService<NetworkShareReconnectService>();
 
             // Library scanner (engine service) + the broadcaster that forwards
             // its progress events to the SignalR hub.

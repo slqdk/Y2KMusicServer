@@ -61,4 +61,15 @@ public static class DataPaths
     /// </summary>
     public static string MixRulesPath(IConfiguration cfg)
         => Path.Combine(DataDir(cfg), "mixrules.json");
+
+    /// <summary>
+    /// Network-share credentials file, at
+    /// <c>&lt;DataPath&gt;\network-shares.json</c> — a sibling of
+    /// <c>mixrules.json</c>, signalling config rather than cache. Stores the SMB
+    /// host + username and a DPAPI-encrypted password so the LocalSystem service
+    /// can authenticate to network music folders. JSON, not the database
+    /// (no-migrations rule).
+    /// </summary>
+    public static string NetworkSharesPath(IConfiguration cfg)
+        => Path.Combine(DataDir(cfg), "network-shares.json");
 }

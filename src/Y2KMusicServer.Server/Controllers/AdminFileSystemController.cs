@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Y2KMusicServer.Server.Network;
 
 namespace Y2KMusicServer.Server.Controllers;
 
@@ -31,6 +32,10 @@ public sealed class AdminFileSystemController : ControllerBase
     /// </summary>
     public sealed record FsListing(string? Path, string? Parent, bool IsDriveList, IReadOnlyList<FsEntry> Entries);
 
+    private readonly NetworkShareConnector _connector;
+
+    public AdminFileSystemController(NetworkShareConnector connector) => _connector = connector;
+
     [HttpGet]
     public IActionResult Browse([FromQuery] string? path)
     {
@@ -39,6 +44,12 @@ public sealed class AdminFileSystemController : ControllerBase
             return Ok(DriveList());
 
         path = path.Trim();
+
+        // Network path: authenticate the service's session to the server first
+        // (using any stored credential for its host) so a credentialed share is
+        // readable here. No-op for local paths or hosts with no stored credential.
+        if (OperatingSystem.IsWindows())
+            _connector.EnsureConnected(path);
 
         if (!Directory.Exists(path))
             return NotFound(new { error = "That folder no longer exists on the server." });

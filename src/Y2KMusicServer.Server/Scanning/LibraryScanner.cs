@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
 using Y2KMusicServer.Server.Data;
 using Y2KMusicServer.Server.Data.Entities;
+using Y2KMusicServer.Server.Network;
 
 namespace Y2KMusicServer.Server.Scanning;
 
@@ -21,14 +22,16 @@ public sealed class LibraryScanner
         new(StringComparer.OrdinalIgnoreCase) { ".mp3", ".wav", ".flac" };
 
     private readonly IDbContextFactory<Y2KDbContext> _dbf;
+    private readonly NetworkShareConnector _connector;
     private readonly ILogger<LibraryScanner> _log;
 
     private int _running; // 0 = idle, 1 = scanning
     private volatile ScanProgress _current = new() { State = ScanState.Idle };
 
-    public LibraryScanner(IDbContextFactory<Y2KDbContext> dbf, ILogger<LibraryScanner> log)
+    public LibraryScanner(IDbContextFactory<Y2KDbContext> dbf, NetworkShareConnector connector, ILogger<LibraryScanner> log)
     {
         _dbf = dbf;
+        _connector = connector;
         _log = log;
     }
 
@@ -103,6 +106,13 @@ public sealed class LibraryScanner
         {
             foreach (var folder in folders)
             {
+                // Authenticate to the server first if this is a network folder
+                // (using the stored credential for its host). No-op for local
+                // folders or hosts with no stored credential; a failure falls
+                // through to the enumerate try/catch below as a skipped folder.
+                if (OperatingSystem.IsWindows())
+                    _connector.EnsureConnected(folder);
+
                 IEnumerable<string> files;
                 try
                 {
