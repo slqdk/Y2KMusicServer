@@ -1,8 +1,14 @@
-# ─────────────────────────────────────────────────────────────────
+﻿# ─────────────────────────────────────────────────────────────────
 #  Y2K Music Server — install.ps1
 #
 #  Installs (or upgrades) the service and the tray on a Windows
 #  host. Must run elevated.
+#
+#  This is a framework-dependent build: the .NET 8 runtime is NOT
+#  bundled. The host must have the .NET 8 Desktop Runtime (for the
+#  WPF tray) and the ASP.NET Core 8 Runtime (for the server). This
+#  script checks for both up front and aborts with a download link
+#  if either is missing, before touching anything on the machine.
 #
 #  Layout produced:
 #    C:\Program Files\Y2KMusicServer\        binaries
@@ -39,6 +45,54 @@ $traySrc   = Join-Path $payloadRoot 'tray'
 
 if (-not (Test-Path $serverSrc)) { throw "Missing payload: $serverSrc" }
 if (-not (Test-Path $traySrc))   { throw "Missing payload: $traySrc" }
+
+# ── Require the .NET 8 shared runtimes ─────────────────────────
+# Framework-dependent build: the runtime isn't in the payload. Verify
+# the shared frameworks are present before we stop the running service
+# or copy anything, so a missing runtime fails loudly here rather than
+# as an opaque service-won't-start later. Checking WindowsDesktop.App
+# and AspNetCore.App is sufficient — both imply NETCore.App.
+function Test-DotnetRuntime {
+    param([string]$Framework, [int]$Major)
+
+    # Preferred: ask the dotnet host directly.
+    try {
+        $listed = & dotnet --list-runtimes 2>$null
+        if ($LASTEXITCODE -eq 0 -and $listed) {
+            $pattern = '^' + [regex]::Escape($Framework) + '\s+' + $Major + '\.'
+            if ($listed | Where-Object { $_ -match $pattern }) { return $true }
+        }
+    } catch { }
+
+    # Fallback: scan the default shared-framework folder, in case the
+    # dotnet host isn't on PATH for this session even though a runtime
+    # is installed.
+    $shared = Join-Path $env:ProgramFiles "dotnet\shared\$Framework"
+    if (Test-Path $shared) {
+        $hit = Get-ChildItem $shared -Directory -ErrorAction SilentlyContinue |
+               Where-Object { $_.Name -like "$Major.*" }
+        if ($hit) { return $true }
+    }
+    return $false
+}
+
+$missing = @()
+if (-not (Test-DotnetRuntime 'Microsoft.WindowsDesktop.App' 8)) {
+    $missing += '.NET Desktop Runtime 8.0 (x64) — required by the tray'
+}
+if (-not (Test-DotnetRuntime 'Microsoft.AspNetCore.App' 8)) {
+    $missing += 'ASP.NET Core Runtime 8.0 (x64) — required by the server'
+}
+if ($missing.Count -gt 0) {
+    Write-Host "Missing required .NET 8 runtime(s):" -ForegroundColor Red
+    foreach ($m in $missing) { Write-Host "  - $m" -ForegroundColor Red }
+    Write-Host ""
+    Write-Host "This build is framework-dependent; the .NET runtime is not bundled."
+    Write-Host "Install the runtime(s) above (x64) from:"
+    Write-Host "  https://dotnet.microsoft.com/download/dotnet/8.0"
+    Write-Host "then re-run this installer."
+    exit 3
+}
 
 Write-Host "Y2K Music Server — installing" -ForegroundColor Cyan
 Write-Host "  Install root: $InstallRoot"

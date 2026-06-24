@@ -2,10 +2,16 @@
 
   <PropertyGroup>
     <!-- Single source of truth for the product version. Override at
-         publish time with: dotnet publish -p:Version=X.Y.Z -->
+         publish time with: dotnet publish -p:Version=X.Y.Z
+
+         AssemblyVersion / FileVersion / InformationalVersion are
+         intentionally NOT set explicitly here. Leaving them unset lets
+         the SDK derive all three from <Version>, so a -p:Version
+         override flows through to the assembly identity that the update
+         checker reads (Assembly.GetName().Version). Re-adding explicit
+         <AssemblyVersion>/<FileVersion> would pin them and make the
+         service report a stale version, which breaks update detection. -->
     <Version>0.1.0</Version>
-    <AssemblyVersion>0.1.0.0</AssemblyVersion>
-    <FileVersion>0.1.0.0</FileVersion>
 
     <Company>slq.dk</Company>
     <Product>Y2K Music Server</Product>
