@@ -210,6 +210,11 @@
 .w-ctxitem:hover { background: var(--w-sel); color: #fff; }
 .w-ctxsep { height: 0; margin: 3px 4px; border-top: 1px solid var(--w-sh); border-bottom: 1px solid var(--w-hi); }
 
+/* Properties dialog: label / value rows */
+.w-props { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; align-items: baseline; margin: 0; }
+.w-props dt { color: var(--w-muted, #444); white-space: nowrap; }
+.w-props dd { margin: 0; overflow-wrap: anywhere; }
+
 /* Schedule timeline segment */
 .w-timeline .w-tl-seg {
   position: absolute; top: 12px; bottom: 2px;

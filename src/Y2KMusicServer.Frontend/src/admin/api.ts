@@ -40,6 +40,36 @@ export interface TracksPage {
   items: TrackDto[]
 }
 
+// Full per-track detail for the Properties dialog: stored DB fields plus live
+// file-system + audio header facts. Live fields are null when the file is
+// missing or its header is unreadable.
+export interface TrackProperties {
+  id: number
+  filePath: string
+  fileName: string
+  fileExists: boolean
+  fileSizeBytes: number
+  modifiedUtc: string | null
+  title: string | null
+  artist: string | null
+  album: string | null
+  year: number | null
+  genre: string | null
+  type: string | null
+  categoryId: number | null
+  categoryName: string | null
+  durationSec: number
+  bpm: number | null
+  bpmConfidence: number | null
+  beatPhaseOffsetSec: number | null
+  lufsIntegrated: number | null
+  scannedAtUtc: string | null
+  audioBitrateKbps: number | null
+  sampleRateHz: number | null
+  channels: number | null
+  codec: string | null
+}
+
 export interface PlaybackStatus {
   trackId: number | null
   title: string | null
@@ -139,6 +169,10 @@ export const putBeatGrid = (trackId: number, body: { bpm: number; phaseOffsetSec
 // then clears that track's cached mix pairs and waveform/structure caches.
 export const rescanTrack = (trackId: number) =>
   post(`/api/admin/track/${trackId}/rescan`)
+
+// Full file/tag/audio/analysis detail for the Properties dialog.
+export const getTrackProperties = (trackId: number) =>
+  req<TrackProperties>(`/api/admin/track/${trackId}/properties`)
 
 // ── Playback transport ─────────────────────────────────────────────────
 export const getStatus = () => req<PlaybackStatus>('/api/admin/playback/status')

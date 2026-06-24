@@ -3,6 +3,7 @@ import * as api from './api'
 import { fmtTime } from './api'
 import type { ScanInfo, AnalysisInfo } from './useHub'
 import CategoryDialog from './CategoryDialog'
+import PropertiesDialog from './PropertiesDialog'
 import ScanBar from './ScanBar'
 import AnalyzeBar from './AnalyzeBar'
 
@@ -10,7 +11,7 @@ const PAGE = 50
 
 // Right-click menu geometry, used only to keep it inside the viewport.
 const MENU_W = 184
-const MENU_H = 96
+const MENU_H = 132
 
 type RowMenu = { x: number; y: number; track: api.TrackDto }
 
@@ -25,6 +26,7 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
   const [busyId, setBusyId] = useState<number | null>(null)
   const [dialogCat, setDialogCat] = useState<api.CategoryDto | null>(null)
   const [menu, setMenu] = useState<RowMenu | null>(null)
+  const [propsId, setPropsId] = useState<number | null>(null)
   const debounce = useRef<number | undefined>(undefined)
 
   const refreshCats = () => api.getCategories().then(setCats).catch(() => {})
@@ -205,6 +207,8 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
           <li className="w-ctxsep" role="separator" />
           <li className="w-ctxitem" role="menuitem"
             onClick={() => { rescanOne(menu.track.id); setMenu(null) }}>Rescan this song</li>
+          <li className="w-ctxitem" role="menuitem"
+            onClick={() => { setPropsId(menu.track.id); setMenu(null) }}>Properties</li>
         </ul>
       )}
 
@@ -214,6 +218,10 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
           onClose={() => setDialogCat(null)}
           onChanged={() => { refreshCats(); loadTracks(q, categoryId, skip) }}
         />
+      )}
+
+      {propsId != null && (
+        <PropertiesDialog trackId={propsId} onClose={() => setPropsId(null)} />
       )}
     </div>
   )

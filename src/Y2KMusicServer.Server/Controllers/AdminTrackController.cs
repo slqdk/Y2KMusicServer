@@ -159,7 +159,7 @@ public sealed class AdminTrackController : ControllerBase
         if (t is null) return NotFound(new { error = "track not found", trackId = id });
 
         var path = t.FilePath;
-        if (!File.Exists(path))
+        if (!System.IO.File.Exists(path))
             return UnprocessableEntity(new { error = "file not found on disk", trackId = id });
 
         // Decode / analyse off the request thread.
@@ -214,6 +214,59 @@ public sealed class AdminTrackController : ControllerBase
         });
     }
 
+    /// <summary>
+    /// Everything we know about one track: the stored DB row plus live
+    /// file-system + audio properties read fresh from the file. The live read is
+    /// cheap — tags and the container header only, no BPM/LUFS re-measure. 404 if
+    /// the track is unknown; a track whose file has moved still returns the stored
+    /// fields with <c>fileExists=false</c> and null live properties.
+    /// </summary>
+    [HttpGet("{id:int}/properties")]
+    public async Task<IActionResult> Properties(int id, CancellationToken ct)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+
+        var t = await db.Tracks.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (t is null) return NotFound(new { error = "track not found", trackId = id });
+
+        string? categoryName = null;
+        if (t.CategoryId is int cid)
+            categoryName = await db.Categories
+                .Where(c => c.Id == cid).Select(c => c.Name).FirstOrDefaultAsync(ct);
+
+        var path = t.FilePath;
+        var exists = System.IO.File.Exists(path);
+        var facts = exists ? await Task.Run(() => ReadFileFacts(path), ct) : FileFacts.Missing;
+
+        return Ok(new
+        {
+            id = t.Id,
+            filePath = path,
+            fileName = Path.GetFileName(path),
+            fileExists = exists,
+            fileSizeBytes = facts.SizeBytes,
+            modifiedUtc = facts.ModifiedUtc,
+            title = t.Title,
+            artist = t.Artist,
+            album = t.Album,
+            year = t.Year,
+            genre = t.Genre,
+            type = t.Type,
+            categoryId = t.CategoryId,
+            categoryName,
+            durationSec = t.DurationSec,
+            bpm = t.Bpm,
+            bpmConfidence = t.BpmConfidence,
+            beatPhaseOffsetSec = t.BeatPhaseOffsetSec,
+            lufsIntegrated = t.LufsIntegrated,
+            scannedAtUtc = t.ScannedAt,
+            audioBitrateKbps = facts.BitrateKbps,
+            sampleRateHz = facts.SampleRateHz,
+            channels = facts.Channels,
+            codec = facts.Codec
+        });
+    }
+
     /// <summary>Reads tags + measures loudness/tempo for one file. Each step is
     /// independently fault-tolerant: a failure leaves that field null so the
     /// caller can preserve the prior stored value.</summary>
@@ -258,9 +311,43 @@ public sealed class AdminTrackController : ControllerBase
         try
         {
             var file = Path.Combine(dir, id + ".json");
-            if (File.Exists(file)) File.Delete(file);
+            if (System.IO.File.Exists(file)) System.IO.File.Delete(file);
         }
         catch { /* best effort */ }
+    }
+
+    /// <summary>Cheap, fault-tolerant read of file-system size/date plus the
+    /// audio container header (bitrate, sample rate, channels, codec). No tag
+    /// re-parse beyond what the header needs and no DSP — safe to call on a
+    /// request thread via Task.Run.</summary>
+    private static FileFacts ReadFileFacts(string path)
+    {
+        long size = 0;
+        DateTime? modified = null;
+        try
+        {
+            var fi = new FileInfo(path);
+            if (fi.Exists) { size = fi.Length; modified = fi.LastWriteTimeUtc; }
+        }
+        catch { /* leave defaults */ }
+
+        int? bitrate = null, sampleRate = null, channels = null;
+        string? codec = null;
+        try
+        {
+            using var tf = TagLib.File.Create(path);
+            var pr = tf.Properties;
+            if (pr is not null)
+            {
+                if (pr.AudioBitrate > 0) bitrate = pr.AudioBitrate;
+                if (pr.AudioSampleRate > 0) sampleRate = pr.AudioSampleRate;
+                if (pr.AudioChannels > 0) channels = pr.AudioChannels;
+                codec = NullIfBlank(pr.Description);
+            }
+        }
+        catch { /* unreadable header — leave nulls */ }
+
+        return new FileFacts(size, modified, bitrate, sampleRate, channels, codec);
     }
 
     private static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
@@ -268,6 +355,13 @@ public sealed class AdminTrackController : ControllerBase
     private sealed record FileProbe(
         string? Title, string? Artist, string? Album, string? Genre, int? Year,
         double DurationSec, double? Lufs, double? Bpm, double? BpmConfidence, double? BeatPhase);
+
+    private sealed record FileFacts(
+        long SizeBytes, DateTime? ModifiedUtc,
+        int? BitrateKbps, int? SampleRateHz, int? Channels, string? Codec)
+    {
+        public static readonly FileFacts Missing = new(0, null, null, null, null, null);
+    }
 }
 
 /// <summary>Body for a beat-grid edit: tempo (BPM) and downbeat phase (seconds).</summary>
