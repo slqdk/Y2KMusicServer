@@ -553,3 +553,5 @@
 .w-xfade-bar button.w-btn { min-height: 24px; }
 .w-xfade-state { font-size: 11px; }
 .w-xfade-plan { font-size: 11px; white-space: nowrap; }
+.w-mode-bar { display: flex; align-items: center; gap: 6px; padding: 2px 0; flex-wrap: wrap; }
+.w-mode-label { font-size: 11px; color: var(--w-muted, #444); }

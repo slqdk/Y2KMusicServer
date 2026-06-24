@@ -26,6 +26,10 @@ export default function Admin() {
   const [logOpen, setLogOpen] = useState(false)
   const [theme, setTheme] = useState<string>(readTheme)
   const [status, setStatus] = useState<api.PlaybackStatus | null>(null)
+  // Mixing modes shown as toggle buttons on the deck panel. Smart Mix / SmartBeat
+  // live in Settings; auto-mix Enabled lives in the (separate) mix-rules store.
+  const [settings, setSettings] = useState<api.SettingsDto | null>(null)
+  const [mixRules, setMixRules] = useState<api.MixRulesDto | null>(null)
 
   useEffect(() => { try { localStorage.setItem('y2k-admin-theme', theme) } catch { /* ignore */ } }, [theme])
 
@@ -37,6 +41,34 @@ export default function Admin() {
     const id = setInterval(refreshStatus, 1000)
     return () => clearInterval(id)
   }, [refreshStatus])
+
+  // Load the mixing-mode values (and refresh after the Settings dialog closes,
+  // since it edits the same Settings + mix-rules stores).
+  const refreshModes = useCallback(() => {
+    api.getSettings().then(setSettings).catch(() => {})
+    api.getMixRules().then(setMixRules).catch(() => {})
+  }, [])
+  useEffect(() => { refreshModes() }, [refreshModes])
+
+  // Flip one mixing mode and reflect the server's stored value. Smart Mix /
+  // SmartBeat are partial Settings PUTs; auto-mix re-PUTs the whole rules object.
+  const toggleMode = useCallback(async (mode: 'smartMix' | 'smartBeatFader' | 'autoMix') => {
+    try {
+      if (mode === 'autoMix') {
+        if (!mixRules) return
+        setMixRules(await api.putMixRules({ ...mixRules, enabled: !mixRules.enabled }))
+      } else if (settings) {
+        const upd = mode === 'smartMix'
+          ? { smartMix: !settings.smartMix }
+          : { smartBeatFader: !settings.smartBeatFader }
+        setSettings(await api.putSettings(upd))
+      }
+    } catch { /* surfaced by the toggle not changing */ }
+  }, [settings, mixRules])
+
+  const mixModes = settings && mixRules
+    ? { smartMix: settings.smartMix, smartBeatFader: settings.smartBeatFader, autoMix: mixRules.enabled }
+    : null
 
   // "Play now" from a library row: if a track is on air and playing, cue the
   // chosen track onto Deck B and crossfade to it immediately; if nothing is
@@ -92,14 +124,15 @@ export default function Admin() {
       <div className="w-cols">
         <LibraryBrowser scan={live.scan} analysis={live.analysis} onPlayNow={playNow} />
         <div className="w-right-col">
-          <DeckPanel live={live} status={status} refresh={refreshStatus} />
+          <DeckPanel live={live} status={status} refresh={refreshStatus}
+            modes={mixModes} onToggleMode={toggleMode} />
           <PlaylistPanel />
         </div>
       </div>
 
       {logOpen && <LogPanel live={live} onClose={() => setLogOpen(false)} />}
 
-      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); refreshModes() }} />}
     </div>
   )
 }

@@ -37,17 +37,18 @@ public sealed class AdminPlaylistController : ControllerBase
 
     /// <summary>
     /// Adds a track. <c>source</c> defaults to <c>Manual</c>; Manual/Request
-    /// adds insert before the next Auto entry, Auto adds append.
+    /// adds insert before the next Auto entry, Auto adds append. <c>atEnd=true</c>
+    /// appends the pick to the very end of the queue instead.
     /// </summary>
     [HttpPost("playlist/add")]
     public async Task<IActionResult> Add(
-        [FromQuery] int trackId, [FromQuery] string? source, CancellationToken ct)
+        [FromQuery] int trackId, [FromQuery] string? source, [FromQuery] bool atEnd, CancellationToken ct)
     {
         if (!Enum.TryParse<PlaylistSource>(source ?? "Manual", ignoreCase: true, out var src))
             return BadRequest(new { error = "source must be Auto, Manual, or Request" });
 
         int? current = _engine.GetStatus().TrackId;
-        var r = await _playlist.AddAsync(trackId, src, addedBy: src.ToString(), current, ct);
+        var r = await _playlist.AddAsync(trackId, src, addedBy: src.ToString(), current, ct, atEnd: atEnd);
         return r switch
         {
             PlaylistAddResult.Ok => Ok(await _playlist.GetAsync(ct)),

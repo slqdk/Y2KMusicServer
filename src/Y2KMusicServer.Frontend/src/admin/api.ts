@@ -207,8 +207,11 @@ export const setIsoB = (mode: Iso) => post(`/api/admin/playback/iso-b?mode=${mod
 
 // ── Playlist + Auto DJ ─────────────────────────────────────────────────
 export const getPlaylist = () => req<PlaylistItem[]>('/api/admin/playlist')
-export const addToPlaylist = (trackId: number, source: 'Manual' | 'Auto' | 'Request' = 'Manual') =>
-  req<PlaylistItem[]>(`/api/admin/playlist/add?trackId=${trackId}&source=${source}`, { method: 'POST' })
+export const addToPlaylist = (
+  trackId: number, source: 'Manual' | 'Auto' | 'Request' = 'Manual', atEnd = false) =>
+  req<PlaylistItem[]>(
+    `/api/admin/playlist/add?trackId=${trackId}&source=${source}${atEnd ? '&atEnd=true' : ''}`,
+    { method: 'POST' })
 export const removeEntry = (id: number) =>
   req<PlaylistItem[]>(`/api/admin/playlist/${id}`, { method: 'DELETE' })
 export const clearPlaylist = () => post('/api/admin/playlist/clear')

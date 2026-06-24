@@ -193,11 +193,13 @@ public sealed class PlaylistService
     /// Inserts a track the operator (or a request) chose. Manual / request adds
     /// land just before the first Auto entry after the current track — the
     /// legacy <c>FindAutoInsertIndex</c> rule — so a hand-picked song plays
-    /// before the auto-fill resumes. Auto adds append at the end.
+    /// before the auto-fill resumes. Auto adds append at the end. When
+    /// <paramref name="atEnd"/> is set the pick is appended after everything
+    /// (still a manual entry, just parked at the tail rather than queued next).
     /// </summary>
     public async Task<PlaylistAddResult> AddAsync(
         int trackId, PlaylistSource source, string? addedBy, int? currentTrackId,
-        CancellationToken ct = default)
+        CancellationToken ct = default, bool atEnd = false)
     {
         await _mutateGate.WaitAsync(ct);
         try
@@ -210,7 +212,7 @@ public sealed class PlaylistService
             var entries = await db.PlaylistEntries.OrderBy(e => e.Position).ToListAsync(ct);
 
             int insertPos;
-            if (source == PlaylistSource.Auto)
+            if (atEnd || source == PlaylistSource.Auto)
             {
                 insertPos = entries.Count == 0 ? 0 : entries[^1].Position + 1;
             }
@@ -240,8 +242,9 @@ public sealed class PlaylistService
             await db.SaveChangesAsync(ct);
             await RenumberAsync(db, ct);
 
-            // A human pick reseeds the Auto DJ reference BPM (legacy behaviour).
-            if (source != PlaylistSource.Auto && track.Bpm is > 30)
+            // A human pick reseeds the Auto DJ reference BPM (legacy behaviour) —
+            // but only when it's the next thing up, not parked at the tail.
+            if (!atEnd && source != PlaylistSource.Auto && track.Bpm is > 30)
                 lock (_historyLock) { _refBpm = track.Bpm.Value; }
 
             return PlaylistAddResult.Ok;

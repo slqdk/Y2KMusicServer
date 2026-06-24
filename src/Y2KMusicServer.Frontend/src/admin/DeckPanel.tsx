@@ -59,8 +59,16 @@ function IsoButtons(
   )
 }
 
+export type MixModes = { smartMix: boolean; smartBeatFader: boolean; autoMix: boolean }
+
 export default function DeckPanel(
-  { live, status, refresh }: { live: Live; status: api.PlaybackStatus | null; refresh: () => void }
+  { live, status, refresh, modes, onToggleMode }: {
+    live: Live
+    status: api.PlaybackStatus | null
+    refresh: () => void
+    modes: MixModes | null
+    onToggleMode: (m: keyof MixModes) => Promise<void> | void
+  }
 ) {
   const isoA = isoFromCode(status?.isoA)
   const isoB = isoFromCode(status?.isoB)
@@ -160,6 +168,23 @@ export default function DeckPanel(
           </div>
           <VertVu vu={live.vuA} />
         </div>
+      </div>
+
+      {/* Mixing modes — persisted toggles, mirror the Settings dialog. */}
+      <div className="w-mode-bar">
+        <span className="w-mode-label">Modes:</span>
+        <button className={`w-btn w-iso ${modes?.smartMix ? 'w-iso-on' : ''}`}
+          title="Smart Mix — true beat-matched crossfade instead of a plain fade"
+          disabled={modes == null || busy} onClick={() => run(() => Promise.resolve(onToggleMode('smartMix')))}>
+          Smart Mix</button>
+        <button className={`w-btn w-iso ${modes?.smartBeatFader ? 'w-iso-on' : ''}`}
+          title="SmartBeat Fader — hold B silent until A's kick, then drop B in on the beat"
+          disabled={modes == null || busy} onClick={() => run(() => Promise.resolve(onToggleMode('smartBeatFader')))}>
+          SmartBeat</button>
+        <button className={`w-btn w-iso ${modes?.autoMix ? 'w-iso-on' : ''}`}
+          title="Intelligent auto-mix — choose vocal-tease / bass-swap / bass-breakdown per pair on auto transitions"
+          disabled={modes == null || busy} onClick={() => run(() => Promise.resolve(onToggleMode('autoMix')))}>
+          Auto-Mix</button>
       </div>
 
       <div className="w-xfade-bar">

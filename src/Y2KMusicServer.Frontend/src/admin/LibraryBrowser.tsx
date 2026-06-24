@@ -11,7 +11,7 @@ const PAGE = 50
 
 // Right-click menu geometry, used only to keep it inside the viewport.
 const MENU_W = 184
-const MENU_H = 132
+const MENU_H = 156
 
 type RowMenu = { x: number; y: number; track: api.TrackDto }
 
@@ -85,6 +85,9 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
   // Add the track to the playlist as a manual pick (it lands ahead of the
   // auto-fill). Double-click and the "Play as next song" menu item share this.
   const playNext = (id: number) => rowAct(id, () => api.addToPlaylist(id, 'Manual'))
+
+  // Append the track to the very end of the playlist (still a manual pick).
+  const addEnd = (id: number) => rowAct(id, () => api.addToPlaylist(id, 'Manual', true))
 
   // Crossfade to the track now (or load + play it if nothing is on air); the
   // parent owns the decision because it has the live playback status.
@@ -202,6 +205,8 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
           onContextMenu={e => e.preventDefault()}>
           <li className="w-ctxitem" role="menuitem"
             onClick={() => { playNext(menu.track.id); setMenu(null) }}>Play as next song</li>
+          <li className="w-ctxitem" role="menuitem"
+            onClick={() => { addEnd(menu.track.id); setMenu(null) }}>Add to end of playlist</li>
           <li className="w-ctxitem" role="menuitem"
             onClick={() => { doPlayNow(menu.track.id); setMenu(null) }}>Play now</li>
           <li className="w-ctxsep" role="separator" />
