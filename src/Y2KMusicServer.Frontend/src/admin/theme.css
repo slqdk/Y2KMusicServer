@@ -1,0 +1,533 @@
+/* =====================================================================
+   Y2K admin theme system — five selectable Windows-era skins.
+
+   The active skin is the root class on the admin shell, set in the title
+   bar and persisted in localStorage:
+       .win2k  .winxp  .win7  .win10  .win11
+
+   OS chrome (panels, buttons, inputs, group boxes, title/menu bars,
+   category tiles, tables, dialogs, the schedule timeline) is driven by
+   CSS custom properties, so ONE set of rules produces every era. Each
+   theme block below supplies its own variable map; only era-specific
+   flourishes (XP/7 gloss + focus glow, Win10 flat accents, Win11 rounded
+   focus underline, Aero glass blur) carry their own rules.
+
+   The media "device" displays — the now-playing LCD, the VU/deck meters,
+   and the activity log — are deliberately CONSISTENT across all themes
+   (they read as device screens, not OS chrome) and live in the shared
+   section near the bottom.
+
+   The listener page is untouched; it keeps the dark theme in styles.css.
+   ===================================================================== */
+
+/* ── Shell + reset (all themes) ──────────────────────────────────────── */
+.win2k, .winxp, .win7, .win10, .win11 {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  background: var(--w-face);
+  color: var(--w-text, #000);
+  font-family: var(--w-font);
+  font-size: var(--w-fontsize, 11px);
+  line-height: 1.3;
+  -webkit-font-smoothing: var(--w-smoothing, auto);
+}
+.win2k *, .win2k *::before, .win2k *::after,
+.winxp *, .winxp *::before, .winxp *::after,
+.win7  *, .win7  *::before, .win7  *::after,
+.win10 *, .win10 *::before, .win10 *::after,
+.win11 *, .win11 *::before, .win11 *::after { box-sizing: border-box; }
+
+/* ── Generic look rules (variable-driven, all themes) ────────────────── */
+.w-raised {
+  box-shadow: var(--w-raised);
+  border: var(--w-edge, 0 solid transparent);
+  border-radius: var(--w-radius, 0);
+}
+.w-sunken {
+  background: #fff;
+  box-shadow: var(--w-sunken);
+  border: var(--w-input-edge, 0 solid transparent);
+  border-radius: var(--w-radius, 0);
+}
+
+.w-titlebar {
+  background: var(--w-titlebar-bg);
+  color: var(--w-titlebar-fg, #fff);
+  font-weight: bold;
+  padding: 3px 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: var(--w-titlebar-radius, 0);
+  border-bottom: var(--w-titlebar-border, none);
+}
+.w-titlebar .w-app { letter-spacing: .02em; }
+.w-theme-select { min-height: auto !important; padding: 1px 4px !important; }
+
+.w-menubar {
+  display: flex;
+  gap: 2px;
+  background: var(--w-menubar-bg, var(--w-face));
+  border-bottom: 1px solid var(--w-sh);
+  padding: 1px 2px;
+}
+.w-menubar button {
+  font: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 2px 8px;
+  color: var(--w-text, #000);
+  border-radius: var(--w-btn-radius, 0);
+}
+.w-menubar button:hover:not([disabled]) { background: var(--w-menubar-hover, var(--w-face)); }
+.w-menubar button[disabled] { color: var(--w-disabled); }
+
+.w-panel {
+  background: var(--w-section);
+  padding: 4px;
+  margin: 4px;
+  border-radius: var(--w-radius, 0);
+}
+.w-panel.w-raised { padding: 6px; }
+.w-panelhead {
+  background: var(--w-panelhead-bg, var(--w-header));
+  color: var(--w-panelhead-fg, #fff);
+  font-weight: bold;
+  padding: 3px 7px;
+  margin: -6px -6px 6px -6px;
+  border-radius: var(--w-radius, 0) var(--w-radius, 0) 0 0;
+  border-bottom: var(--w-panelhead-border, none);
+}
+
+.w-group {
+  border: var(--w-group-border, 2px groove var(--w-lt));
+  border-radius: var(--w-radius, 0);
+  padding: 6px 8px 8px;
+  margin: 0 0 6px;
+}
+.w-group > legend { font-weight: bold; padding: 0 4px; text-align: center; }
+
+/* Buttons */
+.win2k button.w-btn, .winxp button.w-btn, .win7 button.w-btn,
+.win10 button.w-btn, .win11 button.w-btn {
+  font: inherit;
+  background: var(--w-btn-bg, var(--w-face));
+  color: var(--w-text, #000);
+  border: var(--w-btn-edge, none);
+  border-radius: var(--w-btn-radius, 0);
+  box-shadow: var(--w-btn-shadow, none);
+  padding: var(--w-btn-pad, 3px 10px);
+  min-height: 21px;
+  cursor: default;
+}
+.win2k button.w-btn:hover:not([disabled]), .winxp button.w-btn:hover:not([disabled]),
+.win7 button.w-btn:hover:not([disabled]), .win10 button.w-btn:hover:not([disabled]),
+.win11 button.w-btn:hover:not([disabled]) { background: var(--w-btn-bg-hover, var(--w-btn-bg, var(--w-face))); }
+.win2k button.w-btn:active:not([disabled]), .winxp button.w-btn:active:not([disabled]),
+.win7 button.w-btn:active:not([disabled]), .win10 button.w-btn:active:not([disabled]),
+.win11 button.w-btn:active:not([disabled]) {
+  box-shadow: var(--w-btn-shadow-active, var(--w-btn-shadow, none));
+  background: var(--w-btn-bg-active, var(--w-btn-bg-hover, var(--w-btn-bg, var(--w-face))));
+}
+.win2k button.w-btn[disabled], .winxp button.w-btn[disabled], .win7 button.w-btn[disabled],
+.win10 button.w-btn[disabled], .win11 button.w-btn[disabled] { color: var(--w-disabled); }
+.w-btn.w-primary { font-weight: bold; }
+
+/* Inputs / selects */
+.win2k input[type="text"], .win2k input[type="number"], .win2k input[type="search"], .win2k select,
+.winxp input[type="text"], .winxp input[type="number"], .winxp input[type="search"], .winxp select,
+.win7  input[type="text"], .win7  input[type="number"], .win7  input[type="search"], .win7  select,
+.win10 input[type="text"], .win10 input[type="number"], .win10 input[type="search"], .win10 select,
+.win11 input[type="text"], .win11 input[type="number"], .win11 input[type="search"], .win11 select {
+  font: inherit;
+  background: var(--w-input-bg, #fff);
+  color: var(--w-text, #000);
+  border: var(--w-input-edge, none);
+  border-radius: var(--w-input-radius, 0);
+  box-shadow: var(--w-input-shadow, none);
+  padding: 2px 4px;
+}
+.win2k input[disabled], .win2k select[disabled],
+.winxp input[disabled], .winxp select[disabled],
+.win7  input[disabled], .win7  select[disabled],
+.win10 input[disabled], .win10 select[disabled],
+.win11 input[disabled], .win11 select[disabled] { background: var(--w-face); color: var(--w-disabled); }
+.win2k label, .winxp label, .win7 label, .win10 label, .win11 label { user-select: none; }
+.w-check { display: inline-flex; align-items: center; gap: 5px; }
+
+/* Category tiles (tile carries .w-raised; this sets face/tint only) */
+.w-cat {
+  background: var(--w-face);
+  padding: 5px 4px;
+  text-align: center;
+  cursor: default;
+  border-radius: var(--w-radius, 0);
+}
+.w-cat.w-on { background: var(--w-green); }
+.w-cat.w-off .w-cat-name, .w-cat.w-off .w-cat-count { color: var(--w-disabled); }
+.w-cat.w-active { outline: 2px dotted var(--w-accent, var(--w-header)); outline-offset: -3px; }
+
+/* Tables */
+.w-table th {
+  position: sticky; top: 0;
+  background: var(--w-th-bg, var(--w-face));
+  text-align: left;
+  font-weight: normal;
+  padding: 2px 6px;
+  box-shadow: var(--w-th-shadow, inset -1px -1px var(--w-sh), inset 1px 1px var(--w-hi));
+  border-bottom: var(--w-th-border, none);
+}
+.w-table tbody tr:hover { background: var(--w-rowhover, #e8eef9); }
+.w-table tbody tr.w-rowsel { background: var(--w-sel); color: #fff; }
+.w-table tbody tr.w-rownow { background: var(--w-green); color: #000; }
+
+.w-srcbadge { font-size: 10px; padding: 0 4px; border: 1px solid var(--w-sh); border-radius: var(--w-radius, 0); }
+
+/* Dialog */
+.w-dialog {
+  background: var(--w-face);
+  border: var(--w-edge, 0 solid transparent);
+  border-radius: var(--w-radius, 0);
+  box-shadow: var(--w-dialog-shadow, none);
+}
+.w-overlay { background: var(--w-overlay-bg, rgba(0, 0, 32, 0.35)); }
+
+/* Schedule timeline segment */
+.w-timeline .w-tl-seg {
+  position: absolute; top: 12px; bottom: 2px;
+  background: var(--w-accent, var(--w-header));
+  border: 1px solid var(--w-accent, #061a52);
+  border-radius: var(--w-radius, 0);
+}
+
+/* =====================================================================
+   WINDOWS 2000  (the reference skin — values preserved verbatim)
+   ===================================================================== */
+.win2k {
+  --w-face: #d4d0c8; --w-section: #E6E4DC; --w-header: #0A246A; --w-green: #C6E8C6;
+  --w-hi: #ffffff; --w-lt: #dfdfdf; --w-sh: #808080; --w-dk: #0a0a0a;
+  --w-sel: #0A246A; --w-disabled: #808080; --w-text: #000; --w-accent: #0A246A;
+  --w-font: "MS Sans Serif", Tahoma, "Segoe UI", Geneva, sans-serif;
+  --w-fontsize: 11px; --w-smoothing: none; --w-radius: 0;
+  --w-raised: inset -1px -1px var(--w-dk), inset 1px 1px var(--w-hi),
+              inset -2px -2px var(--w-sh), inset 2px 2px var(--w-lt);
+  --w-sunken: inset -1px -1px var(--w-hi), inset 1px 1px var(--w-sh),
+              inset -2px -2px var(--w-lt), inset 2px 2px var(--w-dk);
+  --w-btn-bg: var(--w-face);
+  --w-btn-shadow: inset -1px -1px var(--w-dk), inset 1px 1px var(--w-hi),
+                  inset -2px -2px var(--w-sh), inset 2px 2px var(--w-lt);
+  --w-btn-shadow-active: inset 1px 1px var(--w-dk), inset -1px -1px var(--w-hi),
+                         inset 2px 2px var(--w-sh), inset -2px -2px var(--w-lt);
+  --w-input-bg: #fff;
+  --w-input-shadow: inset -1px -1px var(--w-hi), inset 1px 1px var(--w-sh),
+                    inset -2px -2px var(--w-lt), inset 2px 2px var(--w-dk);
+  --w-titlebar-bg: var(--w-header); --w-titlebar-fg: #fff;
+  --w-group-border: 2px groove var(--w-lt);
+  --w-rowhover: #e8eef9;
+}
+.win2k button.w-btn:active:not([disabled]) { padding: 4px 9px 2px 11px; }
+.win2k button.w-btn[disabled] { text-shadow: 1px 1px var(--w-hi); }
+
+/* =====================================================================
+   WINDOWS XP  (Luna — silver gloss buttons, blue gradient bars)
+   ===================================================================== */
+.winxp {
+  --w-face: #ECE9D8; --w-section: #ECE9D8; --w-green: #C6E8C6;
+  --w-hi: #ffffff; --w-lt: #f4f2e9; --w-sh: #aca899; --w-dk: #716f64;
+  --w-sel: #316AC5; --w-disabled: #a0a0a0; --w-text: #000; --w-accent: #1E62C9;
+  --w-header: linear-gradient(180deg, #3f93e0 0%, #2266c8 45%, #1655b8 90%);
+  --w-font: Tahoma, "Segoe UI", Verdana, sans-serif;
+  --w-fontsize: 12px; --w-smoothing: antialiased; --w-radius: 3px;
+  --w-raised: inset 0 1px 0 #ffffff, 0 0 0 1px #c9c0a3;
+  --w-sunken: inset 1px 1px #b8b09a, inset -1px -1px #ffffff;
+  --w-btn-bg: linear-gradient(180deg, #fefefe 0%, #f3f1e9 45%, #e6e1d3 55%, #d8d1bf 100%);
+  --w-btn-bg-hover: linear-gradient(180deg, #ffffff 0%, #f1f4f8 45%, #dce8f8 55%, #cadcf6 100%);
+  --w-btn-bg-active: linear-gradient(180deg, #d8d1bf 0%, #e6e1d3 50%, #f3f1e9 100%);
+  --w-btn-edge: 1px solid #7b7259; --w-btn-radius: 3px;
+  --w-btn-shadow: inset 0 1px 0 rgba(255, 255, 255, .7);
+  --w-btn-shadow-active: inset 1px 1px 2px rgba(0, 0, 0, .25);
+  --w-input-bg: #fff; --w-input-edge: 1px solid #7f9db9; --w-input-radius: 2px;
+  --w-titlebar-bg: var(--w-header); --w-titlebar-fg: #fff; --w-titlebar-radius: 7px 7px 0 0;
+  --w-panelhead-bg: linear-gradient(180deg, #4084d8, #2563c0); --w-panelhead-fg: #fff;
+  --w-group-border: 2px groove #e7e2d1;
+  --w-menubar-bg: #ECE9D8; --w-menubar-hover: #cfe0f5;
+  --w-th-bg: #ECE9D8;
+  --w-th-shadow: inset 0 -1px 0 #aca899, inset 0 1px 0 #ffffff;
+  --w-rowhover: #cbe2ff;
+}
+.winxp button.w-btn:focus-visible,
+.winxp input:focus, .winxp select:focus {
+  outline: none; border-color: #5a8fd6;
+  box-shadow: var(--w-input-shadow, none), 0 0 4px 1px rgba(90, 143, 214, .65);
+}
+
+/* =====================================================================
+   WINDOWS 7  (Aero — glassy gradients, soft shadows, light headers)
+   ===================================================================== */
+.win7 {
+  --w-face: #f0f0f0; --w-section: #f3f3f3; --w-green: #C6E8C6;
+  --w-hi: #ffffff; --w-lt: #fafafa; --w-sh: #bfbfbf; --w-dk: #9a9a9a;
+  --w-sel: #3399ff; --w-disabled: #9a9a9a; --w-text: #1a1a1a; --w-accent: #2b88d8;
+  --w-header: linear-gradient(180deg, rgba(255, 255, 255, .85), rgba(214, 233, 250, .85) 50%, rgba(186, 214, 240, .9));
+  --w-font: "Segoe UI", Tahoma, sans-serif;
+  --w-fontsize: 12px; --w-smoothing: antialiased; --w-radius: 5px;
+  --w-edge: 1px solid #d4d4d4;
+  --w-raised: 0 1px 2px rgba(0, 0, 0, .12), inset 0 1px 0 rgba(255, 255, 255, .65);
+  --w-sunken: inset 0 1px 2px rgba(0, 0, 0, .14);
+  --w-btn-bg: linear-gradient(180deg, #f2f6fb 0%, #e4eef9 49%, #d2e2f4 50%, #cfe0f5 100%);
+  --w-btn-bg-hover: linear-gradient(180deg, #eaf6ff 0%, #d6ecff 49%, #b9ddff 50%, #a9d6ff 100%);
+  --w-btn-bg-active: linear-gradient(180deg, #cfe0f5, #d2e2f4 50%, #e4eef9 100%);
+  --w-btn-edge: 1px solid #8aa9c8; --w-btn-radius: 3px;
+  --w-btn-shadow: inset 0 1px 0 rgba(255, 255, 255, .8);
+  --w-btn-shadow-active: inset 0 1px 3px rgba(0, 60, 120, .25);
+  --w-input-bg: #fff; --w-input-edge: 1px solid #abadb3; --w-input-radius: 3px;
+  --w-input-shadow: inset 0 1px 1px rgba(0, 0, 0, .06);
+  --w-titlebar-bg: var(--w-header); --w-titlebar-fg: #16324f; --w-titlebar-radius: 6px 6px 0 0;
+  --w-panelhead-bg: linear-gradient(180deg, #eaf3fb, #cfe2f4); --w-panelhead-fg: #0b3a66;
+  --w-group-border: 1px solid #dcdcdc;
+  --w-menubar-bg: #f0f0f0; --w-menubar-hover: #d6ecff;
+  --w-th-bg: linear-gradient(180deg, #fbfbfb, #ededed); --w-th-shadow: none; --w-th-border: 1px solid #d4d4d4;
+  --w-rowhover: #e5f3ff;
+  --w-dialog-shadow: 0 10px 30px rgba(0, 0, 0, .35); --w-overlay-bg: rgba(20, 40, 70, .28);
+}
+.win7 .w-titlebar { backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
+.win7 .w-overlay { backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
+.win7 button.w-btn:focus-visible,
+.win7 input:focus, .win7 select:focus {
+  outline: none; border-color: #5aa9e6;
+  box-shadow: var(--w-input-shadow, none), 0 0 5px 1px rgba(90, 169, 230, .6);
+}
+
+/* =====================================================================
+   WINDOWS 10  (flat, square, thin borders, accent #0078D4)
+   ===================================================================== */
+.win10 {
+  --w-face: #f3f3f3; --w-section: #ffffff; --w-green: #C6E8C6;
+  --w-hi: #ffffff; --w-lt: #f3f3f3; --w-sh: #d6d6d6; --w-dk: #c0c0c0;
+  --w-sel: #0078D4; --w-disabled: #a6a6a6; --w-text: #1a1a1a; --w-accent: #0078D4;
+  --w-font: "Segoe UI", Tahoma, sans-serif;
+  --w-fontsize: 12px; --w-smoothing: antialiased; --w-radius: 0;
+  --w-edge: 1px solid #d6d6d6;
+  --w-raised: none;
+  --w-sunken: none;
+  --w-btn-bg: #e1e1e1; --w-btn-bg-hover: #e5f1fb; --w-btn-bg-active: #cce4f7;
+  --w-btn-edge: 1px solid #adadad; --w-btn-radius: 0; --w-btn-shadow: none;
+  --w-input-bg: #fff; --w-input-edge: 1px solid #767676; --w-input-radius: 0; --w-input-shadow: none;
+  --w-titlebar-bg: #ffffff; --w-titlebar-fg: #1a1a1a; --w-titlebar-border: 1px solid #e0e0e0;
+  --w-panelhead-bg: #ffffff; --w-panelhead-fg: #1a1a1a; --w-panelhead-border: 2px solid var(--w-accent);
+  --w-group-border: 1px solid #d6d6d6;
+  --w-menubar-bg: #f3f3f3; --w-menubar-hover: #e5f1fb;
+  --w-th-bg: #f3f3f3; --w-th-shadow: none; --w-th-border: 1px solid #e0e0e0;
+  --w-rowhover: #e5f1fb;
+  --w-dialog-shadow: 0 6px 18px rgba(0, 0, 0, .25); --w-overlay-bg: rgba(0, 0, 0, .25);
+}
+.win10 .w-panel.w-raised { border: 1px solid #e0e0e0; }
+.win10 button.w-btn:hover:not([disabled]) { border-color: var(--w-accent); }
+.win10 input:focus, .win10 select:focus { outline: none; border-color: var(--w-accent); box-shadow: inset 0 0 0 1px var(--w-accent); }
+
+/* =====================================================================
+   WINDOWS 11  (flat + rounded, soft shadows, Mica-ish, accent #0067C0)
+   ===================================================================== */
+.win11 {
+  --w-face: #f3f3f3; --w-section: #fbfbfb; --w-green: #C6E8C6;
+  --w-hi: #ffffff; --w-lt: #f6f6f6; --w-sh: #e0e0e0; --w-dk: #cfcfcf;
+  --w-sel: #0067C0; --w-disabled: #a6a6a6; --w-text: #1a1a1a; --w-accent: #0067C0;
+  --w-font: "Segoe UI Variable Text", "Segoe UI", Tahoma, sans-serif;
+  --w-fontsize: 13px; --w-smoothing: antialiased; --w-radius: 8px;
+  --w-edge: 1px solid #e6e6e6;
+  --w-raised: 0 1px 3px rgba(0, 0, 0, .08);
+  --w-sunken: none;
+  --w-btn-bg: #fbfbfb; --w-btn-bg-hover: #f3f3f3; --w-btn-bg-active: #ededed;
+  --w-btn-edge: 1px solid #d9d9d9; --w-btn-radius: 6px; --w-btn-shadow: 0 1px 1px rgba(0, 0, 0, .04);
+  --w-btn-pad: 4px 12px;
+  --w-input-bg: #ffffff; --w-input-edge: 1px solid #d2d2d2; --w-input-radius: 5px; --w-input-shadow: none;
+  --w-titlebar-bg: #f3f3f3; --w-titlebar-fg: #1a1a1a; --w-titlebar-radius: 8px 8px 0 0;
+  --w-panelhead-bg: #eef3f8; --w-panelhead-fg: #1a1a1a;
+  --w-group-border: 1px solid #e6e6e6;
+  --w-menubar-bg: #f3f3f3; --w-menubar-hover: #ededed;
+  --w-th-bg: #f6f6f6; --w-th-shadow: none; --w-th-border: 1px solid #ededed;
+  --w-rowhover: #f3f6fb;
+  --w-dialog-shadow: 0 12px 34px rgba(0, 0, 0, .26); --w-overlay-bg: rgba(0, 0, 0, .22);
+}
+.win11 .w-overlay { backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+.win11 input:focus, .win11 select:focus {
+  outline: none; border-color: var(--w-input-focus, var(--w-accent));
+  box-shadow: inset 0 -2px 0 var(--w-accent);
+}
+.win11 button.w-btn:focus-visible { outline: 2px solid var(--w-accent); outline-offset: 1px; }
+
+/* =====================================================================
+   SHARED LAYOUT  (era-agnostic structure — unchanged across themes)
+   ===================================================================== */
+.w-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  grid-template-rows: 1023px;
+  gap: 4px; padding: 0 4px; align-items: stretch;
+}
+@media (max-width: 920px) { .w-cols { grid-template-columns: 1fr; grid-template-rows: auto; } }
+
+.w-cats { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+@media (max-width: 760px) { .w-cats { grid-template-columns: repeat(4, 1fr); } }
+.w-cat-name { font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.w-cat-count { font-size: 10px; margin: 1px 0 4px; }
+.w-cat button.w-btn { width: 100%; padding: 2px 4px; min-height: 19px; }
+
+.w-libpanel { display: flex; flex-direction: column; height: 1023px; min-height: 0; overflow: hidden; }
+.w-listwrap { background: #fff; overflow: auto; }
+.w-table { width: 100%; border-collapse: collapse; background: #fff; }
+.w-table td { padding: 1px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.w-table tr { cursor: default; }
+.w-num { text-align: right; font-variant-numeric: tabular-nums; }
+.w-rowbtns button.w-btn { min-height: 17px; padding: 0 6px; margin-right: 2px; }
+
+.w-toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.w-spacer { flex: 1; }
+.w-muted { color: var(--w-muted, #444); }
+.w-err { color: #a00000; }
+
+.w-conn { font-size: 10px; }
+.w-conn.w-ok { color: #0a7d2c; }
+.w-conn.w-bad { color: #a00000; }
+
+/* Modal positioning (look comes from .w-dialog / .w-overlay above) */
+.w-overlay {
+  position: fixed; inset: 0;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 40px 12px; z-index: 50;
+}
+.w-dialog {
+  width: 560px; max-width: 100%; max-height: calc(100vh - 80px);
+  display: flex; flex-direction: column;
+}
+.w-dialog .w-titlebar { cursor: default; }
+.w-dialog-body { padding: 8px; overflow: auto; }
+.w-dialog-body .w-group { background: var(--w-section); }
+
+.w-table.w-slots th, .w-table.w-slots td { padding: 2px 4px; }
+.w-table.w-slots input[type="text"] { padding: 1px 3px; }
+.w-table.w-slots select { padding: 0 2px; }
+
+.w-timeline {
+  position: relative; height: 26px; margin: 6px 0;
+  background: #fff;
+  box-shadow: var(--w-sunken);
+  border: var(--w-input-edge, 0 solid transparent);
+  border-radius: var(--w-radius, 0);
+}
+.w-timeline .w-tl-tick {
+  position: absolute; top: 0; bottom: 0;
+  border-left: 1px solid #c8c8c8;
+  font-size: 9px; color: #888; padding-left: 2px;
+}
+
+.w-formrow { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.w-formrow > label:first-child { min-width: 150px; }
+
+/* =====================================================================
+   MEDIA DEVICE DISPLAYS  (consistent across all themes — device screens)
+   ===================================================================== */
+.w-now {
+  margin: 4px; padding: 8px;
+  display: grid; grid-template-columns: 1.3fr 2fr; gap: 10px;
+  background: var(--w-section);
+  border-radius: var(--w-radius, 0);
+}
+@media (max-width: 920px) { .w-now { grid-template-columns: 1fr; } }
+.w-display {
+  background: #06121d; color: #38e08b; padding: 8px 10px;
+  font-family: "Lucida Console", Consolas, monospace;
+  box-shadow: inset 1px 1px #0a0a0a, inset -1px -1px #fff, inset 2px 2px #000, inset -2px -2px #dfdfdf;
+  display: flex; gap: 10px; align-items: flex-start;
+}
+.w-np-text { flex: 1; min-width: 0; }
+.w-cover {
+  flex: 0 0 auto; width: 76px; height: 76px;
+  background: #03281c; box-shadow: inset 1px 1px #000;
+  display: grid; place-items: center; overflow: hidden;
+}
+.w-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.w-cover-ph { color: #2f6f58; font-size: 30px; line-height: 1; }
+.w-display .w-np-title { color: #eaffe9; font-size: 14px; font-weight: bold; margin-bottom: 6px; min-height: 18px; }
+.w-display .w-np-row { color: #9fd9c0; font-size: 11px; }
+.w-display .w-np-label { color: #4f8f78; }
+
+.w-seek { display: flex; align-items: center; gap: 8px; }
+.w-seek input[type="range"] { flex: 1; }
+.w-transport { display: flex; gap: 6px; justify-content: center; margin-top: 8px; }
+.w-transport button.w-btn { min-width: 54px; min-height: 28px; font-size: 13px; }
+.w-transport button.w-play { min-width: 96px; font-weight: bold; }
+
+.w-vu { display: grid; grid-template-columns: 18px 1fr; gap: 3px 6px; align-items: center; }
+.w-vu .w-vu-ch { font-size: 10px; color: #4f8f78; }
+.w-vu-track { height: 9px; background: #03281c; box-shadow: inset 1px 1px #000; overflow: hidden; }
+.w-vu-fill { height: 100%; background: linear-gradient(90deg, #21d07a 0%, #21d07a 70%, #e3d046 85%, #e0503a 100%); transition: width 60ms linear; }
+
+.w-deck { display: flex; flex-direction: column; gap: 4px; }
+.w-deck-label { font-size: 10px; color: #4f8f78; letter-spacing: .1em; }
+.w-deck-tag { color: #06121d; background: #38e08b; border-radius: 2px; padding: 0 4px; font-size: 9px; letter-spacing: .08em; }
+.w-deck-np { font-size: 11px; color: #9fd9c0; font-family: "Lucida Console", Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.w-deck-bar { position: relative; height: 6px; background: #03281c; box-shadow: inset 1px 1px #000; }
+.w-deck-fill { height: 100%; background: #38a0e0; }
+.w-deck-inpoint { position: absolute; top: -1px; bottom: -1px; width: 2px; background: #e3d046; box-shadow: 0 0 3px #e3d046; }
+.w-beat { width: 12px; height: 12px; border-radius: 50%; background: #123; box-shadow: inset 1px 1px #000; }
+.w-beat.w-lit { background: #ff5a3c; box-shadow: 0 0 6px #ff5a3c; }
+.w-beatstrip { height: 22px; margin-top: 1px; background: #03281c; box-shadow: inset 1px 1px #000; overflow: hidden; }
+.w-beatstrip canvas { display: block; width: 100%; height: 100%; }
+.w-wave { height: 64px; margin-top: 2px; background: #03281c; box-shadow: inset 1px 1px #000; overflow: hidden; }
+.w-wave canvas { display: block; width: 100%; height: 100%; }
+.w-wavewrap { display: flex; flex-direction: column; gap: 3px; }
+.w-wavectl { display: flex; align-items: center; gap: 6px; font-size: 10px; flex-wrap: wrap; }
+.w-wavebpm { font-weight: bold; min-width: 62px; text-align: center; }
+
+.w-logview {
+  height: 230px; overflow: auto; margin-top: 6px; padding: 4px 6px;
+  background: #06121d; color: #9fd9c0;
+  font-family: "Lucida Console", Consolas, monospace; font-size: 11px; line-height: 1.4;
+  box-shadow: inset 1px 1px #0a0a0a, inset -1px -1px #fff, inset 2px 2px #000, inset -2px -2px #dfdfdf;
+}
+.w-logline { white-space: pre-wrap; word-break: break-word; }
+.w-logline .w-log-time { color: #4f8f78; }
+.w-logline .w-log-lvl { display: inline-block; min-width: 34px; }
+.w-logline .w-log-src { color: #6fb3d6; }
+.w-log-information { color: #cfeede; }
+.w-log-debug { color: #7f9f96; }
+.w-log-verbose { color: #5f7f76; }
+.w-log-warning { color: #e3d046; }
+.w-log-error, .w-log-fatal { color: #ff7a5c; }
+.w-log-exc { color: #ff9a7c; padding-left: 18px; white-space: pre-wrap; }
+.w-logempty { color: #4f8f78; padding: 8px 2px; }
+.w-logpaused { color: #e3d046; }
+
+/* ── Deck panel (dual-deck beat-clocks, above the playlist) ─────────────── */
+.w-right-col { display: flex; flex-direction: column; min-width: 0; }
+.w-deckpanel { display: flex; flex-direction: column; gap: 6px; }
+.w-deckpanel-lane { display: flex; flex-direction: column; gap: 4px; }
+.w-deck-ctrls { display: flex; align-items: center; gap: 4px; }
+.w-deck-clockrow { display: flex; gap: 6px; align-items: center; }
+.w-deckclock {
+  flex: 1;
+  height: 52px;
+  background: #141414;
+  box-shadow: inset 1px 1px #000, inset -1px -1px #2a2a2a;
+  overflow: hidden;
+}
+.w-deckclock canvas { display: block; width: 100%; height: 100%; }
+/* Vertical L/R VU beside each beat-clock */
+.w-vvu { display: flex; gap: 3px; height: 52px; flex: 0 0 auto; }
+.w-vvu-track { position: relative; width: 9px; height: 100%; background: #03281c; box-shadow: inset 1px 1px #000; overflow: hidden; }
+.w-vvu-fill { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(0deg, #21d07a 0%, #21d07a 60%, #e3d046 80%, #e0503a 100%); transition: height 60ms linear; }
+/* On-air track + master transport strip, atop the deck lanes */
+.w-npbar { margin-bottom: 6px; }
+.w-np-transport { margin-left: auto; display: flex; flex-direction: column; justify-content: center; gap: 6px; min-width: 300px; }
+.w-np-transport .w-transport { margin-top: 0; }
+.w-iso-group { display: flex; gap: 4px; }
+.w-deckpanel button.w-iso { min-height: 19px; padding: 1px 8px; font-size: 11px; }
+.w-deckpanel button.w-deckbtn { min-height: 19px; padding: 1px 8px; font-size: 11px; }
+.w-nudge { display: inline-flex; gap: 2px; margin: 0 2px; }
+.w-nudge button.w-btn { padding: 1px 6px; }
+.w-deckpanel button.w-iso.w-iso-on { background: #c6e8c6; font-weight: bold; }
+.w-xfade-bar { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.w-xfade-bar button.w-btn { min-height: 24px; }
+.w-xfade-state { font-size: 11px; }

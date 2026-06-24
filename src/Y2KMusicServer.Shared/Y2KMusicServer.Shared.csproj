@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Y2KMusicServer.Shared</RootNamespace>
+    <AssemblyName>Y2KMusicServer.Shared</AssemblyName>
+  </PropertyGroup>
+
+</Project>

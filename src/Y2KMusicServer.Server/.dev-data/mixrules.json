@@ -1,0 +1,9 @@
+{
+  "Enabled": true,
+  "BpmTolerance": 5,
+  "VocalTease": true,
+  "BassSwap": true,
+  "BassBreakdown": true,
+  "VocalTeaseLevel": 0.8,
+  "MaxOverlapBars": 8
+}

@@ -1,0 +1,21 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- Single source of truth for the product version. Override at
+         publish time with: dotnet publish -p:Version=X.Y.Z -->
+    <Version>0.1.0</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
+
+    <Company>slq.dk</Company>
+    <Product>Y2K Music Server</Product>
+    <Copyright>Copyright © 2026 Søren Lyder Nielsen</Copyright>
+
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+</Project>

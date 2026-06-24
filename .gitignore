@@ -1,0 +1,50 @@
+# Build artefacts
+bin/
+obj/
+dist/
+out/
+*.user
+*.suo
+
+# Visual Studio
+.vs/
+*.userprefs
+
+# .NET
+*.dll.config
+launchSettings.json
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Frontend
+node_modules/
+src/Y2KMusicServer.Frontend/dist/
+src/Y2KMusicServer.Server/wwwroot/assets/
+src/Y2KMusicServer.Server/wwwroot/index.html
+.npm/
+*.tgz
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# SQLite (local dev databases sit beside the project)
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+logs/
+
+# Rider
+.idea/
+
+# AI handoff context — uploaded per chat, never committed
+docs/
+docs-legacy/
+
+# Misc
+Thumbs.db
+.DS_Store
