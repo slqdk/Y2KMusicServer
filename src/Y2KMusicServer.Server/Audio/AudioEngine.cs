@@ -27,26 +27,28 @@ public sealed record PlaybackStatus
     public bool NextStarted { get; init; }   // cued Deck B's silent preview is running
     public IsoMode IsoA { get; init; } = IsoMode.None;   // Deck A EQ isolator mode
     public IsoMode IsoB { get; init; } = IsoMode.None;   // Deck B EQ isolator mode
-    // Auto-mix strategy for the next transition (or the one running during a
+    // The transition planned for the next crossfade (or the one running during a
     // crossfade). Null when there is no cued/active Deck B. PlannedReason is the
-    // planner's human-readable explanation.
-    public string? PlannedStrategy { get; init; }
+    // planner's human-readable explanation. ArmedTransition is the operator's
+    // one-shot force for the next crossfade, or null.
+    public string? PlannedTransition { get; init; }
     public string? PlannedReason { get; init; }
+    public string? ArmedTransition { get; init; }
 }
 
 /// <summary>
 /// Dual-deck playback engine. Deck A is current; Deck B is the incoming track
 /// during a crossfade. A ~50 ms tick loop advances the fade ramp and fires the
-/// scheduled transition. Smart Mix vs a plain fade is chosen by
-/// <c>Settings.SmartMix</c>; mix points come from <c>MixCache</c> (computed via
-/// <see cref="MixAnalyser"/> on first use). The fade is shortened if needed so
-/// Deck B reaches full volume by Deck A's end (EOF contract, policy a).
+/// scheduled transition. The transition for each pair is chosen by
+/// <see cref="MixPlanner"/> under the operator's <see cref="MixRules"/> (the
+/// Crossfade and Mixing section toggles); mix points come from <c>MixCache</c>
+/// (computed via <see cref="MixAnalyser"/> on first use). The fade is shortened
+/// if needed so Deck B reaches full volume by Deck A's end (EOF contract, policy a).
 ///
-/// SmartBeat (Ship 2.3): when a scheduled Smart Mix crossfade starts and
-/// <c>Settings.SmartBeatFader</c> is on and Deck A has a live kick at that
-/// instant, Deck B is held silent through A's last beats and faded in only once
-/// A goes quiet. It does not apply to a manual Next. Auto-advance / Auto DJ is
-/// Phase 3 — a transition only happens when one is queued.
+/// Beat drop crossfade: when the chosen transition is a Beat drop and Deck A has
+/// a live kick at the start instant, Deck B is held silent through A's last beats
+/// and faded in only once A goes quiet (otherwise it falls back to a plain ramp).
+/// An operator can arm any transition for the next crossfade only (ArmTransition).
 /// </summary>
 public sealed class AudioEngine
 {
@@ -93,6 +95,11 @@ public sealed class AudioEngine
     private bool _planASilentFired;
     private double _planSwapAtSec;       // A-position (s) at which to fire the "downbeat" swap steps
     private bool _planDownbeatFired;
+
+    // Operator-armed transition (guarded by _gate): a one-shot forced transition
+    // that overrides the automatic pick on the NEXT A→B crossfade only, then
+    // clears. null = use the automatic pick. Set by the force buttons (ArmTransition).
+    private Transition? _armed;
 
     private volatile bool _tickRunning = true;
 
@@ -274,7 +281,6 @@ public sealed class AudioEngine
         if (next == null) return QueueResult.NotFound;
         if (!File.Exists(next.FilePath)) return QueueResult.FileMissing;
 
-        bool smartMix = settings.SmartMix;
         double configuredFade = settings.NextFadeSeconds;
 
         double outPoint, inPoint, fadeSec, score;
@@ -297,7 +303,7 @@ public sealed class AudioEngine
             var mp = MixAnalyser.AnalysePair(
                 fromPath, fromBpm, fromPhase,
                 next.FilePath, next.Bpm ?? 0, next.BeatPhaseOffsetSec ?? 0,
-                configuredFade, ct, smartMix);
+                configuredFade, ct, smartMode: true);
 
             if (mp.IsValid)
             {
@@ -335,7 +341,7 @@ public sealed class AudioEngine
             {
                 outPoint = 0;
                 inPoint = 0;
-                fadeSec = smartMix ? MixAnalyser.SmartFadeDuration(0, 0) : configuredFade;
+                fadeSec = configuredFade;
                 score = 0;
                 beatAligned = false;
                 reason = "fallback (analysis unavailable)";
@@ -343,38 +349,33 @@ public sealed class AudioEngine
             }
         }
 
-        // ── Auto-mix plan (phase 4) ──────────────────────────────────────────
-        // When the rules are enabled and this isn't a manual operator cue, decide
-        // a transition strategy now and carry it on the prepared transition. The
-        // structure caches build here (off the audio thread); the planner is pure.
-        // The plan only RUNS on an auto-trigger (see StartCrossfade_Locked) — a
-        // manual Next or hand-fired crossfade stays a plain crossfade.
-        MixPlan? plan = null;
-        if (!manual)
+        // ── Transition planner ───────────────────────────────────────────────
+        // Resolve the transition for this pair now and carry it on the prepared
+        // transition, so the operator sees what's planned ahead of the crossfade
+        // (and it lands in the log). The planner is pure; the structure caches
+        // build here, off the audio thread. An armed force overrides this at fire
+        // time. The two section flags live inside the rules — the planner falls
+        // back to a Normal Crossfade when neither section acts.
+        MixPlan plan;
         {
             var rules = MixRules.Load(_cfg);
-            if (rules.Enabled)
+            TrackStructureData? aStruct = TryStructure(fromId, fromPath);
+            TrackStructureData? bStruct = TryStructure(next.Id, next.FilePath);
+            var basePoints = new MixPoints
             {
-                TrackStructureData? aStruct = TryStructure(fromId, fromPath);
-                TrackStructureData? bStruct = TryStructure(next.Id, next.FilePath);
-                var basePoints = new MixPoints
-                {
-                    OutPoint = outPoint,
-                    InPoint = inPoint,
-                    FadeDuration = fadeSec,
-                    BeatAligned = beatAligned
-                };
-                plan = MixPlanner.Plan(
-                    basePoints,
-                    fromBpm > 0 ? fromBpm : (double?)null,
-                    next.Bpm, next.BeatPhaseOffsetSec,
-                    aStruct, bStruct, rules);
+                OutPoint = outPoint,
+                InPoint = inPoint,
+                FadeDuration = fadeSec,
+                BeatAligned = beatAligned
+            };
+            plan = MixPlanner.Plan(
+                basePoints,
+                fromBpm > 0 ? fromBpm : (double?)null,
+                next.Bpm, next.BeatPhaseOffsetSec,
+                aStruct, bStruct, rules);
 
-                // Surface the decision now so the operator sees the planned
-                // transition ahead of the actual crossfade (and it lands in the log).
-                _log.LogInformation("Auto-mix planned: {Strategy} | {Reason}",
-                    plan.StrategyName, plan.Reason);
-            }
+            _log.LogInformation("Next transition planned: {Transition} | {Reason}",
+                plan.StrategyName, plan.Reason);
         }
 
         float targetVol = NormalizedVolume(next, settings);
@@ -382,7 +383,7 @@ public sealed class AudioEngine
         Deck deckB;
         try
         {
-            deckB = BuildDeck(next, smartMix ? 0f : targetVol, inPoint, "B", settings.StreamingEnabled);
+            deckB = BuildDeck(next, 0f, inPoint, "B", settings.StreamingEnabled);
             deckB.BaseVolume = targetVol;
             deckB.InPointSec = inPoint;
         }
@@ -408,8 +409,6 @@ public sealed class AudioEngine
                 TriggerSec = trigger,
                 FadeSec = fadeSec,
                 TargetVol = targetVol,
-                SmartMix = smartMix,
-                SmartBeatFader = settings.SmartBeatFader,
                 BeatAligned = beatAligned,
                 Manual = manual,
                 Reason = reason,
@@ -499,28 +498,32 @@ public sealed class AudioEngine
 
             var bDeck = _crossfading ? _deckB : _prepared?.DeckB;
 
-            // Planned (or active) auto-mix strategy for the readout/log. During a
+            // Planned (or active) transition for the readout/log. During a
             // crossfade, report what is actually executing (_activePlan; null means
-            // a plain fade). Otherwise report the plan carried on the cued Deck B —
-            // or PlainCrossfade with a reason when no plan was attached (manual cue
-            // or auto-mix disabled).
-            string? plannedStrategy = null, plannedReason = null;
+            // a crossfade). Otherwise report the armed force if one is set (it
+            // overrides the next crossfade), else the plan carried on the cued Deck B.
+            string? plannedTransition = null, plannedReason = null;
             if (_crossfading)
             {
-                plannedStrategy = (_activePlan?.Strategy ?? MixStrategy.PlainCrossfade).ToString();
-                plannedReason = _activePlan?.Reason ?? "plain crossfade";
+                plannedTransition = (_activePlan?.Strategy ?? Transition.NormalCrossfade).ToString();
+                plannedReason = _activePlan?.Reason ?? "normal crossfade";
             }
             else if (_prepared != null)
             {
-                if (_prepared.Plan != null)
+                if (_armed is Transition armedNext)
                 {
-                    plannedStrategy = _prepared.Plan.StrategyName;
+                    plannedTransition = armedNext.ToString();
+                    plannedReason = "armed by operator (fires on next A->B)";
+                }
+                else if (_prepared.Plan != null)
+                {
+                    plannedTransition = _prepared.Plan.StrategyName;
                     plannedReason = _prepared.Plan.Reason;
                 }
                 else
                 {
-                    plannedStrategy = MixStrategy.PlainCrossfade.ToString();
-                    plannedReason = _prepared.Manual ? "plain (manual cue)" : "plain (auto-mix off)";
+                    plannedTransition = Transition.NormalCrossfade.ToString();
+                    plannedReason = "normal crossfade";
                 }
             }
 
@@ -540,8 +543,9 @@ public sealed class AudioEngine
                 NextStarted = _bManualStarted,
                 IsoA = _deckA.Iso.Mode,
                 IsoB = bDeck?.Iso.Mode ?? IsoMode.None,
-                PlannedStrategy = plannedStrategy,
-                PlannedReason = plannedReason
+                PlannedTransition = plannedTransition,
+                PlannedReason = plannedReason,
+                ArmedTransition = _armed?.ToString()
             };
         }
     }
@@ -730,41 +734,54 @@ public sealed class AudioEngine
         return true;
     }
 
-    /// <summary>Operator-forced crossfade using a specific auto-mix strategy, for
-    /// testing each transition type. Builds the forced plan for the current
-    /// (Deck A -> cued Deck B) pair — bypassing the auto-selection, the
-    /// preconditions, the per-strategy toggles, and the master enable flag — and
-    /// runs it now. False when there is nothing to mix (no Deck A, no cued Deck B,
-    /// or a crossfade already running).</summary>
-    public bool ForceCrossfade(MixStrategy strategy)
+    /// <summary>Arm a specific transition for the NEXT A→B crossfade only (the
+    /// operator's force buttons). Arming the same transition again disarms it;
+    /// arming a different one replaces it. The armed transition overrides the
+    /// automatic pick and fires once — on whatever triggers the next crossfade
+    /// (auto-advance, Next, or a hand-fired crossfade) — then clears. Returns the
+    /// armed transition, or null if this call toggled it back off.</summary>
+    public Transition? ArmTransition(Transition transition)
     {
-        TransitionInfo? tr = null;
         lock (_gate)
         {
-            if (_deckA == null || _crossfading || _prepared == null) return false;
-
-            var basePoints = new MixPoints
+            if (_armed == transition)
             {
-                OutPoint = _prepared.OutPoint,
-                InPoint = _prepared.InPoint,
-                FadeDuration = _prepared.FadeSec,
-                BeatAligned = _prepared.BeatAligned
-            };
-            TrackStructureData? aStruct = TryStructure(_deckA.TrackId, _deckA.FilePath);
-            TrackStructureData? bStruct = TryStructure(_prepared.DeckB.TrackId, _prepared.DeckB.FilePath);
-            var forced = MixPlanner.Plan(
-                basePoints,
-                _deckA.Bpm > 0 ? _deckA.Bpm : (double?)null,
-                _prepared.DeckB.Bpm, _prepared.DeckB.BeatPhaseOffsetSec,
-                aStruct, bStruct, MixRules.Load(_cfg), force: strategy);
-
-            _log.LogInformation("Auto-mix (forced by operator): {Strategy} | {Reason}",
-                forced.StrategyName, forced.Reason);
-
-            tr = StartCrossfade_Locked(_prepared, fromNext: false, forcedPlan: forced);
+                _armed = null;
+                _log.LogInformation("Transition disarmed: {Transition}", transition);
+                return null;
+            }
+            _armed = transition;
+            _log.LogInformation("Transition armed: {Transition} (fires on next A->B)", transition);
+            return transition;
         }
-        if (tr != null) { TransitionStarted?.Invoke(tr); EmitTaps(); }
-        return true;
+    }
+
+    /// <summary>The currently armed transition, or null. Surfaced in the status so
+    /// the operator can see what the next crossfade will force.</summary>
+    public Transition? ArmedTransition
+    {
+        get { lock (_gate) return _armed; }
+    }
+
+    /// <summary>Build the plan for an armed transition against the current
+    /// (Deck A → cued Deck B) pair — bypassing the auto-selection, preconditions,
+    /// per-move toggles, and the section flags. Caller holds <c>_gate</c>.</summary>
+    private MixPlan BuildForcedPlan_Locked(Transition transition, PreparedNext p)
+    {
+        var basePoints = new MixPoints
+        {
+            OutPoint = p.OutPoint,
+            InPoint = p.InPoint,
+            FadeDuration = p.FadeSec,
+            BeatAligned = p.BeatAligned
+        };
+        TrackStructureData? aStruct = TryStructure(_deckA!.TrackId, _deckA.FilePath);
+        TrackStructureData? bStruct = TryStructure(p.DeckB.TrackId, p.DeckB.FilePath);
+        return MixPlanner.Plan(
+            basePoints,
+            _deckA.Bpm > 0 ? _deckA.Bpm : (double?)null,
+            p.DeckB.Bpm, p.DeckB.BeatPhaseOffsetSec,
+            aStruct, bStruct, MixRules.Load(_cfg), force: transition);
     }
 
     /// <summary>Set Deck A's EQ isolator mode (None / Bass / Vocal). Affects the
@@ -795,7 +812,7 @@ public sealed class AudioEngine
 
     // ── Crossfade plumbing (callers hold _gate) ───────────────────────────────
 
-    private TransitionInfo StartCrossfade_Locked(PreparedNext p, bool fromNext, MixPlan? forcedPlan = null)
+    private TransitionInfo StartCrossfade_Locked(PreparedNext p, bool fromNext)
     {
         double triggerSec = 0;
         try { triggerSec = _deckA!.Reader.CurrentTime.TotalSeconds; } catch { }
@@ -819,30 +836,37 @@ public sealed class AudioEngine
         _crossFadePos = 0;
         _crossFadeStep = CrossfadeMath.StepPerTick(TickMs, effFade);
 
-        if (p.SmartMix)
+        // ── Resolve the transition to run ────────────────────────────────────
+        // An armed force (operator button) overrides the prepared automatic pick
+        // for this one crossfade, then clears. Either way we always have a plan: a
+        // move carries steps; a crossfade (Normal/Beatmatching/Beat drop) does not.
+        MixPlan? plan;
+        if (_armed is Transition armed)
         {
-            _deckBFading = true;
-            _deckB.Vol.Volume = 0f;
+            plan = BuildForcedPlan_Locked(armed, p);
+            _armed = null;
         }
         else
         {
-            _deckBFading = false;
-            _deckB.Vol.Volume = p.TargetVol;
+            plan = p.Plan;
         }
+        bool isMove = plan != null && plan.IsMove;
+        Transition winner = plan?.Strategy ?? Transition.NormalCrossfade;
+        // Beat drop holds B silent until A's kick (the SmartBeat fader); every
+        // other crossfade ramps B up from silence.
+        bool beatDrop = winner == Transition.BeatDropCrossfade;
 
-        // ── Auto-mix plan executor (phase 4) ─────────────────────────────────
-        // The plan runs only on an auto-trigger; a manual Next (fromNext) stays a
-        // plain crossfade. When the plan owns B's volume the auto B-ramp is
-        // suspended; either way the fade-start steps set the isolators (and B's
-        // start volume). SmartBeat is suspended whenever a plan is active.
-        // The plan runs only on an auto-trigger, and only when it actually does
-        // something (has steps) — a PlainCrossfade decision or a manual Next
-        // (fromNext) falls through to today's behaviour, SmartBeat included.
-        // A forced plan (operator test button) overrides the prepared plan for
-        // this run; otherwise the prepared (auto) plan is used. Either way an
-        // empty-step plan or a manual Next falls through to a plain crossfade.
-        var planForRun = forcedPlan ?? p.Plan;
-        _activePlan = (fromNext || planForRun == null || planForRun.Steps.Length == 0) ? null : planForRun;
+        // Every transition now ramps B up from silence (a real crossfade). A move's
+        // steps (via _planOwnsB) or Beat drop's SmartBeat hold may override this.
+        _deckBFading = true;
+        _deckB.Vol.Volume = 0f;
+
+        // ── Move executor ────────────────────────────────────────────────────
+        // A move runs its automation steps; a crossfade does not. When the plan
+        // owns B's volume the auto B-ramp is suspended; the fade-start steps set
+        // the isolators (and B's start volume). The "downbeat" swap fires once when
+        // A reaches the planned bar boundary.
+        _activePlan = isMove ? plan : null;
         _planOwnsB = _activePlan != null && PlanOwnsB(_activePlan);
         _planASilentFired = false;
         _planDownbeatFired = false;
@@ -851,15 +875,16 @@ public sealed class AudioEngine
             _planSwapAtSec = ComputeSwapAt(triggerSec, effFade, _activePlan.SwapHoldSec, _deckA.Bpm, _deckA.BeatPhaseOffsetSec);
         if (_planOwnsB) _deckBFading = false;
 
-        // ── SmartBeat fader ──────────────────────────────────────────────────
+        // ── Beat drop (SmartBeat fader) ──────────────────────────────────────
+        // Only for a Beat drop crossfade: hold B silent until A's live kick, then
+        // drop B in on the beat. If A isn't at a kick right now, fall back to the
+        // plain ramp-in set above. Suspended whenever a move is running.
         _smartBeatActive = false;
         _beatFadeInPos = 0f;
         _beatFadeInStep = 0f;
         string smartBeatState;
-        if (_activePlan != null) smartBeatState = $"skip (auto-mix {_activePlan.StrategyName})";
-        else if (!p.SmartBeatFader) smartBeatState = "disabled";
-        else if (fromNext) smartBeatState = "skip (manual next)";
-        else if (!p.SmartMix) smartBeatState = "skip (not smart mix)";
+        if (_activePlan != null) smartBeatState = $"n/a (move {_activePlan.StrategyName})";
+        else if (!beatDrop) smartBeatState = "n/a (not beat-drop)";
         else
         {
             float onset = _deckA.Fft.BassOnset; // set by the audio thread; volatile
@@ -876,17 +901,17 @@ public sealed class AudioEngine
             }
             else
             {
-                smartBeatState = $"skip (no beat {onset:F2})";
+                smartBeatState = $"fallback ramp (no beat {onset:F2})";
             }
         }
 
-        // Apply the plan's fade-start steps (isolators + any B start volume) and
-        // announce the strategy in the activity log.
+        // Apply a move's fade-start steps (isolators + any B start volume). Then
+        // log exactly what's running — for every transition, so it's always in the
+        // log next to the planned line.
         if (_activePlan != null)
-        {
             ApplyPlanSteps_Locked("fadeStart");
-            _log.LogInformation("Auto-mix: {Strategy} | {Reason}", _activePlan.StrategyName, _activePlan.Reason);
-        }
+        _log.LogInformation("Transition: {Transition} | {Reason}",
+            winner.ToString(), plan?.Reason ?? "normal crossfade");
 
         if (_state == PlaybackEngineState.Playing) _deckB.Out.Play();
         _crossfading = true;
@@ -904,12 +929,12 @@ public sealed class AudioEngine
                 "  Deck A reader={Ar} out={Ao}\n" +
                 "  Deck B reader={Br} out={Bo}",
                 TrackLabel(_deckB.Title, _deckB.Artist), effFade,
-                p.SmartMix ? "Smart Mix" : "plain fade", fromNext ? ", immediate" : "",
+                winner.ToString(), fromNext ? ", immediate" : "",
                 FmtDesc(_deckA.Reader.WaveFormat), FmtDesc(_deckA.Out.OutputWaveFormat),
                 FmtDesc(_deckB.Reader.WaveFormat), FmtDesc(_deckB.Out.OutputWaveFormat));
 
             _log.LogDebug("{MixCard}", BuildMixCard(
-                _deckA, _deckB, triggerSec, effFade, p.SmartMix, smartBeatState,
+                _deckA, _deckB, triggerSec, effFade, !isMove, smartBeatState,
                 p.OutPoint, p.InPoint, p.PairScore, p.MixSource, p.BeatAligned, p.Reason));
         }
 
@@ -919,11 +944,11 @@ public sealed class AudioEngine
             ToTrackId = toId,
             TriggerSec = triggerSec,
             FadeSeconds = effFade,
-            SmartMix = p.SmartMix,
-            BeatAligned = p.BeatAligned,
+            SmartMix = !isMove,
+            BeatAligned = plan?.BeatAligned ?? p.BeatAligned,
             FadeShortened = shortened,
             SmartBeatState = smartBeatState,
-            Reason = p.Reason
+            Reason = plan?.Reason ?? p.Reason
         };
     }
 
@@ -1317,8 +1342,6 @@ public sealed class AudioEngine
         public required double TriggerSec { get; init; }
         public required double FadeSec { get; init; }
         public required float TargetVol { get; init; }
-        public required bool SmartMix { get; init; }
-        public required bool SmartBeatFader { get; init; }
         public required bool BeatAligned { get; init; }
         public bool Manual { get; init; }   // operator-started Deck B (silent preview): skip auto-fire, crossfade on demand
         public string? Reason { get; init; }

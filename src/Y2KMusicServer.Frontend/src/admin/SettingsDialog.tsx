@@ -38,7 +38,6 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
     setBusy(true); setSaved(false); setErr(null)
     try {
       const r = await api.putSettings({
-        smartMix: s.smartMix, smartBeatFader: s.smartBeatFader,
         nextTriggerPct: s.nextTriggerPct, nextFadeSeconds: s.nextFadeSeconds,
         normalizeEnabled: s.normalizeEnabled, limiterEnabled: s.limiterEnabled,
         targetLufs: s.targetLufs, volume: s.volume, scanWorkers: s.scanWorkers,
@@ -106,9 +105,7 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
               </fieldset>
 
               <fieldset className="w-group">
-                <legend>Mixing &amp; Playback</legend>
-                <label className="w-check"><input type="checkbox" checked={s.smartMix} onChange={e => patch({ smartMix: e.target.checked })} /> Smart Mix (true crossfade)</label>
-                <label className="w-check"><input type="checkbox" checked={s.smartBeatFader} onChange={e => patch({ smartBeatFader: e.target.checked })} /> SmartBeat Fader</label>
+                <legend>Playback</legend>
                 <label className="w-check"><input type="checkbox" checked={s.normalizeEnabled} onChange={e => patch({ normalizeEnabled: e.target.checked })} /> Normalize volume</label>
                 <label className="w-check"><input type="checkbox" checked={s.limiterEnabled} onChange={e => patch({ limiterEnabled: e.target.checked })} /> Limiter (anti-clip)</label>
                 <div className="w-formrow">
@@ -133,55 +130,58 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
               </fieldset>
 
               <fieldset className="w-group">
-                <legend>Auto-Mix (beta)</legend>
+                <legend>Mixing</legend>
                 <label className="w-check">
-                  <input type="checkbox" checked={mix?.enabled ?? false} disabled={!mix || busy}
-                    onChange={e => applyMix({ enabled: e.target.checked })} />
-                  Enable intelligent auto-mix
+                  <input type="checkbox" checked={mix?.mixingAuto ?? false} disabled={!mix || busy}
+                    onChange={e => applyMix({ mixingAuto: e.target.checked })} />
+                  Auto-pick a mixing move per pair
                 </label>
                 <div className="w-muted" style={{ margin: '2px 0 6px' }}>
-                  Chooses a transition per pair — vocal-tease, bass-swap or bass-breakdown — and falls back to a plain crossfade. Runs on auto / queued transitions only; a manual Next stays plain. Applies immediately.
+                  When on, the Mixing section picks a move — vocal-tease, bass-swap or bass-breakdown — whenever the pair allows, and otherwise falls back to the chosen crossfade. Mirrors the deck panel&apos;s Mixing toggle; applies immediately.
                 </div>
+                <div className="w-mode-label" style={{ margin: '0 0 4px' }}>Mixing may use:</div>
                 <label className="w-check">
-                  <input type="checkbox" checked={mix?.vocalTease ?? false} disabled={!mix || busy || !mix.enabled}
+                  <input type="checkbox" checked={mix?.vocalTease ?? false} disabled={!mix || busy || !mix.mixingAuto}
                     onChange={e => applyMix({ vocalTease: e.target.checked })} />
                   Vocal tease — ride B&apos;s vocal in over A&apos;s instrumental tail
                 </label>
                 <label className="w-check">
-                  <input type="checkbox" checked={mix?.bassSwap ?? false} disabled={!mix || busy || !mix.enabled}
+                  <input type="checkbox" checked={mix?.bassSwap ?? false} disabled={!mix || busy || !mix.mixingAuto}
                     onChange={e => applyMix({ bassSwap: e.target.checked })} />
                   Bass swap — hand the low end from A to B on a downbeat
                 </label>
                 <label className="w-check">
-                  <input type="checkbox" checked={mix?.bassBreakdown ?? false} disabled={!mix || busy || !mix.enabled}
+                  <input type="checkbox" checked={mix?.bassBreakdown ?? false} disabled={!mix || busy || !mix.mixingAuto}
                     onChange={e => applyMix({ bassBreakdown: e.target.checked })} />
                   Bass breakdown — strip A to its bassline as B comes in
                 </label>
                 <div className="w-formrow">
                   <label>BPM tolerance:</label>
                   <input type="number" min={0} max={20} step={1} value={mix?.bpmTolerance ?? 5}
-                    disabled={!mix || busy || !mix.enabled}
+                    disabled={!mix || busy}
                     onChange={e => applyMix({ bpmTolerance: Number(e.target.value) })} style={{ width: 64 }} /> BPM
+                  <span className="w-muted">beat-match window (Crossfade &amp; Mixing)</span>
                 </div>
                 <div className="w-formrow">
                   <label>Deck B entry level:</label>
                   <input type="number" min={0} max={1} step={0.05} value={mix?.deckBEntryLevel ?? 0.8}
-                    disabled={!mix || busy || !mix.enabled}
+                    disabled={!mix || busy || !mix.mixingAuto}
                     onChange={e => applyMix({ deckBEntryLevel: Number(e.target.value) })} style={{ width: 64 }} />
                   <span className="w-muted">0–1, how loud B comes in</span>
                 </div>
                 <div className="w-formrow">
                   <label>Bass hold:</label>
                   <input type="number" min={0} max={32} step={1} value={mix?.bassHoldBars ?? 4}
-                    disabled={!mix || busy || !mix.enabled || !mix.bassSwap}
+                    disabled={!mix || busy || !mix.mixingAuto || !mix.bassSwap}
                     onChange={e => applyMix({ bassHoldBars: Number(e.target.value) })} style={{ width: 64 }} /> bars
                   <span className="w-muted">cut held before the bass-swap</span>
                 </div>
                 <div className="w-formrow">
                   <label>Max overlap:</label>
                   <input type="number" min={1} max={32} step={1} value={mix?.maxOverlapBars ?? 8}
-                    disabled={!mix || busy || !mix.enabled}
+                    disabled={!mix || busy}
                     onChange={e => applyMix({ maxOverlapBars: Number(e.target.value) })} style={{ width: 64 }} /> bars
+                  <span className="w-muted">caps a beat-matched crossfade</span>
                 </div>
               </fieldset>
 

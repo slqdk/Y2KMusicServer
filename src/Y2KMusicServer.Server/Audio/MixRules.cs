@@ -4,18 +4,21 @@ using Y2KMusicServer.Server.Data;
 namespace Y2KMusicServer.Server.Audio;
 
 /// <summary>
-/// Operator config for the auto-mix planner, persisted as JSON on disk
+/// Operator config for the transition planner, persisted as JSON on disk
 /// (<c>&lt;DataPath&gt;\mixrules.json</c>) rather than in the database — the
 /// no-migrations rule (persistence.md) keeps new settings off the schema.
 ///
-/// <c>Enabled</c> is the master switch the phase-4 executor will honour; the
-/// planner itself always produces a plan (so the dry-run can preview), gated
-/// only by the per-strategy toggles. Defaults match the legacy ±5 BPM and an
-/// 80% Deck B entry level, with the master OFF so nothing changes until opted in.
+/// Two section toggles drive the planner: <c>CrossfadeAuto</c> lets it auto-pick
+/// the best crossfade (Normal / Beatmatching / Beat drop) for the pair, and
+/// <c>MixingAuto</c> lets it auto-pick a musical move (vocal-tease / bass-swap /
+/// bass-breakdown), which takes priority when one fits. The per-move toggles gate
+/// which moves Mixing may use. Defaults: ±5 BPM, 80% Deck B entry level, Crossfade
+/// ON (a real crossfade out of the box) and Mixing OFF (opt in to the moves).
 /// </summary>
 public sealed class MixRules
 {
-    public bool Enabled { get; set; } = false;
+    public bool CrossfadeAuto { get; set; } = true;
+    public bool MixingAuto { get; set; } = false;
     public double BpmTolerance { get; set; } = 5.0;
     public bool VocalTease { get; set; } = true;
     public bool BassSwap { get; set; } = true;

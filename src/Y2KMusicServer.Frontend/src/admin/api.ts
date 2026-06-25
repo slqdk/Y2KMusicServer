@@ -85,12 +85,17 @@ export interface PlaybackStatus {
   nextStarted: boolean
   isoA: IsoCode
   isoB: IsoCode
-  plannedStrategy: MixStrategy | null
+  plannedTransition: Transition | null
   plannedReason: string | null
+  armedTransition: Transition | null
 }
 
-// Auto-mix transition strategies (mirrors the server MixStrategy enum names).
-export type MixStrategy = 'PlainCrossfade' | 'VocalTease' | 'BassSwap' | 'BassBreakdown'
+// Every transition the engine can run (mirrors the server Transition enum names).
+// The first three are crossfades (the Crossfade section); the last three are the
+// musical moves (the Mixing section).
+export type Transition =
+  | 'NormalCrossfade' | 'BeatmatchingCrossfade' | 'BeatDropCrossfade'
+  | 'VocalTease' | 'BassSwap' | 'BassBreakdown'
 
 export interface PlaylistItem {
   id: number
@@ -197,9 +202,10 @@ export const pauseDeckB = () => post('/api/admin/playback/pause-b')
 export const nudgeDeckB = (ms: number) => post(`/api/admin/playback/nudge-b?ms=${ms}`)
 export const ejectDeckB = () => post('/api/admin/playback/eject-b')
 export const crossfadeNow = () => post('/api/admin/playback/crossfade')
-// Force a specific auto-mix strategy now (operator test buttons).
-export const forceMix = (strategy: MixStrategy) =>
-  post(`/api/admin/playback/mix?strategy=${strategy}`)
+// Arm a specific transition for the NEXT A→B crossfade only (the force buttons).
+// Arming the same one again disarms it; it fires once, then clears back to auto.
+export const armTransition = (type: Transition) =>
+  post(`/api/admin/playback/arm?type=${type}`)
 
 // Per-deck EQ isolator (DJ-mixer style — Bass = low-pass, Vocal = centre-band).
 export const setIsoA = (mode: Iso) => post(`/api/admin/playback/iso-a?mode=${mode}`)
@@ -307,8 +313,6 @@ export const getAnalyzeStatus = () => req<AnalyzeStatus>('/api/admin/analyze/sta
 
 // ── General settings ────────────────────────────────────────────────────
 export interface SettingsDto {
-  smartMix: boolean
-  smartBeatFader: boolean
   nextTriggerPct: number
   nextFadeSeconds: number
   autoDj: boolean
@@ -326,8 +330,6 @@ export interface SettingsDto {
   debugLogging: boolean
 }
 export interface SettingsUpdate {
-  smartMix?: boolean
-  smartBeatFader?: boolean
   nextTriggerPct?: number
   nextFadeSeconds?: number
   normalizeEnabled?: boolean
@@ -346,7 +348,8 @@ export const putSettings = (u: SettingsUpdate) =>
 
 // ── Auto-mix rules (mixrules.json — a separate store; applies immediately) ──
 export interface MixRulesDto {
-  enabled: boolean
+  crossfadeAuto: boolean
+  mixingAuto: boolean
   bpmTolerance: number
   vocalTease: boolean
   bassSwap: boolean

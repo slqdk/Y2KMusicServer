@@ -4,13 +4,19 @@ import { fmtTime, isoFromCode, type Iso } from './api'
 import type { Live } from './useHub'
 import BeatClock from './BeatClock'
 
-// Human-readable names for the auto-mix strategies (server enum -> label).
-const MIX_LABEL: Record<api.MixStrategy, string> = {
-  PlainCrossfade: 'Plain crossfade',
+// Human-readable names for every transition (server enum -> label, word-for-word).
+const TRANSITION_LABEL: Record<api.Transition, string> = {
+  NormalCrossfade: 'Normal Crossfade',
+  BeatmatchingCrossfade: 'Beatmatching Crossfade',
+  BeatDropCrossfade: 'Beat drop Crossfade',
   VocalTease: 'Vocal tease',
   BassSwap: 'Bass swap',
   BassBreakdown: 'Bass breakdown',
 }
+
+// The two control sections, each with its three functions (force = arm one).
+const CROSSFADES: api.Transition[] = ['NormalCrossfade', 'BeatmatchingCrossfade', 'BeatDropCrossfade']
+const MOVES: api.Transition[] = ['VocalTease', 'BassSwap', 'BassBreakdown']
 
 // Album art for the on-air track (Deck A); placeholder glyph when none / 404.
 function CoverArt({ trackId }: { trackId: number | null }) {
@@ -59,15 +65,13 @@ function IsoButtons(
   )
 }
 
-export type MixModes = { smartMix: boolean; smartBeatFader: boolean; autoMix: boolean }
-
 export default function DeckPanel(
-  { live, status, refresh, modes, onToggleMode }: {
+  { live, status, refresh, mixRules, onToggleSection }: {
     live: Live
     status: api.PlaybackStatus | null
     refresh: () => void
-    modes: MixModes | null
-    onToggleMode: (m: keyof MixModes) => Promise<void> | void
+    mixRules: api.MixRulesDto | null
+    onToggleSection: (section: 'crossfadeAuto' | 'mixingAuto') => Promise<void> | void
   }
 ) {
   const isoA = isoFromCode(status?.isoA)
@@ -115,9 +119,13 @@ export default function DeckPanel(
   const canIsoB = bId != null && !busy
   const bTag = bId == null ? 'EMPTY' : crossfading ? 'MIXING' : bStarted ? 'PLAYING' : 'LOADED'
 
-  // Auto-mix strategy planned for the next transition (or running during a mix).
-  const planned = status?.plannedStrategy ?? null
-  const plannedLabel = planned ? MIX_LABEL[planned] : '—'
+  // The transition planned for the next crossfade (or running during a mix), and
+  // the operator's one-shot armed force (if any). Arming is allowed whenever a
+  // track is on air — it fires on the next A→B (manual or auto), then clears.
+  const planned = status?.plannedTransition ?? null
+  const plannedLabel = planned ? TRANSITION_LABEL[planned] : '—'
+  const armed = status?.armedTransition ?? null
+  const canArm = aId != null && !busy
 
   return (
     <div className="w-panel w-raised w-deckpanel">
@@ -170,35 +178,49 @@ export default function DeckPanel(
         </div>
       </div>
 
-      {/* Mixing modes — persisted toggles, mirror the Settings dialog. */}
+      {/* Crossfade section — Auto picks the best crossfade for the pair (Normal is
+          the floor). Each Force button ARMS that crossfade for the next A→B only. */}
       <div className="w-mode-bar">
-        <span className="w-mode-label">Modes:</span>
-        <button className={`w-btn w-iso ${modes?.smartMix ? 'w-iso-on' : ''}`}
-          title="Smart Mix — true beat-matched crossfade instead of a plain fade"
-          disabled={modes == null || busy} onClick={() => run(() => Promise.resolve(onToggleMode('smartMix')))}>
-          Smart Mix</button>
-        <button className={`w-btn w-iso ${modes?.smartBeatFader ? 'w-iso-on' : ''}`}
-          title="SmartBeat Fader — hold B silent until A's kick, then drop B in on the beat"
-          disabled={modes == null || busy} onClick={() => run(() => Promise.resolve(onToggleMode('smartBeatFader')))}>
-          SmartBeat</button>
-        <button className={`w-btn w-iso ${modes?.autoMix ? 'w-iso-on' : ''}`}
-          title="Intelligent auto-mix — choose vocal-tease / bass-swap / bass-breakdown per pair on auto transitions"
-          disabled={modes == null || busy} onClick={() => run(() => Promise.resolve(onToggleMode('autoMix')))}>
-          Auto-Mix</button>
+        <span className="w-sect-label">Crossfade</span>
+        <button className={`w-btn w-iso ${mixRules?.crossfadeAuto ? 'w-iso-on' : ''}`}
+          title="Auto-pick the best crossfade (Normal / Beatmatching / Beat drop) for each pair"
+          disabled={mixRules == null || busy}
+          onClick={() => run(() => Promise.resolve(onToggleSection('crossfadeAuto')))}>Auto</button>
+        <span className="w-mode-label">Force:</span>
+        {CROSSFADES.map(t => (
+          <button key={t} className={`w-btn w-iso ${armed === t ? 'w-iso-on' : ''}`}
+            title={`Arm ${TRANSITION_LABEL[t]} for the next A→B (click again to disarm)`}
+            disabled={!canArm} onClick={() => run(() => api.armTransition(t))}>
+            {TRANSITION_LABEL[t]}</button>
+        ))}
       </div>
 
+      {/* Mixing section — Auto picks a musical move when the pair allows it,
+          otherwise the Crossfade section's pick. Each Force button ARMS that move. */}
+      <div className="w-mode-bar">
+        <span className="w-sect-label">Mixing</span>
+        <button className={`w-btn w-iso ${mixRules?.mixingAuto ? 'w-iso-on' : ''}`}
+          title="Auto-pick a move (Vocal tease / Bass swap / Bass breakdown) when the music allows"
+          disabled={mixRules == null || busy}
+          onClick={() => run(() => Promise.resolve(onToggleSection('mixingAuto')))}>Auto</button>
+        <span className="w-mode-label">Force:</span>
+        {MOVES.map(t => (
+          <button key={t} className={`w-btn w-iso ${armed === t ? 'w-iso-on' : ''}`}
+            title={`Arm ${TRANSITION_LABEL[t]} for the next A→B (click again to disarm)`}
+            disabled={!canArm} onClick={() => run(() => api.armTransition(t))}>
+            {TRANSITION_LABEL[t]}</button>
+        ))}
+      </div>
+
+      {/* Crossfade bar — fire the manual A→B now; the armed transition (if any)
+          fires on it. "Next:" names exactly what the next transition will do. */}
       <div className="w-xfade-bar">
         <button className="w-btn w-primary" disabled={!canCrossfade} onClick={() => run(api.crossfadeNow)}>
           Crossfade A → B
         </button>
-        <button className="w-btn" title="Force a vocal-tease transition now (test)" disabled={!canCrossfade}
-          onClick={() => run(() => api.forceMix('VocalTease'))}>Vocal Tease</button>
-        <button className="w-btn" title="Force a bass-swap transition now (test)" disabled={!canCrossfade}
-          onClick={() => run(() => api.forceMix('BassSwap'))}>Bass Swap</button>
-        <button className="w-btn" title="Force a bass-breakdown transition now (test)" disabled={!canCrossfade}
-          onClick={() => run(() => api.forceMix('BassBreakdown'))}>Bass Breakdown</button>
         <span className="w-xfade-plan" title={status?.plannedReason ?? ''}>
-          {crossfading ? 'Mixing: ' : 'Next mix: '}<b>{plannedLabel}</b>
+          {crossfading ? 'Mixing: ' : 'Next: '}<b>{plannedLabel}</b>
+          {armed && !crossfading ? ' (armed)' : ''}
         </span>
         <span style={{ flex: 1 }} />
         <span className="w-xfade-state">

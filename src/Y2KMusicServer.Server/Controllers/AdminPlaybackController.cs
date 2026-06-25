@@ -90,18 +90,19 @@ public sealed class AdminPlaybackController : ControllerBase
             ? Ok(_engine.GetStatus())
             : Conflict(new { error = "nothing cued on Deck B, or already crossfading" });
 
-    /// <summary>Operator-forced crossfade using a specific auto-mix strategy, for
-    /// testing each transition type: ?strategy=PlainCrossfade|VocalTease|BassSwap|
-    /// BassBreakdown. Bypasses the auto-selection and the master enable flag. 400
-    /// on an unknown strategy; 409 when there is nothing to mix.</summary>
-    [HttpPost("mix")]
-    public IActionResult Mix([FromQuery] string strategy)
+    /// <summary>Arm a specific transition for the NEXT A→B crossfade only (the
+    /// force buttons): ?type=NormalCrossfade|BeatmatchingCrossfade|BeatDropCrossfade|
+    /// VocalTease|BassSwap|BassBreakdown. Arming the same type again disarms it;
+    /// arming a different one replaces it. The armed transition overrides the
+    /// automatic pick and fires once on the next crossfade, then clears. 400 on an
+    /// unknown type. The returned status carries the armed transition.</summary>
+    [HttpPost("arm")]
+    public IActionResult Arm([FromQuery] string type)
     {
-        if (!Enum.TryParse<MixStrategy>(strategy, ignoreCase: true, out var s) || !Enum.IsDefined(s))
-            return BadRequest(new { error = "unknown strategy", strategy, allowed = Enum.GetNames<MixStrategy>() });
-        return _engine.ForceCrossfade(s)
-            ? Ok(_engine.GetStatus())
-            : Conflict(new { error = "nothing cued on Deck B, or already crossfading" });
+        if (!Enum.TryParse<Transition>(type, ignoreCase: true, out var t) || !Enum.IsDefined(t))
+            return BadRequest(new { error = "unknown transition", type, allowed = Enum.GetNames<Transition>() });
+        _engine.ArmTransition(t);
+        return Ok(_engine.GetStatus());
     }
 
     /// <summary>Set Deck A's EQ isolator: ?mode=none|bass|vocal|nobass.</summary>

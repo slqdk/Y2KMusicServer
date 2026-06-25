@@ -6,11 +6,11 @@ using Y2KMusicServer.Server.Data;
 namespace Y2KMusicServer.Server.Controllers;
 
 /// <summary>
-/// Auto-mix configuration and a dry-run planner. The rules persist to disk
+/// Transition configuration and a dry-run planner. The rules persist to disk
 /// (<c>mixrules.json</c>), not the schema. The plan endpoint reports which
-/// transition the planner WOULD choose for a pair and executes nothing — the
-/// crossfade path is untouched until the phase-4 executor lands. Strategy
-/// behaviour lives in audio-engine.md.
+/// transition the planner WOULD choose for a pair (under the current Crossfade
+/// and Mixing section toggles) and executes nothing. Transition behaviour lives
+/// in audio-engine.md.
 /// </summary>
 [ApiController]
 [Route("api/admin/mix")]
@@ -42,9 +42,9 @@ public sealed class AdminMixController : ControllerBase
 
     /// <summary>
     /// Dry-run: the transition the planner would pick for <c>from</c> → <c>to</c>,
-    /// building the structure caches on a miss. Plans regardless of the master
-    /// <c>Enabled</c> flag (so you can preview); per-strategy toggles still apply.
-    /// Executes nothing. 404 if either track is unknown.
+    /// building the structure caches on a miss. Reflects the current Crossfade and
+    /// Mixing section toggles (Normal Crossfade is the floor). Executes nothing.
+    /// 404 if either track is unknown.
     /// </summary>
     [HttpGet("plan")]
     public async Task<IActionResult> GetPlan([FromQuery] int fromId, [FromQuery] int toId, CancellationToken ct)
@@ -85,7 +85,8 @@ public sealed class AdminMixController : ControllerBase
         {
             from = new { a.Id, a.Title, a.Artist, bpm = a.Bpm },
             to = new { b.Id, b.Title, b.Artist, bpm = b.Bpm },
-            masterEnabled = rules.Enabled,
+            crossfadeAuto = rules.CrossfadeAuto,
+            mixingAuto = rules.MixingAuto,
             plan
         });
     }

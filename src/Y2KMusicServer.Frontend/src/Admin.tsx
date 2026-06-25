@@ -26,9 +26,8 @@ export default function Admin() {
   const [logOpen, setLogOpen] = useState(false)
   const [theme, setTheme] = useState<string>(readTheme)
   const [status, setStatus] = useState<api.PlaybackStatus | null>(null)
-  // Mixing modes shown as toggle buttons on the deck panel. Smart Mix / SmartBeat
-  // live in Settings; auto-mix Enabled lives in the (separate) mix-rules store.
-  const [settings, setSettings] = useState<api.SettingsDto | null>(null)
+  // The Crossfade and Mixing section toggles on the deck panel; both live in the
+  // (separate) mix-rules store, edited here and in the Settings dialog.
   const [mixRules, setMixRules] = useState<api.MixRulesDto | null>(null)
 
   useEffect(() => { try { localStorage.setItem('y2k-admin-theme', theme) } catch { /* ignore */ } }, [theme])
@@ -42,33 +41,21 @@ export default function Admin() {
     return () => clearInterval(id)
   }, [refreshStatus])
 
-  // Load the mixing-mode values (and refresh after the Settings dialog closes,
-  // since it edits the same Settings + mix-rules stores).
-  const refreshModes = useCallback(() => {
-    api.getSettings().then(setSettings).catch(() => {})
+  // Load the section toggles (and refresh after the Settings dialog closes, since
+  // it edits the same mix-rules store — the "Mixing may use" gates and params).
+  const refreshMixRules = useCallback(() => {
     api.getMixRules().then(setMixRules).catch(() => {})
   }, [])
-  useEffect(() => { refreshModes() }, [refreshModes])
+  useEffect(() => { refreshMixRules() }, [refreshMixRules])
 
-  // Flip one mixing mode and reflect the server's stored value. Smart Mix /
-  // SmartBeat are partial Settings PUTs; auto-mix re-PUTs the whole rules object.
-  const toggleMode = useCallback(async (mode: 'smartMix' | 'smartBeatFader' | 'autoMix') => {
+  // Flip one section toggle (Crossfade / Mixing) and reflect the server's stored
+  // value — both are fields on the mix-rules object, re-PUT as a whole.
+  const toggleSection = useCallback(async (section: 'crossfadeAuto' | 'mixingAuto') => {
+    if (!mixRules) return
     try {
-      if (mode === 'autoMix') {
-        if (!mixRules) return
-        setMixRules(await api.putMixRules({ ...mixRules, enabled: !mixRules.enabled }))
-      } else if (settings) {
-        const upd = mode === 'smartMix'
-          ? { smartMix: !settings.smartMix }
-          : { smartBeatFader: !settings.smartBeatFader }
-        setSettings(await api.putSettings(upd))
-      }
+      setMixRules(await api.putMixRules({ ...mixRules, [section]: !mixRules[section] }))
     } catch { /* surfaced by the toggle not changing */ }
-  }, [settings, mixRules])
-
-  const mixModes = settings && mixRules
-    ? { smartMix: settings.smartMix, smartBeatFader: settings.smartBeatFader, autoMix: mixRules.enabled }
-    : null
+  }, [mixRules])
 
   // "Play now" from a library row: if a track is on air and playing, cue the
   // chosen track onto Deck B and crossfade to it immediately; if nothing is
@@ -125,14 +112,14 @@ export default function Admin() {
         <LibraryBrowser scan={live.scan} analysis={live.analysis} onPlayNow={playNow} />
         <div className="w-right-col">
           <DeckPanel live={live} status={status} refresh={refreshStatus}
-            modes={mixModes} onToggleMode={toggleMode} />
+            mixRules={mixRules} onToggleSection={toggleSection} />
           <PlaylistPanel />
         </div>
       </div>
 
       {logOpen && <LogPanel live={live} onClose={() => setLogOpen(false)} />}
 
-      {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); refreshModes() }} />}
+      {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); refreshMixRules() }} />}
     </div>
   )
 }
