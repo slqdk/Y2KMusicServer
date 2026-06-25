@@ -282,6 +282,7 @@ public sealed class AudioEngine
         if (!File.Exists(next.FilePath)) return QueueResult.FileMissing;
 
         double configuredFade = settings.NextFadeSeconds;
+        var rules = MixRules.Load(_cfg);
 
         double outPoint, inPoint, fadeSec, score;
         bool beatAligned;
@@ -303,7 +304,8 @@ public sealed class AudioEngine
             var mp = MixAnalyser.AnalysePair(
                 fromPath, fromBpm, fromPhase,
                 next.FilePath, next.Bpm ?? 0, next.BeatPhaseOffsetSec ?? 0,
-                configuredFade, ct, smartMode: true);
+                configuredFade, ct, smartMode: true,
+                sameBars: rules.SameTempoBars, relatedBars: rules.RelatedTempoBars);
 
             if (mp.IsValid)
             {
@@ -358,7 +360,6 @@ public sealed class AudioEngine
         // back to a Normal Crossfade when neither section acts.
         MixPlan plan;
         {
-            var rules = MixRules.Load(_cfg);
             TrackStructureData? aStruct = TryStructure(fromId, fromPath);
             TrackStructureData? bStruct = TryStructure(next.Id, next.FilePath);
             var basePoints = new MixPoints
@@ -398,9 +399,21 @@ public sealed class AudioEngine
         {
             if (_deckA == null) { DisposeOffThread(deckB); return QueueResult.NoCurrent; }
 
+            double durA = _deckA.DurationSec;
+
+            // By-transition fade rule: a Normal Crossfade can't beat-align (there
+            // are no shared bars), so it's bounded by the operator's seconds cap
+            // and placed to land on A's end. Beat-matched crossfades and the moves
+            // keep their bar-based length from the analysis above.
+            if (plan.Strategy == Transition.NormalCrossfade && configuredFade > 0)
+            {
+                fadeSec = Math.Min(fadeSec, configuredFade);
+                if (durA > 0) outPoint = Math.Max(durA * 0.5, durA - fadeSec);
+            }
+
             double trigger = outPoint > 0
-                ? Math.Clamp(outPoint, 0, _deckA.DurationSec)
-                : _deckA.DurationSec * Math.Clamp(settings.NextTriggerPct / 100.0, 0.05, 0.99);
+                ? Math.Clamp(outPoint, 0, durA)
+                : durA * Math.Clamp(settings.NextTriggerPct / 100.0, 0.05, 0.99);
 
             oldPrepared = _prepared?.DeckB;
             _prepared = new PreparedNext

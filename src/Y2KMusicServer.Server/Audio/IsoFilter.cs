@@ -21,12 +21,17 @@
 //             An approximation, not isolation — true vocal stems are a later
 //             (offline analyze-pass) feature.
 //
+//  Mode changes are NOT an instant swap. The old and new stage are cross-blended
+//  over ModeBlendSec, so the band fades in/out — most importantly the bass on a
+//  swap rises/falls smoothly instead of clicking on. This applies to the
+//  auto-mix moves' isolator steps and the operator's manual toggles alike.
+//
 //  Thread model: the audio (pump) thread calls Read; the control thread calls
-//  SetMode. A mode change builds a brand-new immutable Stage and publishes it
-//  by a single volatile reference assignment. Only the audio thread mutates the
-//  BiQuad state, and only ever on the *current* Stage, so there is no
-//  cross-thread contention and no lock on the hot path. Rebuilding the filters
-//  on every change also means re-engaging a mode never clicks on stale state.
+//  SetMode. A mode change builds a brand-new immutable Stage (carrying the
+//  outgoing one as Prev) and publishes it by a single volatile reference
+//  assignment. The audio thread detects a fresh Stage by reference identity and
+//  drives the blend with counters it alone owns — so there is no cross-thread
+//  contention and no lock on the hot path.
 // ═══════════════════════════════════════════════════════════════════════════
 
 using NAudio.Dsp;
@@ -50,18 +55,30 @@ public sealed class IsoFilter : ISampleProvider
 
     private const float Q = 0.7071f;          // Butterworth (maximally flat) sections.
 
+    // How long a mode change is cross-blended. ~0.4 s reads as a quick fade, not
+    // a click — tune here. (Per-deck; applies to moves and manual toggles.)
+    private const float ModeBlendSec = 0.4f;
+
     private readonly ISampleProvider _source;
     private readonly int _sampleRate;
     private readonly int _channels;
+    private readonly int _blendSamples;       // interleaved samples in a blend.
 
     private volatile Stage _stage;
+
+    // Audio-thread-only blend state — only Read touches these, so no locking.
+    private Stage? _lastStage;
+    private int _blendPos;                     // interleaved samples into the blend.
+    private float[] _scratch = Array.Empty<float>();
 
     public IsoFilter(ISampleProvider source)
     {
         _source = source ?? throw new ArgumentNullException(nameof(source));
         _sampleRate = source.WaveFormat.SampleRate;
         _channels = source.WaveFormat.Channels;
-        _stage = new Stage(IsoMode.None, _sampleRate, _channels);
+        _blendSamples = Math.Max(1, (int)(_sampleRate * ModeBlendSec)) * _channels;
+        _stage = new Stage(IsoMode.None, _sampleRate, _channels, null);
+        _lastStage = _stage;
     }
 
     public WaveFormat WaveFormat => _source.WaveFormat;
@@ -69,12 +86,15 @@ public sealed class IsoFilter : ISampleProvider
     /// <summary>The active mode. Read freely from any thread.</summary>
     public IsoMode Mode => _stage.Mode;
 
-    /// <summary>Switch the active mode. A single reference assignment — the audio
-    /// thread picks up the new Stage on its next Read. No-op if unchanged.</summary>
+    /// <summary>Switch the active mode. Publishes a new Stage (carrying the
+    /// current one as Prev for the blend) by a single reference assignment; the
+    /// audio thread picks it up and cross-blends on its next Reads. No-op if
+    /// unchanged.</summary>
     public void SetMode(IsoMode mode)
     {
-        if (mode == _stage.Mode) return;
-        _stage = new Stage(mode, _sampleRate, _channels);
+        var cur = _stage;
+        if (mode == cur.Mode) return;
+        _stage = new Stage(mode, _sampleRate, _channels, cur);
     }
 
     public int Read(float[] buffer, int offset, int count)
@@ -83,23 +103,59 @@ public sealed class IsoFilter : ISampleProvider
         if (read <= 0) return read;
 
         var s = _stage; // single volatile read; this whole block sees one Stage
-        if (s.Mode == IsoMode.None) return read;
+        if (!ReferenceEquals(s, _lastStage)) { _lastStage = s; _blendPos = 0; }
+
+        bool blending = s.Prev != null && _blendPos < _blendSamples;
+
+        if (s.Mode == IsoMode.None && !blending) return read; // true bypass, zero cost
 
         int ch = _channels;
         int frames = read / ch;
 
-        if (s.Mode == IsoMode.Bass || s.Mode == IsoMode.NoBass)
+        if (blending)
         {
-            // Per-channel cascade — low-pass for Bass, high-pass for NoBass.
+            // Run the input through BOTH the outgoing and incoming stage, then
+            // cross-blend prev→new across ModeBlendSec. Prev's filters carry on
+            // their live state; the new stage's filters warm up over the blend.
+            if (_scratch.Length < read) _scratch = new float[read];
+            Array.Copy(buffer, offset, _scratch, 0, read);
+            Apply(s.Prev!, _scratch, 0, frames, ch); // previous band → _scratch
+            Apply(s, buffer, offset, frames, ch);     // new band → buffer
+
+            int total = _blendSamples;
             for (int f = 0; f < frames; f++)
             {
+                float t = MathF.Min(1f, (_blendPos + f * ch) / (float)total);
                 int b = offset + f * ch;
+                int p = f * ch;
+                for (int c = 0; c < ch; c++)
+                    buffer[b + c] = _scratch[p + c] * (1f - t) + buffer[b + c] * t;
+            }
+            _blendPos += read;
+            return read;
+        }
+
+        Apply(s, buffer, offset, frames, ch);
+        return read;
+    }
+
+    /// <summary>Apply a stage's band filter in place to <paramref name="frames"/>
+    /// interleaved frames at <paramref name="off"/>. None is a no-op (dry).</summary>
+    private static void Apply(Stage s, float[] buf, int off, int frames, int ch)
+    {
+        if (s.Mode == IsoMode.None) return;
+
+        if (s.Mode == IsoMode.Bass || s.Mode == IsoMode.NoBass)
+        {
+            for (int f = 0; f < frames; f++)
+            {
+                int b = off + f * ch;
                 for (int c = 0; c < ch; c++)
                 {
-                    float x = buffer[b + c];
+                    float x = buf[b + c];
                     var sections = s.Cascade[c];
                     for (int i = 0; i < sections.Length; i++) x = sections[i].Transform(x);
-                    buffer[b + c] = x;
+                    buf[b + c] = x;
                 }
             }
         }
@@ -107,24 +163,25 @@ public sealed class IsoFilter : ISampleProvider
         {
             for (int f = 0; f < frames; f++)
             {
-                int b = offset + f * ch;
+                int b = off + f * ch;
                 float mono = 0f;
-                for (int c = 0; c < ch; c++) mono += buffer[b + c];
+                for (int c = 0; c < ch; c++) mono += buf[b + c];
                 mono /= ch;
                 for (int i = 0; i < s.VHp.Length; i++) mono = s.VHp[i].Transform(mono);
                 mono = s.VLp.Transform(mono);
-                for (int c = 0; c < ch; c++) buffer[b + c] = mono;
+                for (int c = 0; c < ch; c++) buf[b + c] = mono;
             }
         }
-        return read;
     }
 
-    /// <summary>Immutable per-mode filter set. Constructed fresh on every mode
-    /// change; the audio thread is the only mutator of the BiQuad state and only
-    /// touches the current Stage, so no locking is needed on Read.</summary>
+    /// <summary>Immutable per-mode filter set, plus the outgoing stage (Prev) for
+    /// the cross-blend. Constructed fresh on every mode change; the audio thread
+    /// is the only mutator of the BiQuad state and only touches the current and
+    /// previous Stage during a blend, so no locking is needed on Read.</summary>
     private sealed class Stage
     {
         public readonly IsoMode Mode;
+        public readonly Stage? Prev;
 
         // Bass / NoBass: one low-pass (Bass) or high-pass (NoBass) cascade per
         // channel ([channel][section]).
@@ -134,9 +191,10 @@ public sealed class IsoFilter : ISampleProvider
         public readonly BiQuadFilter[] VHp = Array.Empty<BiQuadFilter>();
         public readonly BiQuadFilter VLp = null!;
 
-        public Stage(IsoMode mode, int sampleRate, int channels)
+        public Stage(IsoMode mode, int sampleRate, int channels, Stage? prev)
         {
             Mode = mode;
+            Prev = prev;
             if (mode == IsoMode.Bass || mode == IsoMode.NoBass)
             {
                 bool lowPass = mode == IsoMode.Bass;
@@ -157,7 +215,7 @@ public sealed class IsoFilter : ISampleProvider
                     VHp[i] = BiQuadFilter.HighPassFilter(sampleRate, VocalHpHz, Q);
                 VLp = BiQuadFilter.LowPassFilter(sampleRate, VocalLpHz, Q);
             }
-            // None: no filters; Read bypasses before touching any of these.
+            // None: no filters; Read bypasses (or blends dry) before touching these.
         }
     }
 }

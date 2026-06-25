@@ -123,9 +123,25 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
                     onChange={e => patch({ nextTriggerPct: Number(e.target.value) })} style={{ width: 64 }} /> %
                 </div>
                 <div className="w-formrow">
-                  <label>Fade duration:</label>
+                  <label>Normal crossfade:</label>
                   <input type="number" min={0} max={30} value={s.nextFadeSeconds}
                     onChange={e => patch({ nextFadeSeconds: Number(e.target.value) })} style={{ width: 64 }} /> sec
+                  <span className="w-muted">caps a Normal (un-aligned) crossfade</span>
+                </div>
+                <div className="w-formrow">
+                  <label>Beat-matched (same tempo):</label>
+                  <input type="number" min={1} max={16} step={1} value={mix?.sameTempoBars ?? 4}
+                    disabled={!mix || busy}
+                    onChange={e => applyMix({ sameTempoBars: Number(e.target.value) })} style={{ width: 64 }} /> bars
+                </div>
+                <div className="w-formrow">
+                  <label>Beat-matched (related tempo):</label>
+                  <input type="number" min={1} max={16} step={1} value={mix?.relatedTempoBars ?? 2}
+                    disabled={!mix || busy}
+                    onChange={e => applyMix({ relatedTempoBars: Number(e.target.value) })} style={{ width: 64 }} /> bars
+                </div>
+                <div className="w-muted" style={{ marginTop: 2 }}>
+                  Normal crossfades use the seconds cap; beat-matched crossfades and the moves use bars.
                 </div>
               </fieldset>
 

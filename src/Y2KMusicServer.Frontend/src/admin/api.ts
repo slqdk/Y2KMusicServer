@@ -360,6 +360,8 @@ export interface MixRulesDto {
   deckBEntryLevel: number
   bassHoldBars: number
   maxOverlapBars: number
+  sameTempoBars: number
+  relatedTempoBars: number
 }
 export const getMixRules = () => req<MixRulesDto>('/api/admin/mix/rules')
 // PUT replaces the whole object (the server clamps and returns what it stored).

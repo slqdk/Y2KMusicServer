@@ -27,6 +27,11 @@ public sealed class MixRules
     public int BassHoldBars { get; set; } = 4;
     public int MaxOverlapBars { get; set; } = 8;
 
+    // Beat-matched crossfade length, in bars, by tempo relationship (the Normal
+    // crossfade uses a seconds cap instead — see Settings.NextFadeSeconds).
+    public int SameTempoBars { get; set; } = 4;
+    public int RelatedTempoBars { get; set; } = 2;
+
     private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
 
     /// <summary>Reads the rules from disk, or returns defaults on a miss / parse
@@ -68,6 +73,8 @@ public sealed class MixRules
         r.DeckBEntryLevel = Clamp(r.DeckBEntryLevel, 0, 1);
         r.BassHoldBars = (int)Clamp(r.BassHoldBars, 0, 32);
         r.MaxOverlapBars = (int)Clamp(r.MaxOverlapBars, 1, 64);
+        r.SameTempoBars = (int)Clamp(r.SameTempoBars, 1, 16);
+        r.RelatedTempoBars = (int)Clamp(r.RelatedTempoBars, 1, 16);
         return r;
     }
 

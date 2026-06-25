@@ -32,12 +32,25 @@ public sealed class AdminMixController : ControllerBase
     public IActionResult GetRules() => Ok(MixRules.Load(_cfg));
 
     /// <summary>Replace the auto-mix rules. Values are clamped to sane ranges;
-    /// returns what was stored.</summary>
+    /// returns what was stored. Clears the per-pair MixCache, since the crossfade
+    /// bar counts feed the cached fade length (it rebuilds lazily on next play).</summary>
     [HttpPut("rules")]
-    public IActionResult PutRules([FromBody] MixRules? rules)
+    public async Task<IActionResult> PutRules([FromBody] MixRules? rules, CancellationToken ct)
     {
         if (rules is null) return BadRequest(new { error = "body required" });
-        return Ok(MixRules.Save(_cfg, rules));
+        var saved = MixRules.Save(_cfg, rules);
+
+        try
+        {
+            await using var db = await _dbf.CreateDbContextAsync(ct);
+            await db.MixCache.ExecuteDeleteAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex, "MixCache clear after rules save failed");
+        }
+
+        return Ok(saved);
     }
 
     /// <summary>
@@ -60,22 +73,25 @@ public sealed class AdminMixController : ControllerBase
         try { aStruct = await Task.Run(() => TrackStructure.GetOrBuild(_cfg, a.Id, a.FilePath), ct); } catch { }
         try { bStruct = await Task.Run(() => TrackStructure.GetOrBuild(_cfg, b.Id, b.FilePath), ct); } catch { }
 
-        // Base mix points. smartMode → the fade length is BPM-derived and the
-        // passed 6 s is ignored; it only influences the out-point ceiling.
+        var rules = MixRules.Load(_cfg);
+
+        // Base mix points. smartMode → the fade length is BPM-derived (using the
+        // operator's bar counts) and the passed 6 s is ignored; it only influences
+        // the out-point ceiling.
         MixPoints basePoints;
         try
         {
             basePoints = await Task.Run(() => MixAnalyser.AnalysePair(
                 a.FilePath, a.Bpm ?? 0, a.BeatPhaseOffsetSec ?? 0,
                 b.FilePath, b.Bpm ?? 0, b.BeatPhaseOffsetSec ?? 0,
-                6.0, ct, smartMode: true), ct);
+                6.0, ct, smartMode: true,
+                sameBars: rules.SameTempoBars, relatedBars: rules.RelatedTempoBars), ct);
         }
         catch
         {
             basePoints = new MixPoints();
         }
 
-        var rules = MixRules.Load(_cfg);
         var plan = MixPlanner.Plan(basePoints, a.Bpm, b.Bpm, b.BeatPhaseOffsetSec, aStruct, bStruct, rules);
 
         _log.LogInformation("MixPlan {From}->{To}: {Strategy} | {Reason}",

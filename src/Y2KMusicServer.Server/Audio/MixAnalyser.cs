@@ -36,10 +36,13 @@ public static class MixAnalyser
     private const int WindowSamps = SampleRate * WindowMs / 1000;
 
     /// <summary>
-    /// Ideal fade overlap from the BPM relationship: same tempo → 4 bars;
-    /// related tempo → 2 bars of the slower; unknown/very different → 3 s.
+    /// Ideal fade overlap from the BPM relationship: same tempo → sameBars bars;
+    /// related tempo → relatedBars bars of the slower; unknown/very different →
+    /// 3 s. The bar counts default to 4 / 2 and are operator-configurable
+    /// (mixrules.json); they govern the beat-matched crossfades and the moves —
+    /// the Normal crossfade is bounded by a seconds cap instead.
     /// </summary>
-    public static double SmartFadeDuration(double bpmA, double bpmB)
+    public static double SmartFadeDuration(double bpmA, double bpmB, int sameBars = 4, int relatedBars = 2)
     {
         if (bpmA > 30 && bpmB > 30)
         {
@@ -49,13 +52,13 @@ public static class MixAnalyser
             if (ratio >= 0.95)
             {
                 double beatSec = 60.0 / bpmA;
-                return beatSec * 4 * 4; // 4 bars
+                return beatSec * 4 * sameBars; // sameBars bars
             }
             if (ratio >= 0.50)
             {
                 double slowerBpm = Math.Min(bpmA, bpmB);
                 double beatSec = 60.0 / slowerBpm;
-                return beatSec * 4 * 2; // 2 bars
+                return beatSec * 4 * relatedBars; // relatedBars bars of the slower
             }
         }
         return 3.0;
@@ -66,11 +69,12 @@ public static class MixAnalyser
         string pathB, double bpmB, double phaseB,
         double fadeDuration,
         CancellationToken ct,
-        bool smartMode = false)
+        bool smartMode = false,
+        int sameBars = 4, int relatedBars = 2)
     {
         try
         {
-            double fd = smartMode ? SmartFadeDuration(bpmA, bpmB) : fadeDuration;
+            double fd = smartMode ? SmartFadeDuration(bpmA, bpmB, sameBars, relatedBars) : fadeDuration;
 
             float[]? energyA = null, energyB = null;
             double durA = 0, durB = 0;
