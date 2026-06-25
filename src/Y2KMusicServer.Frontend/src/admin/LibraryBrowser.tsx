@@ -7,7 +7,9 @@ import PropertiesDialog from './PropertiesDialog'
 import ScanBar from './ScanBar'
 import AnalyzeBar from './AnalyzeBar'
 
-const PAGE = 50
+// The library loads in full and scrolls; this take covers any realistic library
+// in one request (the server clamps it to its own ceiling).
+const LOAD_ALL = 100000
 
 // Right-click menu geometry, used only to keep it inside the viewport.
 const MENU_W = 184
@@ -20,7 +22,6 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
   const [catErr, setCatErr] = useState<string | null>(null)
   const [q, setQ] = useState('')
   const [categoryId, setCategoryId] = useState<number | null>(null)
-  const [skip, setSkip] = useState(0)
   const [page, setPage] = useState<api.TracksPage | null>(null)
   const [selId, setSelId] = useState<number | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
@@ -32,15 +33,15 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
   const refreshCats = () => api.getCategories().then(setCats).catch(() => {})
   useEffect(() => { refreshCats() }, [])
 
-  const loadTracks = (qv: string, cat: number | null, sk: number) =>
-    api.getTracks({ q: qv, categoryId: cat, skip: sk, take: PAGE }).then(setPage).catch(() => setPage(null))
+  const loadTracks = (qv: string, cat: number | null) =>
+    api.getTracks({ q: qv, categoryId: cat, take: LOAD_ALL }).then(setPage).catch(() => setPage(null))
 
-  // Debounced search; immediate on filter/page change.
+  // Debounced search; immediate on filter change.
   useEffect(() => {
     window.clearTimeout(debounce.current)
-    debounce.current = window.setTimeout(() => loadTracks(q, categoryId, skip), 250)
+    debounce.current = window.setTimeout(() => loadTracks(q, categoryId), 250)
     return () => window.clearTimeout(debounce.current)
-  }, [q, categoryId, skip])
+  }, [q, categoryId])
 
   // Dismiss the row menu on any click, scroll, resize, or Escape. The menu
   // item's own onClick runs first (it bubbles to the React root before this
@@ -97,7 +98,7 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
   // the row shows the new values.
   const rescanOne = (id: number) => rowAct(id, async () => {
     await api.rescanTrack(id)
-    await loadTracks(q, categoryId, skip)
+    await loadTracks(q, categoryId)
   })
 
   const openMenu = (e: ReactMouseEvent, t: api.TrackDto) => {
@@ -110,8 +111,6 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
 
   const total = page?.total ?? 0
   const items = page?.items ?? []
-  const from = total === 0 ? 0 : skip + 1
-  const to = Math.min(skip + PAGE, total)
 
   return (
     <div className="w-panel w-raised w-libpanel">
@@ -144,14 +143,14 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
       </div>
       {catErr && <div className="w-err" style={{ marginTop: 4 }}>{catErr}</div>}
 
-      <ScanBar live={scan} onComplete={() => { refreshCats(); loadTracks(q, categoryId, skip) }} />
-      <AnalyzeBar live={analysis} onComplete={() => loadTracks(q, categoryId, skip)} />
+      <ScanBar live={scan} onComplete={() => { refreshCats(); loadTracks(q, categoryId) }} />
+      <AnalyzeBar live={analysis} onComplete={() => loadTracks(q, categoryId)} />
 
       {/* Search */}
       <div className="w-toolbar">
         <label>Search:</label>
         <input type="search" value={q} style={{ flex: 1 }}
-          onChange={e => { setSkip(0); setQ(e.target.value) }}
+          onChange={e => setQ(e.target.value)}
           placeholder="title / artist / album" />
         {categoryId != null && (
           <button className="w-btn" onClick={() => setCategoryId(null)}>
@@ -192,14 +191,6 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
         </table>
       </div>
 
-      {/* Paging */}
-      <div className="w-toolbar">
-        <button className="w-btn" disabled={skip === 0} onClick={() => setSkip(Math.max(0, skip - PAGE))}>‹ Prev</button>
-        <button className="w-btn" disabled={to >= total} onClick={() => setSkip(skip + PAGE)}>Next ›</button>
-        <span className="w-spacer" />
-        <span className="w-muted">{from}–{to} of {total}</span>
-      </div>
-
       {menu && (
         <ul className="w-ctxmenu" role="menu" style={{ left: menu.x, top: menu.y }}
           onContextMenu={e => e.preventDefault()}>
@@ -221,7 +212,7 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
         <CategoryDialog
           category={dialogCat}
           onClose={() => setDialogCat(null)}
-          onChanged={() => { refreshCats(); loadTracks(q, categoryId, skip) }}
+          onChanged={() => { refreshCats(); loadTracks(q, categoryId) }}
         />
       )}
 

@@ -23,6 +23,10 @@ public sealed class AdminLibraryController : ControllerBase
         _cfg = cfg;
     }
 
+    // The library browser loads the whole library in one request and scrolls it,
+    // so this cap is only a guard against a pathological take= value.
+    private const int MaxTake = 100_000;
+
     [HttpGet("stats")]
     public async Task<object> Stats(CancellationToken ct)
     {
@@ -41,10 +45,11 @@ public sealed class AdminLibraryController : ControllerBase
     }
 
     /// <summary>
-    /// Paged track listing for the admin library browser. Optional free-text
+    /// Track listing for the admin library browser. Optional free-text
     /// <paramref name="q"/> (title / artist / album, case-insensitive LIKE) and
     /// <paramref name="categoryId"/> filter. <paramref name="take"/> is clamped
-    /// to 1..500.
+    /// to 1..<see cref="MaxTake"/>; the browser requests the whole library in one
+    /// call and scrolls it.
     /// </summary>
     [HttpGet("tracks")]
     public async Task<object> Tracks(
@@ -54,7 +59,7 @@ public sealed class AdminLibraryController : ControllerBase
         [FromQuery] int take = 100,
         CancellationToken ct = default)
     {
-        take = Math.Clamp(take, 1, 500);
+        take = Math.Clamp(take, 1, MaxTake);
         skip = Math.Max(0, skip);
 
         await using var db = await _dbf.CreateDbContextAsync(ct);

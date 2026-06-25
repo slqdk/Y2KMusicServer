@@ -20,10 +20,10 @@ export default function PlaylistPanel() {
   }
 
   return (
-    <div className="w-panel w-raised">
+    <div className="w-panel w-raised w-playlistpanel">
       <div className="w-panelhead">Playlist</div>
       <RequestsPanel onAccepted={refreshList} />
-      <div className="w-listwrap w-sunken" style={{ height: 220 }}>
+      <div className="w-listwrap w-sunken" style={{ flex: 1, minHeight: 0 }}>
         <table className="w-table">
           <thead>
             <tr><th>#</th><th>Title</th><th>Artist</th><th className="w-num">Dur</th><th>Added by</th><th></th></tr>

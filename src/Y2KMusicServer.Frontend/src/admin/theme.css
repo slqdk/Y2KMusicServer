@@ -523,7 +523,10 @@
 
 /* ── Deck panel (dual-deck beat-clocks, above the playlist) ─────────────── */
 .w-right-col { display: flex; flex-direction: column; min-width: 0; }
-.w-deckpanel { display: flex; flex-direction: column; gap: 6px; }
+/* The deck panel keeps its content height; the playlist grows to fill the rest
+   of the fixed-height right column, and its queue scrolls inside it. */
+.w-playlistpanel { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; }
+.w-deckpanel { display: flex; flex-direction: column; gap: 6px; flex: 0 0 auto; }
 .w-deckpanel-lane { display: flex; flex-direction: column; gap: 4px; }
 .w-deck-ctrls { display: flex; align-items: center; gap: 4px; }
 .w-deck-clockrow { display: flex; gap: 6px; align-items: center; }
@@ -540,7 +543,10 @@
 .w-vvu-track { position: relative; width: 9px; height: 100%; background: #03281c; box-shadow: inset 1px 1px #000; overflow: hidden; }
 .w-vvu-fill { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(0deg, #21d07a 0%, #21d07a 60%, #e3d046 80%, #e0503a 100%); transition: height 60ms linear; }
 /* On-air track + master transport strip, atop the deck lanes */
-.w-npbar { margin-bottom: 6px; }
+.w-npbar { margin-bottom: 6px; align-items: stretch; }
+/* Bigger on-air album art so the Now-Playing deck reads at a glance. Scoped to
+   the on-air strip — the listener page and other covers are unaffected. */
+.w-npbar .w-cover { width: 120px; height: 120px; }
 .w-np-transport { margin-left: auto; display: flex; flex-direction: column; justify-content: center; gap: 6px; min-width: 300px; }
 .w-np-transport .w-transport { margin-top: 0; }
 .w-iso-group { display: flex; gap: 4px; }
