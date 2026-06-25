@@ -35,6 +35,8 @@ export default function CategoryDialog({ category, onClose, onChanged }:
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
   const [browsing, setBrowsing] = useState(false)
+  const [clearConfirm, setClearConfirm] = useState(false)
+  const [cleared, setCleared] = useState<number | null>(null)
 
   const refreshFolders = () => api.getFolders(category.id).then(setFolders).catch(() => {})
 
@@ -89,6 +91,14 @@ export default function CategoryDialog({ category, onClose, onChanged }:
       const arr = Array.from({ length: SLOTS }, blankSlot)
       r.forEach(s => { if (s.slotIndex < SLOTS) arr[s.slotIndex] = { enabled: s.enabled, timeFromHHmm: s.timeFromHHmm ?? '08:00', timeToHHmm: s.timeToHHmm ?? '12:00', daysMask: s.daysMask, priority: s.priority } })
       setSlots(arr); setSaved(true); onChanged()
+    } catch { /* ignore */ } finally { setBusy(false) }
+  }
+
+  const doClear = async () => {
+    setBusy(true); setCleared(null)
+    try {
+      const r = await api.clearCategoryData(category.id)
+      setCleared(r.removed); setClearConfirm(false); onChanged()
     } catch { /* ignore */ } finally { setBusy(false) }
   }
 
@@ -213,6 +223,36 @@ export default function CategoryDialog({ category, onClose, onChanged }:
               <button className="w-btn w-primary" disabled={busy} onClick={saveSlots}>Save schedule</button>
               {saved && <span className="w-muted">Saved.</span>}
             </div>
+          </fieldset>
+
+          {/* Library data — clear scanned tracks; keeps folders + schedule */}
+          <fieldset className="w-group">
+            <legend>Library data</legend>
+            {!clearConfirm ? (
+              <div className="w-toolbar">
+                <button className="w-btn" disabled={busy || category.trackCount === 0}
+                  onClick={() => { setCleared(null); setClearConfirm(true) }}>
+                  Clear scanned data…
+                </button>
+                {cleared != null
+                  ? <span className="w-muted">Removed {cleared} track(s). Rescan with ↻ to rebuild.</span>
+                  : <span className="w-muted">
+                      {category.trackCount > 0
+                        ? `Removes the ${category.trackCount} scanned track(s) for ${category.name}; folders and schedule are kept.`
+                        : 'No scanned tracks to clear.'}
+                    </span>}
+              </div>
+            ) : (
+              <div className="w-toolbar" style={{ alignItems: 'center' }}>
+                <span className="w-err" style={{ flex: 1 }}>
+                  Remove all {category.trackCount} scanned track(s) for {category.name}? This also clears their
+                  mix/structure caches, playlist entries and requests. The folder path(s) and schedule are kept.
+                  This can&apos;t be undone.
+                </span>
+                <button className="w-btn" disabled={busy} onClick={doClear}>Yes, clear</button>
+                <button className="w-btn" disabled={busy} onClick={() => setClearConfirm(false)}>Cancel</button>
+              </div>
+            )}
           </fieldset>
         </div>
       </div>

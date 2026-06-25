@@ -297,6 +297,11 @@ export const renameCategory = (id: number, name: string) =>
   req<{ id: number; name: string; isCustom: boolean }>(`/api/admin/categories/${id}/rename`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
 
+// Clears a category's scanned tracks and their derived data (mix/structure
+// caches, playlist entries, requests). Keeps the folder paths and schedule.
+export const clearCategoryData = (id: number) =>
+  req<{ removed: number }>(`/api/admin/categories/${id}/clear-data`, { method: 'POST' })
+
 export const startScan = (categoryId?: number) =>
   req<ScanStatus>(`/api/admin/scan${categoryId != null ? `?categoryId=${categoryId}` : ''}`, { method: 'POST' })
 export const getScanStatus = () => req<ScanStatus>('/api/admin/scan/status')

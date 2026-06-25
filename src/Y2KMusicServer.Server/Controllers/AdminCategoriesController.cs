@@ -19,11 +19,13 @@ public sealed class AdminCategoriesController : ControllerBase
 {
     private readonly IDbContextFactory<Y2KDbContext> _dbf;
     private readonly LibraryScanner _scanner;
+    private readonly IConfiguration _cfg;
 
-    public AdminCategoriesController(IDbContextFactory<Y2KDbContext> dbf, LibraryScanner scanner)
+    public AdminCategoriesController(IDbContextFactory<Y2KDbContext> dbf, LibraryScanner scanner, IConfiguration cfg)
     {
         _dbf = dbf;
         _scanner = scanner;
+        _cfg = cfg;
     }
 
     public sealed record AddFolderRequest(string Path);
@@ -237,5 +239,65 @@ public sealed class AdminCategoriesController : ControllerBase
         cat.Name = name;
         await db.SaveChangesAsync(ct);
         return Ok(new { cat.Id, cat.Name, cat.IsCustom });
+    }
+
+    /// <summary>
+    /// Clears all scanned data for a category — its Track rows and everything
+    /// derived from them (mix-cache pairs, playlist entries, listener requests,
+    /// and the on-disk peak/structure caches) — but KEEPS the category, its
+    /// folders, and its schedule. Use it to wipe a category and re-scan clean.
+    /// Returns the number of tracks removed. 404 if the category is unknown.
+    /// </summary>
+    [HttpPost("{id:int}/clear-data")]
+    public async Task<IActionResult> ClearData(int id, CancellationToken ct)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+
+        var cat = await db.Categories.FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (cat is null) return NotFound(new { error = "category not found", id });
+
+        // Materialise the track ids first, for the on-disk cache cleanup below.
+        var ids = await db.Tracks.Where(t => t.CategoryId == id).Select(t => t.Id).ToListAsync(ct);
+        if (ids.Count == 0) return Ok(new { removed = 0 });
+
+        // A reusable subquery (no giant IN list) for the bulk deletes. MixCache
+        // FKs are Restrict, so its pairs must go before the tracks; PlaylistEntry
+        // and Request cascade, but we delete them explicitly so the result never
+        // depends on the SQLite foreign-keys pragma being on.
+        var idQuery = db.Tracks.Where(t => t.CategoryId == id).Select(t => t.Id);
+
+        int removed;
+        await using (var tx = await db.Database.BeginTransactionAsync(ct))
+        {
+            await db.MixCache
+                .Where(m => idQuery.Contains(m.FromTrackId) || idQuery.Contains(m.ToTrackId))
+                .ExecuteDeleteAsync(ct);
+            await db.PlaylistEntries.Where(p => idQuery.Contains(p.TrackId)).ExecuteDeleteAsync(ct);
+            await db.Requests.Where(r => idQuery.Contains(r.TrackId)).ExecuteDeleteAsync(ct);
+            removed = await db.Tracks.Where(t => t.CategoryId == id).ExecuteDeleteAsync(ct);
+            await tx.CommitAsync(ct);
+        }
+
+        // Best-effort: drop the per-track on-disk caches (orphaned after a re-scan
+        // assigns new ids anyway). Never fail the request over a cache file.
+        TryDeleteTrackCaches(ids);
+
+        return Ok(new { removed });
+    }
+
+    private void TryDeleteTrackCaches(IReadOnlyCollection<int> ids)
+    {
+        foreach (var dir in new[] { DataPaths.PeaksDir(_cfg), DataPaths.StructureDir(_cfg) })
+        {
+            foreach (var trackId in ids)
+            {
+                try
+                {
+                    var file = Path.Combine(dir, $"{trackId}.json");
+                    if (System.IO.File.Exists(file)) System.IO.File.Delete(file);
+                }
+                catch { /* best-effort: a stale cache file is harmless */ }
+            }
+        }
     }
 }
