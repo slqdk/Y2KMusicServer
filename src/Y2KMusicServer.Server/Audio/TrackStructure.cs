@@ -102,32 +102,46 @@ public static class TrackStructure
     private const float Eps = 1e-7f;
 
     /// <summary>
+    /// Reads the cached structure for a track if present and current, without
+    /// ever computing on a miss. Returns null when there is no cache, the cache
+    /// is an older schema version, or it is corrupt. Cheap enough for a polled
+    /// endpoint — it never decodes audio.
+    /// </summary>
+    public static TrackStructureData? TryReadCached(IConfiguration cfg, int trackId)
+    {
+        var dir = DataPaths.EnsureStructureDir(cfg);
+        var file = Path.Combine(dir, trackId + ".json");
+        if (!File.Exists(file)) return null;
+        try
+        {
+            var cached = JsonSerializer.Deserialize<TrackStructureData>(File.ReadAllText(file));
+            if (cached != null && cached.Version == SchemaVersion && cached.Energy.Length > 0)
+                return cached;
+        }
+        catch
+        {
+            // Corrupt / old-version cache — treat as a miss.
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Returns the cached structure for a track, computing and caching it on a
     /// miss (or a version bump). Throws if the file cannot be opened/decoded
     /// (caller maps to 404).
     /// </summary>
     public static TrackStructureData GetOrBuild(IConfiguration cfg, int trackId, string filePath)
     {
-        var dir = DataPaths.EnsureStructureDir(cfg);
-        var file = Path.Combine(dir, trackId + ".json");
-
-        if (File.Exists(file))
-        {
-            try
-            {
-                var cached = JsonSerializer.Deserialize<TrackStructureData>(File.ReadAllText(file));
-                if (cached != null && cached.Version == SchemaVersion && cached.Energy.Length > 0)
-                    return cached;
-            }
-            catch
-            {
-                // Corrupt / old-version cache — fall through and recompute.
-            }
-        }
+        var cached = TryReadCached(cfg, trackId);
+        if (cached != null) return cached;
 
         var data = Compute(filePath);
 
-        try { File.WriteAllText(file, JsonSerializer.Serialize(data)); }
+        try
+        {
+            var dir = DataPaths.EnsureStructureDir(cfg);
+            File.WriteAllText(Path.Combine(dir, trackId + ".json"), JsonSerializer.Serialize(data));
+        }
         catch { /* cache write is best-effort; serving still works */ }
 
         return data;

@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Y2KMusicServer.Server.Audio;
 using Y2KMusicServer.Server.Data;
 using Y2KMusicServer.Server.Data.Entities;
 
@@ -30,6 +32,7 @@ public sealed class PlaylistService
 
     private readonly IDbContextFactory<Y2KDbContext> _dbf;
     private readonly ILogger<PlaylistService> _log;
+    private readonly IConfiguration _cfg;
 
     private readonly SemaphoreSlim _mutateGate = new(1, 1);
 
@@ -45,10 +48,11 @@ public sealed class PlaylistService
     // the legacy "web category override". Set by the public controller.
     private volatile int[] _webCategories = Array.Empty<int>();
 
-    public PlaylistService(IDbContextFactory<Y2KDbContext> dbf, ILogger<PlaylistService> log)
+    public PlaylistService(IDbContextFactory<Y2KDbContext> dbf, ILogger<PlaylistService> log, IConfiguration cfg)
     {
         _dbf = dbf;
         _log = log;
+        _cfg = cfg;
     }
 
     // ── History (called by the scheduler on each promotion) ───────────────────
@@ -172,7 +176,7 @@ public sealed class PlaylistService
     public async Task<IReadOnlyList<PlaylistItemDto>> GetAsync(CancellationToken ct = default)
     {
         await using var db = await _dbf.CreateDbContextAsync(ct);
-        return await db.PlaylistEntries.AsNoTracking()
+        var items = await db.PlaylistEntries.AsNoTracking()
             .OrderBy(e => e.Position)
             .Select(e => new PlaylistItemDto
             {
@@ -182,11 +186,20 @@ public sealed class PlaylistService
                 Title = e.Track!.Title,
                 Artist = e.Track!.Artist,
                 DurationSec = e.Track!.DurationSec,
+                Bpm = e.Track!.Bpm,
+                Lufs = e.Track!.LufsIntegrated,
                 Source = e.Source.ToString(),
                 AddedBy = e.AddedBy,
                 AddedAt = e.AddedAt
             })
             .ToListAsync(ct);
+
+        // Mix-in point = the track's intro-skip (IntroEndSec) from the structure
+        // cache, read-only so the 2s poll never decodes audio. Null when the
+        // structure hasn't been computed for that track yet (fills in over time).
+        return items
+            .Select(i => i with { IntroEndSec = TrackStructure.TryReadCached(_cfg, i.TrackId)?.IntroEndSec })
+            .ToList();
     }
 
     /// <summary>
@@ -693,6 +706,9 @@ public sealed record PlaylistItemDto
     public string? Title { get; init; }
     public string? Artist { get; init; }
     public double DurationSec { get; init; }
+    public double? Bpm { get; init; }
+    public double? Lufs { get; init; }
+    public double? IntroEndSec { get; init; }
     public string Source { get; init; } = "Auto";
     public string? AddedBy { get; init; }
     public DateTime AddedAt { get; init; }

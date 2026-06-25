@@ -104,6 +104,9 @@ export interface PlaylistItem {
   title: string | null
   artist: string | null
   durationSec: number
+  bpm: number | null
+  lufs: number | null
+  introEndSec: number | null
   source: string
   addedBy: string | null
   addedAt: string
