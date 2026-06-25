@@ -114,7 +114,6 @@ export default function DeckPanel(
   const canStopB = bId != null && bStarted && !crossfading && !busy
   const canNudge = bId != null && !crossfading && !busy
   const canEjectB = bId != null && !crossfading && !busy
-  const canCrossfade = bId != null && !crossfading && !busy
   const canIsoA = aId != null && !busy
   const canIsoB = bId != null && !busy
   const bTag = bId == null ? 'EMPTY' : crossfading ? 'MIXING' : bStarted ? 'PLAYING' : 'LOADED'
@@ -212,25 +211,12 @@ export default function DeckPanel(
         ))}
       </div>
 
-      {/* Crossfade bar — fire the manual A→B now; the armed transition (if any)
-          fires on it. "Next:" names exactly what the next transition will do. */}
+      {/* Next-transition readout — names exactly what the next A→B will do: the
+          move, the crossfade, or an armed force. Fire it with Next ⏭ (transport). */}
       <div className="w-xfade-bar">
-        <button className="w-btn w-primary" disabled={!canCrossfade} onClick={() => run(api.crossfadeNow)}>
-          Crossfade A → B
-        </button>
         <span className="w-xfade-plan" title={status?.plannedReason ?? ''}>
           {crossfading ? 'Mixing: ' : 'Next: '}<b>{plannedLabel}</b>
           {armed && !crossfading ? ' (armed)' : ''}
-        </span>
-        <span style={{ flex: 1 }} />
-        <span className="w-xfade-state">
-          {crossfading
-            ? 'Mixing…'
-            : bId == null
-              ? 'Cue a track to B with →B in the library'
-              : bStarted
-                ? 'Align the beats, then crossfade'
-                : 'Press Start B to preview'}
         </span>
       </div>
 
