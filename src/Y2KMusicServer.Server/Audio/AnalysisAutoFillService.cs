@@ -57,8 +57,8 @@ public sealed class AnalysisAutoFillService : IHostedService
         // Debug-level: this fires after every scan, including ones with nothing
         // to analyse. A pass that actually measures tracks logs its own
         // Information-level completion from AudioAnalysisService.
-        if (_analysis.TryStart(reanalyzeAll: false))
-            _log.LogDebug("Scan complete — background analysis fill started for any unanalysed tracks.");
+        if (_analysis.TryStart(reanalyzeAll: false, folderId: p.ScopeFolderId))
+            _log.LogDebug("Scan complete — background analysis fill started (scope folder {Folder}).", p.ScopeFolderId);
         else
             _log.LogDebug("Scan complete, but an analysis pass is already running; "
                 + "any new tracks will be picked up by the next scan.");

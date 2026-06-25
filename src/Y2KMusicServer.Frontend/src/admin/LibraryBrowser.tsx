@@ -134,11 +134,7 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
                   title={!on && c.folderCount === 0 ? 'Add a folder first (⚙ Settings)' : ''}>
                   {on ? 'Disable' : 'Enable'}
                 </button>
-                <button className="w-btn"
-                  disabled={c.folderCount === 0 || (scan != null && (scan.state === 1 || scan.state === 2))}
-                  onClick={e => { e.stopPropagation(); api.startScan(c.id).catch(() => {}) }}
-                  title={c.folderCount === 0 ? 'No folder to rescan (⚙ add one)' : "Rescan this category's folder(s)"}>↻</button>
-                <button className="w-btn" title="Folders, schedule, rename"
+                <button className="w-btn" title="Folders, schedule, rescan, clear"
                   onClick={e => { e.stopPropagation(); setDialogCat(c) }}>⚙</button>
               </div>
             </div>

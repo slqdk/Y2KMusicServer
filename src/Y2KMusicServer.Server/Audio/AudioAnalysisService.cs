@@ -31,14 +31,14 @@ public sealed class AudioAnalysisService
     public AnalysisProgress Current => _current;
     public bool IsRunning => Volatile.Read(ref _running) == 1;
 
-    public bool TryStart(bool reanalyzeAll = false)
+    public bool TryStart(bool reanalyzeAll = false, int? folderId = null)
     {
         if (Interlocked.CompareExchange(ref _running, 1, 0) != 0)
             return false;
 
         _ = Task.Run(() =>
         {
-            try { Run(reanalyzeAll); }
+            try { Run(reanalyzeAll, folderId); }
             catch (Exception ex)
             {
                 _log.LogError(ex, "Audio analysis failed");
@@ -60,7 +60,7 @@ public sealed class AudioAnalysisService
         public bool Any => Lufs != null || Bpm != null;
     }
 
-    private void Run(bool reanalyzeAll)
+    private void Run(bool reanalyzeAll, int? folderId)
     {
         Emit(new AnalysisProgress { State = AnalysisState.Running, Message = "Selecting tracks" });
 
@@ -69,6 +69,20 @@ public sealed class AudioAnalysisService
         {
             var q = db.Tracks.AsNoTracking();
             if (!reanalyzeAll) q = q.Where(t => t.LufsIntegrated == null || t.Bpm == null);
+
+            // Folder-scoped pass (chained after a single-folder scan): only that
+            // folder's own tracks, with "innermost wins" so nested folders aren't
+            // pulled in. Null folder → whole library (a full re-run or direct call).
+            if (folderId is int fid)
+            {
+                var folder = db.CategoryFolders.AsNoTracking().FirstOrDefault(f => f.Id == fid);
+                if (folder != null)
+                {
+                    var allFolders = db.CategoryFolders.AsNoTracking().Select(f => f.Path).ToList();
+                    q = q.OwnedBy(folder.Path, FolderScope.NestedPrefixes(folder.Path, allFolders));
+                }
+            }
+
             items = q.OrderBy(t => t.Id)
                 .Select(t => new Item(t.Id, t.FilePath, t.Title, t.LufsIntegrated != null, t.Bpm != null))
                 .ToList();

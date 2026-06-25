@@ -108,12 +108,12 @@ public sealed class AdminCategoriesController : ControllerBase
             await db.SaveChangesAsync(ct);
         }
 
-        // Auto-scan the affected category so a newly-assigned folder is indexed
-        // without a manual "Scan library" click. Fire-and-forget: the scan runs
-        // on a background thread and reports over SignalR (scanProgress /
-        // scanComplete). If a scan is already running this is a no-op and the
-        // folder is picked up by the next scan.
-        _scanner.TryStart(id);
+        // Auto-scan just the newly-assigned folder (not the whole category), so a
+        // new folder is indexed without a manual click and the chained analysis is
+        // scoped to it. Fire-and-forget: runs on a background thread and reports
+        // over SignalR. If a scan is already running this is a no-op and the folder
+        // is picked up by the next scan.
+        _scanner.TryStart(id, folder.Id);
 
         // onDiskNow is a hint, not a gate — the path is accepted even if the
         // drive isn't mounted right now.
@@ -242,39 +242,58 @@ public sealed class AdminCategoriesController : ControllerBase
     }
 
     /// <summary>
-    /// Clears all scanned data for a category — its Track rows and everything
-    /// derived from them (mix-cache pairs, playlist entries, listener requests,
-    /// and the on-disk peak/structure caches) — but KEEPS the category, its
-    /// folders, and its schedule. Use it to wipe a category and re-scan clean.
-    /// Returns the number of tracks removed. 404 if the category is unknown.
+    /// Rescans a single assigned folder (and its sub-tree, minus any deeper
+    /// assigned folder — "innermost wins"). Fire-and-forget; the chained analysis
+    /// is scoped to this folder's tracks. 404 if the folder isn't in the category.
     /// </summary>
-    [HttpPost("{id:int}/clear-data")]
-    public async Task<IActionResult> ClearData(int id, CancellationToken ct)
+    [HttpPost("{id:int}/folders/{folderId:int}/scan")]
+    public async Task<IActionResult> ScanFolder(int id, int folderId, CancellationToken ct)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        if (!await db.CategoryFolders.AnyAsync(f => f.Id == folderId && f.CategoryId == id, ct))
+            return NotFound(new { error = "folder not found", id, folderId });
+
+        bool started = _scanner.TryStart(id, folderId);
+        return Ok(new { started });
+    }
+
+    /// <summary>
+    /// Clears the scanned data for a single folder — the tracks it owns (under it,
+    /// minus anything a deeper assigned folder owns) and everything derived from
+    /// them (mix-cache pairs, playlist entries, listener requests, and the on-disk
+    /// peak/structure caches) — but KEEPS the folder assigned and the schedule.
+    /// Nested folders are untouched. Returns the number of tracks removed.
+    /// </summary>
+    [HttpPost("{id:int}/folders/{folderId:int}/clear-data")]
+    public async Task<IActionResult> ClearFolderData(int id, int folderId, CancellationToken ct)
     {
         await using var db = await _dbf.CreateDbContextAsync(ct);
 
-        var cat = await db.Categories.FirstOrDefaultAsync(c => c.Id == id, ct);
-        if (cat is null) return NotFound(new { error = "category not found", id });
+        var folder = await db.CategoryFolders.FirstOrDefaultAsync(f => f.Id == folderId && f.CategoryId == id, ct);
+        if (folder is null) return NotFound(new { error = "folder not found", id, folderId });
 
-        // Materialise the track ids first, for the on-disk cache cleanup below.
-        var ids = await db.Tracks.Where(t => t.CategoryId == id).Select(t => t.Id).ToListAsync(ct);
+        var allFolders = await db.CategoryFolders.Select(f => f.Path).ToListAsync(ct);
+        var nested = FolderScope.NestedPrefixes(folder.Path, allFolders);
+
+        // Materialise the owned track ids first, for the on-disk cache cleanup.
+        var ids = await db.Tracks.OwnedBy(folder.Path, nested).Select(t => t.Id).ToListAsync(ct);
         if (ids.Count == 0) return Ok(new { removed = 0 });
 
-        // A reusable subquery (no giant IN list) for the bulk deletes. MixCache
-        // FKs are Restrict, so its pairs must go before the tracks; PlaylistEntry
-        // and Request cascade, but we delete them explicitly so the result never
-        // depends on the SQLite foreign-keys pragma being on.
-        var idQuery = db.Tracks.Where(t => t.CategoryId == id).Select(t => t.Id);
+        // Reusable subquery (no giant IN list). MixCache FKs are Restrict, so its
+        // pairs must go before the tracks; PlaylistEntry and Request cascade, but
+        // we delete them explicitly so the result never depends on the SQLite
+        // foreign-keys pragma being on.
+        var ownedIds = db.Tracks.OwnedBy(folder.Path, nested).Select(t => t.Id);
 
         int removed;
         await using (var tx = await db.Database.BeginTransactionAsync(ct))
         {
             await db.MixCache
-                .Where(m => idQuery.Contains(m.FromTrackId) || idQuery.Contains(m.ToTrackId))
+                .Where(m => ownedIds.Contains(m.FromTrackId) || ownedIds.Contains(m.ToTrackId))
                 .ExecuteDeleteAsync(ct);
-            await db.PlaylistEntries.Where(p => idQuery.Contains(p.TrackId)).ExecuteDeleteAsync(ct);
-            await db.Requests.Where(r => idQuery.Contains(r.TrackId)).ExecuteDeleteAsync(ct);
-            removed = await db.Tracks.Where(t => t.CategoryId == id).ExecuteDeleteAsync(ct);
+            await db.PlaylistEntries.Where(p => ownedIds.Contains(p.TrackId)).ExecuteDeleteAsync(ct);
+            await db.Requests.Where(r => ownedIds.Contains(r.TrackId)).ExecuteDeleteAsync(ct);
+            removed = await db.Tracks.OwnedBy(folder.Path, nested).ExecuteDeleteAsync(ct);
             await tx.CommitAsync(ct);
         }
 

@@ -35,8 +35,9 @@ export default function CategoryDialog({ category, onClose, onChanged }:
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
   const [browsing, setBrowsing] = useState(false)
-  const [clearConfirm, setClearConfirm] = useState(false)
-  const [cleared, setCleared] = useState<number | null>(null)
+  const [clearTarget, setClearTarget] = useState<api.FolderDto | null>(null)
+  const [clearedMsg, setClearedMsg] = useState<string | null>(null)
+  const [scanMsg, setScanMsg] = useState<string | null>(null)
 
   const refreshFolders = () => api.getFolders(category.id).then(setFolders).catch(() => {})
 
@@ -94,11 +95,23 @@ export default function CategoryDialog({ category, onClose, onChanged }:
     } catch { /* ignore */ } finally { setBusy(false) }
   }
 
-  const doClear = async () => {
-    setBusy(true); setCleared(null)
+  const rescanFolder = async (f: api.FolderDto) => {
+    setBusy(true); setScanMsg(null); setClearedMsg(null)
     try {
-      const r = await api.clearCategoryData(category.id)
-      setCleared(r.removed); setClearConfirm(false); onChanged()
+      const r = await api.scanFolder(category.id, f.id)
+      setScanMsg(r.started
+        ? `Rescanning ${f.path}… progress shows on the Library page (close this dialog to watch).`
+        : 'A scan is already running — try again once it finishes.')
+      onChanged()
+    } catch { /* ignore */ } finally { setBusy(false) }
+  }
+
+  const clearFolder = async (f: api.FolderDto) => {
+    setBusy(true); setClearedMsg(null); setScanMsg(null)
+    try {
+      const r = await api.clearFolderData(category.id, f.id)
+      setClearedMsg(`Removed ${r.removed} track(s) under ${f.path}. Rescan to rebuild.`)
+      setClearTarget(null); onChanged()
     } catch { /* ignore */ } finally { setBusy(false) }
   }
 
@@ -136,8 +149,11 @@ export default function CategoryDialog({ category, onClose, onChanged }:
                   {folders.map(f => (
                     <tr key={f.id}>
                       <td title={f.path}>{f.path}</td>
-                      <td className="w-rowbtns" style={{ width: 1 }}>
-                        <button className="w-btn" disabled={busy} onClick={() => removeFolder(f.id)}>✕</button>
+                      <td className="w-rowbtns" style={{ width: 1, whiteSpace: 'nowrap' }}>
+                        <button className="w-btn" disabled={busy} title="Rescan this folder" onClick={() => rescanFolder(f)}>↻</button>
+                        <button className="w-btn" disabled={busy} title="Clear this folder's scanned data"
+                          onClick={() => { setScanMsg(null); setClearedMsg(null); setClearTarget(f) }}>Clear…</button>
+                        <button className="w-btn" disabled={busy} title="Remove this folder" onClick={() => removeFolder(f.id)}>✕</button>
                       </td>
                     </tr>
                   ))}
@@ -145,6 +161,19 @@ export default function CategoryDialog({ category, onClose, onChanged }:
                 </tbody>
               </table>
             </div>
+            {clearTarget && (
+              <div className="w-toolbar" style={{ alignItems: 'center' }}>
+                <span className="w-err" style={{ flex: 1 }}>
+                  Clear all scanned tracks under {clearTarget.path}? Their mix/structure caches, playlist
+                  entries and requests go too; the folder stays assigned and nested folders are untouched.
+                  Can&apos;t be undone.
+                </span>
+                <button className="w-btn" disabled={busy} onClick={() => clearFolder(clearTarget)}>Yes, clear</button>
+                <button className="w-btn" disabled={busy} onClick={() => setClearTarget(null)}>Cancel</button>
+              </div>
+            )}
+            {scanMsg && <div className="w-muted">{scanMsg}</div>}
+            {clearedMsg && <div className="w-muted">{clearedMsg}</div>}
             <div className="w-toolbar">
               <label htmlFor="addfolder">Path:</label>
               <input id="addfolder" type="text" value={newPath}
@@ -223,36 +252,6 @@ export default function CategoryDialog({ category, onClose, onChanged }:
               <button className="w-btn w-primary" disabled={busy} onClick={saveSlots}>Save schedule</button>
               {saved && <span className="w-muted">Saved.</span>}
             </div>
-          </fieldset>
-
-          {/* Library data — clear scanned tracks; keeps folders + schedule */}
-          <fieldset className="w-group">
-            <legend>Library data</legend>
-            {!clearConfirm ? (
-              <div className="w-toolbar">
-                <button className="w-btn" disabled={busy || category.trackCount === 0}
-                  onClick={() => { setCleared(null); setClearConfirm(true) }}>
-                  Clear scanned data…
-                </button>
-                {cleared != null
-                  ? <span className="w-muted">Removed {cleared} track(s). Rescan with ↻ to rebuild.</span>
-                  : <span className="w-muted">
-                      {category.trackCount > 0
-                        ? `Removes the ${category.trackCount} scanned track(s) for ${category.name}; folders and schedule are kept.`
-                        : 'No scanned tracks to clear.'}
-                    </span>}
-              </div>
-            ) : (
-              <div className="w-toolbar" style={{ alignItems: 'center' }}>
-                <span className="w-err" style={{ flex: 1 }}>
-                  Remove all {category.trackCount} scanned track(s) for {category.name}? This also clears their
-                  mix/structure caches, playlist entries and requests. The folder path(s) and schedule are kept.
-                  This can&apos;t be undone.
-                </span>
-                <button className="w-btn" disabled={busy} onClick={doClear}>Yes, clear</button>
-                <button className="w-btn" disabled={busy} onClick={() => setClearConfirm(false)}>Cancel</button>
-              </div>
-            )}
           </fieldset>
         </div>
       </div>

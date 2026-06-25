@@ -46,7 +46,17 @@ public sealed class LibraryScanner
     /// that category, or null to scan every category that has folders. Returns
     /// false if a scan is already running.
     /// </summary>
-    public bool TryStart(int? categoryId = null)
+    public bool TryStart(int? categoryId = null) => StartRun(categoryId, null);
+
+    /// <summary>
+    /// Starts a scan of a single folder (and its sub-tree, minus any deeper
+    /// assigned folder — "innermost folder wins"). The chained analysis pass is
+    /// scoped to just this folder's tracks. Returns false if a scan is already
+    /// running.
+    /// </summary>
+    public bool TryStart(int categoryId, int folderId) => StartRun(categoryId, folderId);
+
+    private bool StartRun(int? categoryId, int? folderId)
     {
         if (Interlocked.CompareExchange(ref _running, 1, 0) != 0)
             return false;
@@ -55,7 +65,7 @@ public sealed class LibraryScanner
         {
             try
             {
-                Run(categoryId);
+                Run(categoryId, folderId);
             }
             catch (Exception ex)
             {
@@ -71,25 +81,44 @@ public sealed class LibraryScanner
         return true;
     }
 
-    private void Run(int? categoryId)
+    private void Run(int? categoryId, int? folderId)
     {
         Emit(new ScanProgress { State = ScanState.Enumerating });
 
-        List<(int CategoryId, string[] Folders)> targets;
+        // (categoryId, folderPath, nested-folder exclusion prefixes) per target.
+        List<(int CategoryId, string Folder, List<string> Exclude)> targets;
         HashSet<string> existing;
 
         using (var db = _dbf.CreateDbContext())
         {
-            var cats = db.Categories
-                .Include(c => c.Folders)
-                .Where(c => c.Folders.Count > 0)
-                .Where(c => categoryId == null || c.Id == categoryId)
-                .OrderBy(c => c.DisplayOrder)
-                .ToList();
+            // Every assigned folder path, to compute the innermost-wins exclusions
+            // (folders nested inside a target are scanned on their own, not here).
+            var allFolders = db.CategoryFolders.Select(f => f.Path).ToList();
 
-            targets = cats
-                .Select(c => (c.Id, c.Folders.Select(f => f.Path).ToArray()))
-                .ToList();
+            if (folderId is int fid)
+            {
+                var folder = db.CategoryFolders.FirstOrDefault(f => f.Id == fid);
+                if (folder == null)
+                {
+                    Emit(new ScanProgress { State = ScanState.Completed, Message = "Folder not found.", ScopeFolderId = folderId });
+                    return;
+                }
+                targets = new() { (folder.CategoryId, folder.Path, FolderScope.NestedPrefixes(folder.Path, allFolders)) };
+            }
+            else
+            {
+                var cats = db.Categories
+                    .Include(c => c.Folders)
+                    .Where(c => c.Folders.Count > 0)
+                    .Where(c => categoryId == null || c.Id == categoryId)
+                    .OrderBy(c => c.DisplayOrder)
+                    .ToList();
+
+                targets = cats
+                    .SelectMany(c => c.Folders.Select(f =>
+                        (c.Id, f.Path, FolderScope.NestedPrefixes(f.Path, allFolders))))
+                    .ToList();
+            }
 
             existing = db.Tracks
                 .Select(t => t.FilePath)
@@ -97,38 +126,41 @@ public sealed class LibraryScanner
         }
 
         // Build the worklist. `claimed` starts from the existing library so
-        // already-scanned files are skipped, and grows as categories claim
-        // files in DisplayOrder, giving first-wins for cross-category dupes.
+        // already-scanned files are skipped, and grows as folders claim files,
+        // giving first-wins for any remaining cross-folder dupes.
         var claimed = new HashSet<string>(existing, StringComparer.OrdinalIgnoreCase);
         var work = new List<(int CategoryId, string Path)>();
 
-        foreach (var (catId, folders) in targets)
+        foreach (var (catId, folder, exclude) in targets)
         {
-            foreach (var folder in folders)
+            // Authenticate to the server first if this is a network folder (using
+            // the stored credential for its host). No-op for local folders or
+            // hosts with no stored credential; a failure falls through to the
+            // enumerate try/catch below as a skipped folder.
+            if (OperatingSystem.IsWindows())
+                _connector.EnsureConnected(folder);
+
+            IEnumerable<string> files;
+            try
             {
-                // Authenticate to the server first if this is a network folder
-                // (using the stored credential for its host). No-op for local
-                // folders or hosts with no stored credential; a failure falls
-                // through to the enumerate try/catch below as a skipped folder.
-                if (OperatingSystem.IsWindows())
-                    _connector.EnsureConnected(folder);
+                files = Directory
+                    .EnumerateFiles(folder, "*", SearchOption.AllDirectories)
+                    .Where(f => SupportedExtensions.Contains(Path.GetExtension(f)));
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Could not enumerate folder {Folder}", folder);
+                continue;
+            }
 
-                IEnumerable<string> files;
-                try
-                {
-                    files = Directory
-                        .EnumerateFiles(folder, "*", SearchOption.AllDirectories)
-                        .Where(f => SupportedExtensions.Contains(Path.GetExtension(f)));
-                }
-                catch (Exception ex)
-                {
-                    _log.LogWarning(ex, "Could not enumerate folder {Folder}", folder);
+            foreach (var file in files)
+            {
+                // Innermost wins: a file under a deeper assigned folder belongs to
+                // that folder's scan, not this one.
+                if (exclude.Count > 0 && exclude.Any(p => file.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
                     continue;
-                }
-
-                foreach (var file in files)
-                    if (claimed.Add(file)) // Add returns false when already present
-                        work.Add((catId, file));
+                if (claimed.Add(file)) // Add returns false when already present
+                    work.Add((catId, file));
             }
         }
 
@@ -138,7 +170,8 @@ public sealed class LibraryScanner
             Emit(new ScanProgress
             {
                 State = ScanState.Completed,
-                Message = "No new files found."
+                Message = "No new files found.",
+                ScopeFolderId = folderId
             });
             return;
         }
@@ -199,7 +232,8 @@ public sealed class LibraryScanner
             FilesProcessed = processed,
             Added = added,
             Skipped = skipped,
-            Message = $"Added {added}, skipped {skipped}."
+            Message = $"Added {added}, skipped {skipped}.",
+            ScopeFolderId = folderId
         });
     }
 

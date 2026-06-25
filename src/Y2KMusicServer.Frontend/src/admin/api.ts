@@ -297,10 +297,12 @@ export const renameCategory = (id: number, name: string) =>
   req<{ id: number; name: string; isCustom: boolean }>(`/api/admin/categories/${id}/rename`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
 
-// Clears a category's scanned tracks and their derived data (mix/structure
-// caches, playlist entries, requests). Keeps the folder paths and schedule.
-export const clearCategoryData = (id: number) =>
-  req<{ removed: number }>(`/api/admin/categories/${id}/clear-data`, { method: 'POST' })
+// Per-folder scan + clear. A folder owns the tracks under it minus any deeper
+// assigned folder ("innermost wins"); clear keeps the folder path + schedule.
+export const scanFolder = (categoryId: number, folderId: number) =>
+  req<{ started: boolean }>(`/api/admin/categories/${categoryId}/folders/${folderId}/scan`, { method: 'POST' })
+export const clearFolderData = (categoryId: number, folderId: number) =>
+  req<{ removed: number }>(`/api/admin/categories/${categoryId}/folders/${folderId}/clear-data`, { method: 'POST' })
 
 export const startScan = (categoryId?: number) =>
   req<ScanStatus>(`/api/admin/scan${categoryId != null ? `?categoryId=${categoryId}` : ''}`, { method: 'POST' })

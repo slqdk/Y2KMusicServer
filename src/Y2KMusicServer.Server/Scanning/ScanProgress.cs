@@ -23,5 +23,11 @@ public sealed record ScanProgress
     public int Skipped { get; init; }
     public string? CurrentPath { get; init; }
     public string? Message { get; init; }
+
+    /// <summary>When a single folder was scanned, its id — so the chained
+    /// analysis pass can scope itself to just that folder's tracks. Null for a
+    /// category-wide or whole-library scan.</summary>
+    public int? ScopeFolderId { get; init; }
+
     public DateTime UpdatedAtUtc { get; init; } = DateTime.UtcNow;
 }
