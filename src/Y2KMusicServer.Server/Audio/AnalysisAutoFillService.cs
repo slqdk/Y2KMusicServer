@@ -3,24 +3,20 @@ using Y2KMusicServer.Server.Scanning;
 namespace Y2KMusicServer.Server.Audio;
 
 /// <summary>
-/// Keeps the library scanned and analysed automatically, so the operator never
-/// has to press a Scan or Analyse button (there are none). The library is kept
-/// up to date and analysed ahead of playback, which is what lets Auto DJ match
-/// BPM when it selects and the crossfade beat-align on the incoming track.
+/// Chains a missing-only analysis pass off the end of every scan, so newly
+/// indexed tracks get their BPM/loudness filled ahead of playback (which is what
+/// lets Auto DJ match BPM and the crossfade beat-align on the incoming track).
 ///
-/// Two triggers, one chain:
-/// 1. <b>At startup</b> it scans every category that has folders, so files
-///    dropped into a registered folder while the service was down get indexed.
-/// 2. <b>After every scan completes</b> (the startup scan, an auto-scan on
-///    folder-add, or a scan started via the endpoint) it kicks a missing-only
-///    <see cref="AudioAnalysisService"/> pass. The pass selects only tracks
-///    lacking BPM/loudness, so the scan-complete chain fills both newly-added
-///    tracks and any that were left unanalysed by an interrupted earlier pass —
-///    there is no separate startup analysis step.
+/// There is deliberately NO startup scan: the library is not re-walked on boot
+/// (that re-read every file's tags on each start and burned CPU during
+/// playback). Scanning is triggered only by assigning a folder to a category, or
+/// by a manual per-category rescan from the admin UI. Either way the
+/// scan-complete handler here kicks a missing-only
+/// <see cref="AudioAnalysisService"/> pass — it selects only tracks lacking
+/// BPM/loudness, so it also mops up anything an interrupted earlier pass left.
 ///
-/// If a scan or pass is already running when a trigger fires, the start is a
-/// no-op and the work is picked up by the next scan. The scan/analyse endpoints
-/// remain for programmatic use; they are simply no longer surfaced in the UI.
+/// If a pass is already running when a scan completes, the start is a no-op and
+/// the new tracks are picked up by the next scan/pass.
 /// </summary>
 public sealed class AnalysisAutoFillService : IHostedService
 {
@@ -40,13 +36,10 @@ public sealed class AnalysisAutoFillService : IHostedService
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
+        // Subscribe to scan completion only — no startup scan is kicked. Scans
+        // come from a folder-add or a manual per-category rescan; this handler
+        // then fills any missing analysis. Schema is created by DbInitializer.
         _scanner.Progress += OnScanProgress;
-
-        // Startup scan, off the startup thread so the host isn't held up. Its
-        // completion chains into a missing-only analysis pass via OnScanProgress,
-        // so this one trigger also fills any unanalysed tracks. The schema is
-        // already created by DbInitializer before hosted services start.
-        _ = Task.Run(StartupScan, CancellationToken.None);
         return Task.CompletedTask;
     }
 
@@ -54,21 +47,6 @@ public sealed class AnalysisAutoFillService : IHostedService
     {
         _scanner.Progress -= OnScanProgress;
         return Task.CompletedTask;
-    }
-
-    private void StartupScan()
-    {
-        try
-        {
-            if (_scanner.TryStart(categoryId: null))
-                _log.LogInformation("Startup: scanning categories for new files (analysis follows automatically).");
-            else
-                _log.LogDebug("Startup scan skipped — a scan is already running.");
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex, "Startup scan failed to start; folder-add will still scan, manual endpoints still work.");
-        }
     }
 
     private void OnScanProgress(ScanProgress p)
