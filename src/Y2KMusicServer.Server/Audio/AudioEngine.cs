@@ -435,7 +435,7 @@ public sealed class AudioEngine
                 "Trig: armed -> {To} | trigger {Trigger:F2}s ({Basis}) | fade {Fade:F2}s | {Mode} | {Source} | in {In:F2}s q={Score:F2} beat-aligned={Beat}",
                 TrackLabel(next.Title, next.Artist), trigger,
                 outPoint > 0 ? "out-point" : "NextTriggerPct",
-                fadeSec, smartMix ? "Smart Mix" : "plain fade", mixSource,
+                fadeSec, plan.StrategyName, mixSource,
                 inPoint, score, beatAligned);
         }
 
