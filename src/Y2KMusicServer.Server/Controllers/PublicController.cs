@@ -40,8 +40,30 @@ public sealed class PublicController : ControllerBase
     {
         var s = _engine.GetStatus();
         bool allowNext;
+        double? bpm = null;
+        string? genre = null;
+        int? year = null;
+        string? type = null;
         await using (var db = await _dbf.CreateDbContextAsync(ct))
+        {
             allowNext = (await db.Settings.AsNoTracking().FirstOrDefaultAsync(ct))?.AllowWebNext ?? false;
+
+            // Enrich with the current track's tags for the now-playing chips.
+            if (s.TrackId is int tid)
+            {
+                var meta = await db.Tracks.AsNoTracking()
+                    .Where(t => t.Id == tid)
+                    .Select(t => new { t.Bpm, t.Genre, t.Year, t.Type })
+                    .FirstOrDefaultAsync(ct);
+                if (meta != null)
+                {
+                    bpm = meta.Bpm;
+                    genre = meta.Genre;
+                    year = meta.Year;
+                    type = meta.Type;
+                }
+            }
+        }
 
         return new
         {
@@ -52,7 +74,11 @@ public sealed class PublicController : ControllerBase
             positionSec = s.PositionSec,
             durationSec = s.DurationSec,
             playing = s.State == PlaybackEngineState.Playing,
-            allowNext
+            allowNext,
+            bpm,
+            genre,
+            year,
+            type
         };
     }
 
@@ -81,6 +107,25 @@ public sealed class PublicController : ControllerBase
             .Select(t => new { t.Id, t.Title, t.Artist, t.Album, t.DurationSec })
             .ToListAsync(ct);
         return new { items };
+    }
+
+    /// <summary>
+    /// The public playlist (now-playing head + upcoming), trimmed for listeners.
+    /// Read-only; returns a bare array ordered as the engine serves it.
+    /// </summary>
+    [HttpGet("playlist")]
+    public async Task<object> Playlist(CancellationToken ct)
+    {
+        var items = await _playlist.GetAsync(ct);
+        return items.Select(p => new
+        {
+            position = p.Position,
+            trackId = p.TrackId,
+            title = p.Title,
+            artist = p.Artist,
+            durationSec = p.DurationSec,
+            source = p.Source
+        });
     }
 
     [HttpPost("request")]
@@ -115,7 +160,12 @@ public sealed class PublicController : ControllerBase
         var cats = await db.Categories.AsNoTracking()
             .Where(c => c.Enabled)
             .OrderBy(c => c.DisplayOrder)
-            .Select(c => new { c.Id, c.Name })
+            .Select(c => new
+            {
+                c.Id,
+                c.Name,
+                Count = db.Tracks.Count(t => t.CategoryId == c.Id)
+            })
             .ToListAsync(ct);
         return new { showSelector = show, selected = _playlist.GetWebCategories(), categories = cats };
     }
