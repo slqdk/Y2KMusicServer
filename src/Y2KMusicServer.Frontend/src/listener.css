@@ -400,3 +400,37 @@
   .lz-side, .lz-results, .lz-playlist { grid-column: auto; }
   .lz-panel { max-height: none; }
 }
+
+/* ── Phones ──────────────────────────────────────────────────────────────
+   The tablet top bar packs Listen Live · now-playing · theme · Next onto one
+   row; on a phone that collapses the title to nothing and the controls crowd
+   over it. Here the now-playing block takes its own full row and the controls
+   drop to the row beneath it. Panels also switch from nested scroll panes to
+   growing with their content, so the page scrolls once.
+   ===================================================================== */
+@media (max-width: 640px) {
+  .lz-top { flex-wrap: wrap; gap: 10px 12px; padding: 12px 14px; }
+  .lz-np { flex: 1 1 100%; align-items: flex-start; gap: 12px; }
+  .lz-np-body { flex: 1; min-width: 0; }
+  .lz-np-art { width: 56px; height: 56px; }
+  .lz-np-state { white-space: nowrap; }
+  .lz-np-title { font-size: 1.1rem; white-space: normal; }
+  .lz-np-artist { white-space: normal; }
+  .lz-live-wrap { order: 2; }
+  .lz-top-right { order: 3; margin-left: auto; }
+
+  /* Touch-sized controls. */
+  .lz-btn { min-height: 40px; }
+  .lz-theme { min-height: 40px; font-size: 16px; padding: 6px 8px; }
+  .lz-chip { min-height: 38px; padding: 8px 12px; }
+
+  /* One page scroll instead of two nested scroll panes on a small screen. */
+  .lz-work { padding: 12px 12px 24px; gap: 12px; }
+  .lz-panel { min-height: auto; max-height: none; }
+  .lz-panel-body { overflow: visible; }
+  .lz-empty { min-height: 120px; }
+
+  /* 16px inputs so mobile browsers don't zoom in on focus. */
+  .lz-input { font-size: 16px; }
+  .lz-result { padding: 10px 12px; }
+}
