@@ -25,7 +25,9 @@ public sealed class LibraryScanner
     private readonly NetworkShareConnector _connector;
     private readonly ILogger<LibraryScanner> _log;
 
-    private int _running; // 0 = idle, 1 = scanning
+    private readonly object _gate = new();
+    private readonly Queue<(int? Cat, int? Folder)> _queue = new();
+    private bool _busy; // worker loop active (draining the queue)
     private volatile ScanProgress _current = new() { State = ScanState.Idle };
 
     public LibraryScanner(IDbContextFactory<Y2KDbContext> dbf, NetworkShareConnector connector, ILogger<LibraryScanner> log)
@@ -39,46 +41,64 @@ public sealed class LibraryScanner
     public event Action<ScanProgress>? Progress;
 
     public ScanProgress Current => _current;
-    public bool IsScanning => Volatile.Read(ref _running) == 1;
+    public bool IsScanning { get { lock (_gate) return _busy; } }
 
     /// <summary>
-    /// Starts a scan on a background thread. Pass a category id to scan just
-    /// that category, or null to scan every category that has folders. Returns
-    /// false if a scan is already running.
+    /// Queues a scan of every category that has folders (or just one category if
+    /// an id is given). Scans run one at a time in FIFO order — see
+    /// <see cref="Enqueue"/>. Always returns true.
     /// </summary>
-    public bool TryStart(int? categoryId = null) => StartRun(categoryId, null);
+    public bool TryStart(int? categoryId = null) => Enqueue(categoryId, null);
 
     /// <summary>
-    /// Starts a scan of a single folder (and its sub-tree, minus any deeper
+    /// Queues a scan of a single folder (and its sub-tree, minus any deeper
     /// assigned folder — "innermost folder wins"). The chained analysis pass is
-    /// scoped to just this folder's tracks. Returns false if a scan is already
-    /// running.
+    /// scoped to just this folder's tracks. Always returns true.
     /// </summary>
-    public bool TryStart(int categoryId, int folderId) => StartRun(categoryId, folderId);
+    public bool TryStart(int categoryId, int folderId) => Enqueue(categoryId, folderId);
 
-    private bool StartRun(int? categoryId, int? folderId)
+    /// <summary>
+    /// Queues a scan request and makes sure the background worker is running.
+    /// Only one scan runs at a time; further requests wait in FIFO order, so
+    /// pressing rescan on several folders stacks them up instead of being
+    /// rejected. An identical request already waiting is coalesced. Always
+    /// returns true (the request is accepted, to run now or shortly).
+    /// </summary>
+    private bool Enqueue(int? categoryId, int? folderId)
     {
-        if (Interlocked.CompareExchange(ref _running, 1, 0) != 0)
-            return false;
-
-        _ = Task.Run(() =>
+        lock (_gate)
         {
+            if (!_queue.Any(j => j.Cat == categoryId && j.Folder == folderId))
+                _queue.Enqueue((categoryId, folderId));
+            if (_busy) return true; // a worker is already draining the queue
+            _busy = true;
+        }
+
+        _ = Task.Run(DrainQueue);
+        return true;
+    }
+
+    private void DrainQueue()
+    {
+        while (true)
+        {
+            (int? Cat, int? Folder) job;
+            lock (_gate)
+            {
+                if (_queue.Count == 0) { _busy = false; return; }
+                job = _queue.Dequeue();
+            }
+
             try
             {
-                Run(categoryId, folderId);
+                Run(job.Cat, job.Folder);
             }
             catch (Exception ex)
             {
                 _log.LogError(ex, "Library scan failed");
                 Emit(new ScanProgress { State = ScanState.Failed, Message = ex.Message });
             }
-            finally
-            {
-                Interlocked.Exchange(ref _running, 0);
-            }
-        });
-
-        return true;
+        }
     }
 
     private void Run(int? categoryId, int? folderId)
@@ -299,6 +319,9 @@ public sealed class LibraryScanner
 
     private void Emit(ScanProgress p)
     {
+        int queued;
+        lock (_gate) queued = _queue.Count;
+        p = p with { Queued = queued };
         _current = p;
         Progress?.Invoke(p);
     }

@@ -44,6 +44,7 @@ export interface ScanInfo {
   filesProcessed: number
   added: number
   skipped: number
+  queued: number
   currentPath: string | null
   message: string | null
 }
@@ -182,6 +183,7 @@ export function useHub(): Live {
         filesProcessed: num(m, 'filesProcessed'),
         added: num(m, 'added'),
         skipped: num(m, 'skipped'),
+        queued: num(m, 'queued'),
         currentPath: str(m, 'currentPath'),
         message: str(m, 'message')
       }

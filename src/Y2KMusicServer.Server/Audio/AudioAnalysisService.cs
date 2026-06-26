@@ -18,7 +18,9 @@ public sealed class AudioAnalysisService
     private readonly IDbContextFactory<Y2KDbContext> _dbf;
     private readonly ILogger<AudioAnalysisService> _log;
 
-    private int _running; // 0 = idle, 1 = running
+    private readonly object _gate = new();
+    private readonly Queue<(bool All, int? Folder)> _queue = new();
+    private bool _busy; // worker loop active (draining the queue)
     private volatile AnalysisProgress _current = new() { State = AnalysisState.Idle };
 
     public AudioAnalysisService(IDbContextFactory<Y2KDbContext> dbf, ILogger<AudioAnalysisService> log)
@@ -29,24 +31,51 @@ public sealed class AudioAnalysisService
 
     public event Action<AnalysisProgress>? Progress;
     public AnalysisProgress Current => _current;
-    public bool IsRunning => Volatile.Read(ref _running) == 1;
+    public bool IsRunning { get { lock (_gate) return _busy; } }
 
+    /// <summary>
+    /// Queues an analysis pass and makes sure the worker is running. Only one
+    /// pass runs at a time; further requests wait in FIFO order, so each scoped
+    /// scan's chained analysis still runs even when scans are stacked back to
+    /// back. An identical request already waiting is coalesced. Always returns
+    /// true. <paramref name="folderId"/> scopes to one folder's tracks (null =
+    /// whole library); <paramref name="reanalyzeAll"/> re-measures, not just fills.
+    /// </summary>
     public bool TryStart(bool reanalyzeAll = false, int? folderId = null)
     {
-        if (Interlocked.CompareExchange(ref _running, 1, 0) != 0)
-            return false;
-
-        _ = Task.Run(() =>
+        lock (_gate)
         {
-            try { Run(reanalyzeAll, folderId); }
+            if (!_queue.Any(j => j.All == reanalyzeAll && j.Folder == folderId))
+                _queue.Enqueue((reanalyzeAll, folderId));
+            if (_busy) return true; // a worker is already draining the queue
+            _busy = true;
+        }
+
+        _ = Task.Run(DrainQueue);
+        return true;
+    }
+
+    private void DrainQueue()
+    {
+        while (true)
+        {
+            (bool All, int? Folder) job;
+            lock (_gate)
+            {
+                if (_queue.Count == 0) { _busy = false; return; }
+                job = _queue.Dequeue();
+            }
+
+            try
+            {
+                Run(job.All, job.Folder);
+            }
             catch (Exception ex)
             {
                 _log.LogError(ex, "Audio analysis failed");
                 Emit(new AnalysisProgress { State = AnalysisState.Failed, Message = ex.Message });
             }
-            finally { Interlocked.Exchange(ref _running, 0); }
-        });
-        return true;
+        }
     }
 
     private sealed record Item(int Id, string Path, string? Title, bool HasLufs, bool HasBpm);

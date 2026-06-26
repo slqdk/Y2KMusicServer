@@ -20,7 +20,8 @@ export default function ScanBar({ live, onComplete }: { live: ScanInfo | null; o
   // Live hub events win once they arrive; fall back to the seed snapshot.
   const scan: ScanInfo | null = live ?? (seed && {
     state: seed.state, filesFound: seed.filesFound, filesProcessed: seed.filesProcessed,
-    added: seed.added, skipped: seed.skipped, currentPath: seed.currentPath, message: seed.message
+    added: seed.added, skipped: seed.skipped, queued: seed.queued,
+    currentPath: seed.currentPath, message: seed.message
   })
 
   // Refresh categories/library when a scan finishes.
@@ -39,6 +40,7 @@ export default function ScanBar({ live, onComplete }: { live: ScanInfo | null; o
       <span className={failed ? 'w-err' : 'w-muted'}>
         {STATE_NAME[scan.state] ?? '?'} — {scan.filesProcessed}/{scan.filesFound} files
         {scan.added > 0 || scan.skipped > 0 ? ` (+${scan.added} new, ${scan.skipped} skipped)` : ''}
+        {scan.queued > 0 ? ` · ${scan.queued} queued` : ''}
       </span>
       {running && scan.currentPath && (
         <span className="w-muted" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

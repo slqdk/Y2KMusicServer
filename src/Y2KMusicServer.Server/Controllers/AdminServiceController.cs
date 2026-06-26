@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Y2KMusicServer.Server.Data;
 using Y2KMusicServer.Server.Updates;
 using Y2KMusicServer.Shared;
 
@@ -36,6 +37,7 @@ public sealed class AdminServiceController : ControllerBase
             KestrelPort = port,
             AdminUrl = $"{host}/admin",
             ListenerUrl = $"{host}/",
+            DataPath = ResolveDataPath(),
             Update = _updates.Latest
         };
     }
@@ -53,5 +55,11 @@ public sealed class AdminServiceController : ControllerBase
         if (!string.IsNullOrEmpty(url) && Uri.TryCreate(url, UriKind.Absolute, out var uri))
             return uri.Port;
         return 8765;
+    }
+
+    private string ResolveDataPath()
+    {
+        try { return Path.GetFullPath(DataPaths.DataDir(_cfg)); }
+        catch { return DataPaths.DataDir(_cfg); }
     }
 }

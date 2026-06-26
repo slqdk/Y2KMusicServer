@@ -129,6 +129,10 @@ public sealed class TrayApp : IDisposable
         openListener.Click += (_, _) => OpenUrl(BaseUrl + "/");
         menu.Items.Add(openListener);
 
+        var openData = new WinForms.ToolStripMenuItem("Open data folder");
+        openData.Click += (_, _) => OpenDataFolder();
+        menu.Items.Add(openData);
+
         menu.Items.Add(new WinForms.ToolStripSeparator());
 
         _statusItem = new WinForms.ToolStripMenuItem("Service: (unknown)") { Enabled = false };
@@ -245,6 +249,35 @@ public sealed class TrayApp : IDisposable
         catch (Exception ex)
         {
             MessageBox.Show("Could not open URL: " + ex.Message, "Y2K");
+        }
+    }
+
+    /// <summary>
+    /// Opens the data root (C:\ProgramData\Y2KMusicServer in production) in
+    /// Explorer — handy for wiping persistent data. Uses the path the service
+    /// reports; if the service isn't responding, falls back to the production
+    /// default. Opens the parent if the folder itself doesn't exist yet.
+    /// </summary>
+    private void OpenDataFolder()
+    {
+        var path = _lastStatus?.DataPath;
+        if (string.IsNullOrWhiteSpace(path))
+            path = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "Y2KMusicServer");
+
+        try
+        {
+            var parent = Path.GetDirectoryName(path);
+            var target = Directory.Exists(path) ? path
+                : (parent is not null && Directory.Exists(parent) ? parent : path);
+
+            Process.Start(new ProcessStartInfo { FileName = target, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("Could not open the data folder:\n" + ex.Message + "\n\nPath: " + path,
+                "Y2K", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 

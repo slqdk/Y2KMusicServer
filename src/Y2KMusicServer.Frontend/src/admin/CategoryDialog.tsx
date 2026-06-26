@@ -98,10 +98,8 @@ export default function CategoryDialog({ category, onClose, onChanged }:
   const rescanFolder = async (f: api.FolderDto) => {
     setBusy(true); setScanMsg(null); setClearedMsg(null)
     try {
-      const r = await api.scanFolder(category.id, f.id)
-      setScanMsg(r.started
-        ? `Rescanning ${f.path}… progress shows on the Library page (close this dialog to watch).`
-        : 'A scan is already running — try again once it finishes.')
+      await api.scanFolder(category.id, f.id)
+      setScanMsg(`Queued rescan of ${f.path}. Queue more folders if you like, or close this dialog to watch progress on the Library page.`)
       onChanged()
     } catch { /* ignore */ } finally { setBusy(false) }
   }

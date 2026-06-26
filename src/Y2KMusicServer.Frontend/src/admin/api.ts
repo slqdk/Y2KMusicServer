@@ -265,6 +265,7 @@ export interface ScanStatus {
   filesProcessed: number
   added: number
   skipped: number
+  queued: number
   currentPath: string | null
   message: string | null
 }

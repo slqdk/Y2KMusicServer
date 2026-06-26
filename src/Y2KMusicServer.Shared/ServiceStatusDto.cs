@@ -12,5 +12,11 @@ public sealed class ServiceStatusDto
     public required int KestrelPort { get; init; }
     public required string AdminUrl { get; init; }
     public required string ListenerUrl { get; init; }
+
+    /// <summary>Absolute path of the data root (<c>C:\ProgramData\Y2KMusicServer</c>
+    /// in production) — what the tray's "Open data folder" opens. Null on older
+    /// services that don't report it.</summary>
+    public string? DataPath { get; init; }
+
     public UpdateInfoDto? Update { get; init; }
 }

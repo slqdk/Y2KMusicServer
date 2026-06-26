@@ -29,5 +29,9 @@ public sealed record ScanProgress
     /// category-wide or whole-library scan.</summary>
     public int? ScopeFolderId { get; init; }
 
+    /// <summary>How many further scans are waiting behind this one. Scans run one
+    /// at a time, so pressing rescan on several folders stacks them up.</summary>
+    public int Queued { get; init; }
+
     public DateTime UpdatedAtUtc { get; init; } = DateTime.UtcNow;
 }
