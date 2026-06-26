@@ -22,17 +22,19 @@ public sealed class PublicController : ControllerBase
     private readonly StreamingEncoder _stream;
     private readonly PlaylistService _playlist;
     private readonly IDbContextFactory<Y2KDbContext> _dbf;
+    private readonly IConfiguration _cfg;
 
     public PublicController(AudioEngine engine, StreamingEncoder stream, PlaylistService playlist,
-        IDbContextFactory<Y2KDbContext> dbf)
+        IDbContextFactory<Y2KDbContext> dbf, IConfiguration cfg)
     {
         _engine = engine;
         _stream = stream;
         _playlist = playlist;
         _dbf = dbf;
+        _cfg = cfg;
     }
 
-    public sealed record RequestBody(int TrackId, string? RequesterName);
+    public sealed record RequestBody(int TrackId, string? RequesterName, string? DeviceId);
     public sealed record CategorySelectBody(int[] CategoryIds);
 
     [HttpGet("nowplaying")]
@@ -86,13 +88,14 @@ public sealed class PublicController : ControllerBase
     public IActionResult StreamInfo()
     {
         var st = _stream.GetStatus();
-        return Ok(new { enabled = st.Enabled, bitrate = st.Bitrate, listeners = st.Listeners });
+        var web = WebConfigStore.Load(_cfg);
+        return Ok(new { enabled = st.Enabled, bitrate = st.Bitrate, listeners = st.Listeners, showListenLive = web.ShowListenLive });
     }
 
     [HttpGet("search")]
-    public async Task<object> Search([FromQuery] string? q, [FromQuery] int take = 30, CancellationToken ct = default)
+    public async Task<object> Search([FromQuery] string? q, [FromQuery] int take = 6, CancellationToken ct = default)
     {
-        take = Math.Clamp(take, 1, 50);
+        take = Math.Clamp(take, 1, 6);
         if (string.IsNullOrWhiteSpace(q)) return new { items = Array.Empty<object>() };
 
         var term = q.Trim();
@@ -136,6 +139,24 @@ public sealed class PublicController : ControllerBase
         await using var db = await _dbf.CreateDbContextAsync(ct);
         if (!await db.Tracks.AnyAsync(t => t.Id == body.TrackId, ct))
             return NotFound(new { error = "track not found", body.TrackId });
+
+        // Per-device request throttle (web-config.json). Keyed by the device id
+        // the listener page sends; falls back to the caller IP if absent.
+        var web = WebConfigStore.Load(_cfg);
+        if (web.RequestLimitEnabled)
+        {
+            var key = string.IsNullOrWhiteSpace(body.DeviceId)
+                ? (HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown")
+                : body.DeviceId.Trim();
+            var wait = RequestThrottle.Check(key, TimeSpan.FromMinutes(web.RequestIntervalMinutes));
+            if (wait is TimeSpan w)
+                return StatusCode(429, new
+                {
+                    error = "rate_limited",
+                    retryAfterSec = (int)Math.Ceiling(w.TotalSeconds),
+                    intervalMinutes = web.RequestIntervalMinutes
+                });
+        }
 
         var name = body.RequesterName?.Trim();
         if (name is { Length: > 40 }) name = name[..40];

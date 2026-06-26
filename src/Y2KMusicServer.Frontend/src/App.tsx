@@ -16,7 +16,7 @@ interface NowPlaying {
   year: number | null
   type: string | null
 }
-interface StreamInfo { enabled: boolean; bitrate: number; listeners: number }
+interface StreamInfo { enabled: boolean; bitrate: number; listeners: number; showListenLive: boolean }
 interface SearchItem { id: number; title: string | null; artist: string | null; album: string | null; durationSec: number }
 interface CatItem { id: number; name: string; count: number }
 interface CatState { showSelector: boolean; selected: number[]; categories: CatItem[] }
@@ -50,6 +50,19 @@ const readRecent = (): string[] => {
   try { const v = JSON.parse(localStorage.getItem('y2k-recent-searches') || '[]'); return Array.isArray(v) ? v.slice(0, 6) : [] }
   catch { return [] }
 }
+// A stable per-device id for request throttling, kept in localStorage. Not
+// crypto.randomUUID — the listener page is served over plain http, where the
+// Web Crypto API is unavailable; this token only needs to be stable per device.
+const DEVICE_ID = ((): string => {
+  try {
+    let id = localStorage.getItem('y2k-device-id')
+    if (!id) {
+      id = `d-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+      localStorage.setItem('y2k-device-id', id)
+    }
+    return id
+  } catch { return 'anon' }
+})()
 
 /* ── Component ───────────────────────────────────────────────────────── */
 export default function App() {
@@ -150,10 +163,17 @@ export default function App() {
   const requestSelected = async () => {
     if (!selected) return
     try {
-      await j('/api/request', {
+      const r = await fetch('/api/request', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trackId: selected.id, requesterName: name.trim() || null })
+        body: JSON.stringify({ trackId: selected.id, requesterName: name.trim() || null, deviceId: DEVICE_ID })
       })
+      if (r.status === 429) {
+        const d = await r.json().catch(() => null)
+        const mins = Math.ceil((d?.retryAfterSec ?? 0) / 60)
+        flash(mins > 1 ? `Please wait about ${mins} min before requesting again.` : 'Please wait a moment before requesting again.')
+        return
+      }
+      if (!r.ok) { flash('Request failed. Try again.'); return }
       flash(`Requested “${selected.title ?? 'track'}” — the DJ will see it.`)
       setSelectedId(null)
     } catch { flash('Request failed. Try again.') }
@@ -205,25 +225,43 @@ export default function App() {
     return playlist
   }, [playlist, npId, np])
 
+  // The theme picker and the recent-searches list each render in two spots; CSS
+  // shows one per breakpoint (top bar / side on desktop, the foot on phones).
+  const themeSelect = (cls: string) => (
+    <select className={`lz-theme ${cls}`} value={theme} onChange={e => setTheme(e.target.value)} title="Theme" aria-label="Theme">
+      {THEMES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+    </select>
+  )
+  const recentBlock = (cls: string) => (
+    <div className={cls}>
+      <div className="lz-field-label">Recent searches</div>
+      {recent.length === 0
+        ? <div className="lz-recent-empty">Nothing yet.</div>
+        : <ul className="lz-recent">{recent.map(t => <li key={t} onClick={() => setQ(t)} title={`Search “${t}”`}>{t}</li>)}</ul>}
+    </div>
+  )
+
   return (
     <div className={`lz lz-${theme}`}>
       {/* ── Top bar ──────────────────────────────────────────────────── */}
       <div className="lz-top">
-        <div className="lz-live-wrap" style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
-          <button
-            className={`lz-btn${live ? ' is-live' : ''}`}
-            onClick={toggleLive}
-            disabled={!stream?.enabled}
-            title={stream?.enabled ? 'Listen to the live stream' : 'The stream is off air'}
-          >
-            {!stream?.enabled ? 'Off air' : live ? '● LIVE' : '▶ Listen Live'}
-          </button>
-          {stream?.enabled && (
-            <span style={{ fontSize: '.66rem', color: 'var(--lz-faint)' }}>
-              {stream.bitrate} kbps{live ? ` · ${stream.listeners} listening` : ''}
-            </span>
-          )}
-        </div>
+        {stream?.showListenLive && (
+          <div className="lz-live-wrap" style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
+            <button
+              className={`lz-btn${live ? ' is-live' : ''}`}
+              onClick={toggleLive}
+              disabled={!stream?.enabled}
+              title={stream?.enabled ? 'Listen to the live stream' : 'The stream is off air'}
+            >
+              {!stream?.enabled ? 'Off air' : live ? '● LIVE' : '▶ Listen Live'}
+            </button>
+            {stream?.enabled && (
+              <span style={{ fontSize: '.66rem', color: 'var(--lz-faint)' }}>
+                {stream.bitrate} kbps{live ? ` · ${stream.listeners} listening` : ''}
+              </span>
+            )}
+          </div>
+        )}
 
         <div className="lz-np">
           {np?.trackId && artOk
@@ -244,9 +282,7 @@ export default function App() {
         </div>
 
         <div className="lz-top-right">
-          <select className="lz-theme" value={theme} onChange={e => setTheme(e.target.value)} title="Theme" aria-label="Theme">
-            {THEMES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
-          </select>
+          {themeSelect('lz-theme-top')}
           <button className="lz-btn" onClick={skip} disabled={!np?.allowNext || np?.trackId == null} title={np?.allowNext ? 'Skip to the next track' : 'Skip is disabled'}>
             Next ⏭
           </button>
@@ -282,10 +318,7 @@ export default function App() {
             Request Selected Song
           </button>
 
-          <div className="lz-field-label">Recent searches</div>
-          {recent.length === 0
-            ? <div className="lz-recent-empty">Nothing yet.</div>
-            : <ul className="lz-recent">{recent.map(t => <li key={t} onClick={() => setQ(t)} title={`Search “${t}”`}>{t}</li>)}</ul>}
+          {recentBlock('lz-recent-desktop')}
         </aside>
 
         {/* Center: search results */}
@@ -349,6 +382,12 @@ export default function App() {
             </table>
           </div>
         </section>
+      </div>
+
+      {/* ── Foot (phones only): recent searches, then the theme picker ──── */}
+      <div className="lz-foot">
+        {recentBlock('lz-recent-mobile')}
+        {themeSelect('lz-theme-foot')}
       </div>
 
       {toast && <div className="lz-toast">{toast}</div>}

@@ -22,25 +22,28 @@ public sealed class AdminSettingsController : ControllerBase
 {
     private readonly IDbContextFactory<Y2KDbContext> _dbf;
     private readonly LogVerbositySwitch _verbosity;
+    private readonly IConfiguration _cfg;
 
-    public AdminSettingsController(IDbContextFactory<Y2KDbContext> dbf, LogVerbositySwitch verbosity)
+    public AdminSettingsController(IDbContextFactory<Y2KDbContext> dbf, LogVerbositySwitch verbosity, IConfiguration cfg)
     {
         _dbf = dbf;
         _verbosity = verbosity;
+        _cfg = cfg;
     }
 
     /// <summary>General-settings patch. Streaming and Auto DJ are intentionally absent.</summary>
     public sealed record SettingsUpdate(
         bool? SmartMix, bool? SmartBeatFader, int? NextTriggerPct, int? NextFadeSeconds,
         bool? NormalizeEnabled, bool? LimiterEnabled, double? TargetLufs, int? Volume,
-        int? ScanWorkers, bool? AllowWebNext, bool? ShowWebCategories, bool? DebugLogging);
+        int? ScanWorkers, bool? AllowWebNext, bool? ShowWebCategories, bool? DebugLogging,
+        bool? ShowListenLive, bool? RequestLimitEnabled, int? RequestIntervalMinutes);
 
     [HttpGet]
     public async Task<IActionResult> Get(CancellationToken ct)
     {
         await using var db = await _dbf.CreateDbContextAsync(ct);
         var s = await db.Settings.AsNoTracking().FirstOrDefaultAsync(ct);
-        return s == null ? Conflict(new { error = "settings row missing" }) : Ok(Shape(s));
+        return s == null ? Conflict(new { error = "settings row missing" }) : Ok(Shape(s, WebConfigStore.Load(_cfg)));
     }
 
     [HttpPut]
@@ -71,15 +74,24 @@ public sealed class AdminSettingsController : ControllerBase
         // without a service restart.
         if (u.DebugLogging is bool dlog) _verbosity.SetDebug(dlog);
 
-        return Ok(Shape(s));
+        // The listener-facing flags live in web-config.json (no-migrations rule),
+        // not the Settings row — apply only the ones present and persist.
+        var web = WebConfigStore.Load(_cfg);
+        if (u.ShowListenLive is bool sll) web.ShowListenLive = sll;
+        if (u.RequestLimitEnabled is bool rle) web.RequestLimitEnabled = rle;
+        if (u.RequestIntervalMinutes is int rim) web.RequestIntervalMinutes = rim;
+        web = WebConfigStore.Save(_cfg, web);
+
+        return Ok(Shape(s, web));
     }
 
-    private static object Shape(Settings s) => new
+    private static object Shape(Settings s, WebConfigStore.WebConfig w) => new
     {
         s.SmartMix, s.SmartBeatFader, s.NextTriggerPct, s.NextFadeSeconds,
         s.AutoDj, s.AutoDjTracks, s.AutoDjBpmDev, s.ScanWorkers,
         s.NormalizeEnabled, s.LimiterEnabled, s.TargetLufs, s.Volume,
         s.StreamingEnabled, s.StreamingBitrate, s.AllowWebNext, s.ShowWebCategories,
-        s.DebugLogging
+        s.DebugLogging,
+        w.ShowListenLive, w.RequestLimitEnabled, w.RequestIntervalMinutes
     };
 }

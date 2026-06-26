@@ -339,6 +339,9 @@ export interface SettingsDto {
   allowWebNext: boolean
   showWebCategories: boolean
   debugLogging: boolean
+  showListenLive: boolean
+  requestLimitEnabled: boolean
+  requestIntervalMinutes: number
 }
 export interface SettingsUpdate {
   nextTriggerPct?: number
@@ -351,6 +354,9 @@ export interface SettingsUpdate {
   allowWebNext?: boolean
   showWebCategories?: boolean
   debugLogging?: boolean
+  showListenLive?: boolean
+  requestLimitEnabled?: boolean
+  requestIntervalMinutes?: number
 }
 export const getSettings = () => req<SettingsDto>('/api/admin/settings')
 export const putSettings = (u: SettingsUpdate) =>

@@ -164,6 +164,11 @@
 .lz-recent li:hover { color: var(--lz-text); }
 .lz-recent-empty { color: var(--lz-faint); font-size: .82rem; padding: 4px; }
 
+/* Bottom foot — only used on phones (theme picker + recent move here); the
+   media query below reveals it. */
+.lz-foot { display: none; }
+.lz-foot .lz-field-label:first-child { margin-top: 0; }
+
 /* Panels (results + playlist) */
 .lz-panel {
   background: var(--lz-panel);
@@ -433,4 +438,10 @@
   /* 16px inputs so mobile browsers don't zoom in on focus. */
   .lz-input { font-size: 16px; }
   .lz-result { padding: 10px 12px; }
+
+  /* Theme + recent live in the foot on phones only. */
+  .lz-theme-top { display: none; }
+  .lz-recent-desktop { display: none; }
+  .lz-foot { display: block; padding: 8px 12px 24px; border-top: 1px solid var(--lz-line); }
+  .lz-foot .lz-theme { width: 100%; margin-top: 8px; }
 }

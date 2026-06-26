@@ -87,11 +87,16 @@ public sealed class AutoDjScheduler : BackgroundService
         if (!await _playlist.IsAutoDjOnAsync(ct)) return;
         if (status.State != PlaybackEngineState.Playing || status.TrackId is null) return;
 
-        // ── Chain: keep one entry queued on the engine ────────────────────────
-        if (!status.Crossfading && status.NextTrackId is null)
+        // ── Chain: keep the engine armed with the playlist's NEXT entry ───────
+        // Arm Deck B when nothing is queued, OR re-arm when the queued track is
+        // no longer the playlist's next entry. The latter is the fix for accepted
+        // requests: a request is inserted just ahead of the previously-armed
+        // scheduled track, so without re-arming the engine would crossfade to the
+        // stale scheduled track and the request would be pruned unplayed.
+        if (!status.Crossfading)
         {
             var nextId = await _playlist.NextUpcomingTrackIdAsync(status.TrackId, ct);
-            if (nextId is int n && n != status.TrackId)
+            if (nextId is int n && n != status.TrackId && n != status.NextTrackId)
             {
                 var r = await _engine.QueueNextAsync(n, ct);
                 if (r != QueueResult.Ok)

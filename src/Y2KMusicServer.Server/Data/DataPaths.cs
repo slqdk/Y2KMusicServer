@@ -72,4 +72,13 @@ public static class DataPaths
     /// </summary>
     public static string NetworkSharesPath(IConfiguration cfg)
         => Path.Combine(DataDir(cfg), "network-shares.json");
+
+    /// <summary>
+    /// Listener web-settings file, at <c>&lt;DataPath&gt;\web-config.json</c> —
+    /// a sibling of <c>mixrules.json</c> / <c>network-shares.json</c>. Holds the
+    /// "Listen Live" visibility flag and the per-device request-throttle
+    /// settings. JSON, not the database (no-migrations rule).
+    /// </summary>
+    public static string WebConfigPath(IConfiguration cfg)
+        => Path.Combine(DataDir(cfg), "web-config.json");
 }

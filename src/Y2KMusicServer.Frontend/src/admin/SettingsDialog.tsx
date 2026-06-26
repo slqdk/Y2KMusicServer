@@ -42,7 +42,9 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
         normalizeEnabled: s.normalizeEnabled, limiterEnabled: s.limiterEnabled,
         targetLufs: s.targetLufs, volume: s.volume, scanWorkers: s.scanWorkers,
         allowWebNext: s.allowWebNext, showWebCategories: s.showWebCategories,
-        debugLogging: s.debugLogging
+        debugLogging: s.debugLogging,
+        showListenLive: s.showListenLive, requestLimitEnabled: s.requestLimitEnabled,
+        requestIntervalMinutes: s.requestIntervalMinutes
       })
       setS(r); setSaved(true)
     } catch { setErr('Save failed.') } finally { setBusy(false) }
@@ -205,7 +207,14 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
                 <legend>Web requests</legend>
                 <label className="w-check"><input type="checkbox" checked={s.allowWebNext} onChange={e => patch({ allowWebNext: e.target.checked })} /> Allow website visitors to skip to next song</label>
                 <label className="w-check"><input type="checkbox" checked={s.showWebCategories} onChange={e => patch({ showWebCategories: e.target.checked })} /> Show category selector on website</label>
-                <div className="w-muted">The listener page wiring lands with Ship 4.4; these flags persist now.</div>
+                <label className="w-check"><input type="checkbox" checked={s.showListenLive} onChange={e => patch({ showListenLive: e.target.checked })} /> Show &ldquo;Listen Live&rdquo; button on website</label>
+                <label className="w-check"><input type="checkbox" checked={s.requestLimitEnabled} onChange={e => patch({ requestLimitEnabled: e.target.checked })} /> Limit how often a device can request a song</label>
+                <div className="w-formrow">
+                  <label>Minutes between requests:</label>
+                  <input type="number" min={1} max={1440} value={s.requestIntervalMinutes} disabled={!s.requestLimitEnabled}
+                    onChange={e => patch({ requestIntervalMinutes: Number(e.target.value) })} style={{ width: 64 }} />
+                  <span className="w-muted">per device</span>
+                </div>
               </fieldset>
 
               <fieldset className="w-group">
