@@ -3,26 +3,36 @@ using Y2KMusicServer.Server.Scanning;
 namespace Y2KMusicServer.Server.Audio;
 
 /// <summary>
-/// Chains a missing-only analysis pass off the end of every scan, so newly
-/// indexed tracks get their BPM/loudness filled ahead of playback (which is what
-/// lets Auto DJ match BPM and the crossfade beat-align on the incoming track).
+/// Keeps the BPM/loudness columns filled ahead of playback (which is what lets
+/// Auto DJ match BPM and the crossfade beat-align on the incoming track). It has
+/// two triggers:
 ///
-/// There is deliberately NO startup scan: the library is not re-walked on boot
-/// (that re-read every file's tags on each start and burned CPU during
-/// playback). Scanning is triggered only by assigning a folder to a category, or
-/// by a manual per-category rescan from the admin UI. Either way the
-/// scan-complete handler here kicks a missing-only
-/// <see cref="AudioAnalysisService"/> pass — it selects only tracks lacking
-/// BPM/loudness, so it also mops up anything an interrupted earlier pass left.
+/// 1. Startup resume — shortly after boot it kicks a missing-only
+///    <see cref="AudioAnalysisService"/> pass, so an analysis interrupted by a
+///    restart picks up where it left off. The pass selects only tracks lacking
+///    BPM/loudness, so a fully-analysed library does no work; it does NOT re-walk
+///    the library (there is deliberately no startup scan — that re-read every
+///    file's tags on each start and burned CPU). The kick is delayed so DB init
+///    and the network-share reconnect settle first, and the analysis pass
+///    authenticates shares itself as a backstop.
 ///
-/// If a pass is already running when a scan completes, the start is a no-op and
-/// the new tracks are picked up by the next scan/pass.
+/// 2. Chain off scans — when a scan completes it kicks the same missing-only
+///    pass, scoped to the scanned folder, so newly indexed tracks get measured.
+///    Scans come only from a folder-add or a manual per-category rescan.
+///
+/// If a pass is already running when either trigger fires, the start is queued by
+/// <see cref="AudioAnalysisService"/> rather than dropped.
 /// </summary>
 public sealed class AnalysisAutoFillService : IHostedService
 {
     private readonly LibraryScanner _scanner;
     private readonly AudioAnalysisService _analysis;
     private readonly ILogger<AnalysisAutoFillService> _log;
+    private readonly CancellationTokenSource _cts = new();
+
+    // Let DB init + the network-share reconnect (which itself waits ~5s) settle
+    // before the boot-time resume reads any files.
+    private static readonly TimeSpan ResumeDelay = TimeSpan.FromSeconds(8);
 
     public AnalysisAutoFillService(
         LibraryScanner scanner,
@@ -36,15 +46,31 @@ public sealed class AnalysisAutoFillService : IHostedService
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        // Subscribe to scan completion only — no startup scan is kicked. Scans
-        // come from a folder-add or a manual per-category rescan; this handler
-        // then fills any missing analysis. Schema is created by DbInitializer.
+        // Chain analysis off every scan completion (folder-add or manual rescan).
         _scanner.Progress += OnScanProgress;
+
+        // Resume an interrupted analysis on boot — a missing-only pass over the
+        // whole library, so anything a restart left unmeasured gets finished. No
+        // startup scan: the library is not re-walked. Delayed so startup and the
+        // share reconnect settle first; cancelled if the host stops before then.
+        _ = ResumeAfterDelayAsync(_cts.Token);
         return Task.CompletedTask;
+    }
+
+    private async Task ResumeAfterDelayAsync(CancellationToken ct)
+    {
+        try { await Task.Delay(ResumeDelay, ct); }
+        catch (OperationCanceledException) { return; }
+
+        if (_analysis.TryStart(reanalyzeAll: false, folderId: null))
+            _log.LogInformation("Startup: resuming analysis of any unmeasured tracks.");
+        else
+            _log.LogDebug("Startup: an analysis pass is already running; resume skipped.");
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
+        _cts.Cancel();
         _scanner.Progress -= OnScanProgress;
         return Task.CompletedTask;
     }

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
 using Y2KMusicServer.Server.Data;
+using Y2KMusicServer.Server.Network;
 
 namespace Y2KMusicServer.Server.Audio;
 
@@ -16,6 +17,7 @@ namespace Y2KMusicServer.Server.Audio;
 public sealed class AudioAnalysisService
 {
     private readonly IDbContextFactory<Y2KDbContext> _dbf;
+    private readonly NetworkShareConnector _connector;
     private readonly ILogger<AudioAnalysisService> _log;
 
     private readonly object _gate = new();
@@ -23,9 +25,10 @@ public sealed class AudioAnalysisService
     private bool _busy; // worker loop active (draining the queue)
     private volatile AnalysisProgress _current = new() { State = AnalysisState.Idle };
 
-    public AudioAnalysisService(IDbContextFactory<Y2KDbContext> dbf, ILogger<AudioAnalysisService> log)
+    public AudioAnalysisService(IDbContextFactory<Y2KDbContext> dbf, NetworkShareConnector connector, ILogger<AudioAnalysisService> log)
     {
         _dbf = dbf;
+        _connector = connector;
         _log = log;
     }
 
@@ -125,6 +128,20 @@ public sealed class AudioAnalysisService
         }
 
         int workers = ReadWorkers();
+
+        // Make sure any network shares holding these tracks are authenticated
+        // before decoding — analysis can run from boot (the startup resume) before
+        // the WNet session is up, and reads would otherwise fail. Mirrors the
+        // scanner; local files have no share root and are skipped. Windows-only.
+        if (OperatingSystem.IsWindows())
+        {
+            foreach (var root in items
+                .Select(i => NetworkShareConnector.ShareRoot(i.Path))
+                .Where(r => r is not null).Select(r => r!)
+                .Distinct(StringComparer.OrdinalIgnoreCase))
+                _connector.EnsureConnected(root);
+        }
+
         var results = new ConcurrentDictionary<int, Result>();
         int processed = 0, updated = 0, failed = 0;
         long lastEmitTicks = 0;
