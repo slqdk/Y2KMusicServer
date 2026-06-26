@@ -403,6 +403,20 @@
 .w-table tr { cursor: default; user-select: none; }
 .w-num { text-align: right; font-variant-numeric: tabular-nums; }
 
+/* Resizable, fixed-layout grids (Library + Playlist). Fixed layout makes the
+   <colgroup> percentages authoritative, so the table is always exactly its
+   container width — it never scrolls sideways — and overlong cells/headers clip
+   with an ellipsis. The divider handle sits inside the right edge of each
+   header cell (the sticky th is its positioning context). */
+.w-table.w-grid { table-layout: fixed; }
+.w-table.w-grid th { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.w-colresizer {
+  position: absolute; top: 0; right: 0;
+  width: 6px; height: 100%;
+  cursor: col-resize; z-index: 3;
+}
+.w-colresizer:hover { box-shadow: inset -2px 0 var(--w-sel, #0a246a); }
+
 .w-toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
 .w-spacer { flex: 1; }
 .w-muted { color: var(--w-muted, #444); }

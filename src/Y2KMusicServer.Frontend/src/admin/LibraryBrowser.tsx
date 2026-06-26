@@ -6,6 +6,7 @@ import CategoryDialog from './CategoryDialog'
 import PropertiesDialog from './PropertiesDialog'
 import ScanBar from './ScanBar'
 import AnalyzeBar from './AnalyzeBar'
+import { useColumnWidths, ColResizer } from './useColumns'
 
 // The library loads in full and scrolls; this take covers any realistic library
 // in one request (the server clamps it to its own ceiling).
@@ -29,6 +30,9 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
   const [menu, setMenu] = useState<RowMenu | null>(null)
   const [propsId, setPropsId] = useState<number | null>(null)
   const debounce = useRef<number | undefined>(undefined)
+
+  // Resizable, fixed-width columns: Title, Artist, Category, Dur, BPM, LUFS.
+  const { colgroup, startResize } = useColumnWidths('y2k.cols.library', [34, 30, 14, 7, 7, 8])
 
   const refreshCats = () => api.getCategories().then(setCats).catch(() => {})
   useEffect(() => { refreshCats() }, [])
@@ -161,12 +165,17 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
 
       {/* Track table. Double-click a row to queue it as the next song; right-click
           for the full action menu. */}
-      <div className="w-listwrap w-sunken" style={{ flex: 1, minHeight: 0, marginTop: 6 }}>
-        <table className="w-table">
+      <div className="w-listwrap w-sunken" style={{ flex: 1, minHeight: 0, marginTop: 6, overflowX: 'hidden' }}>
+        <table className="w-table w-grid">
+          {colgroup}
           <thead>
             <tr>
-              <th>Title</th><th>Artist</th><th>Category</th>
-              <th className="w-num">Dur</th><th className="w-num">BPM</th><th className="w-num">LUFS</th>
+              <th>Title<ColResizer onMouseDown={startResize(0)} /></th>
+              <th>Artist<ColResizer onMouseDown={startResize(1)} /></th>
+              <th>Category<ColResizer onMouseDown={startResize(2)} /></th>
+              <th className="w-num">Dur<ColResizer onMouseDown={startResize(3)} /></th>
+              <th className="w-num">BPM<ColResizer onMouseDown={startResize(4)} /></th>
+              <th className="w-num">LUFS</th>
             </tr>
           </thead>
           <tbody>

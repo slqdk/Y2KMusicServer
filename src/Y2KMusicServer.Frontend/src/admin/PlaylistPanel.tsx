@@ -2,6 +2,7 @@ import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import * as api from './api'
 import { fmtTime } from './api'
 import RequestsPanel from './RequestsPanel'
+import { useColumnWidths, ColResizer } from './useColumns'
 
 // Right-click menu geometry, used only to keep it inside the viewport.
 const MENU_W = 200
@@ -16,6 +17,10 @@ export default function PlaylistPanel(
   const [busy, setBusy] = useState(false)
   const [selId, setSelId] = useState<number | null>(null)
   const [menu, setMenu] = useState<RowMenu | null>(null)
+
+  // Resizable, fixed-width columns: #, Title, Artist, Dur, Mix-in, BPM, LUFS,
+  // Added by, and the remove button.
+  const { colgroup, startResize } = useColumnWidths('y2k.cols.playlist', [5, 25, 22, 8, 9, 7, 8, 11, 5])
 
   const refreshList = () => api.getPlaylist().then(setList).catch(() => {})
   useEffect(() => {
@@ -74,14 +79,20 @@ export default function PlaylistPanel(
       <RequestsPanel onAccepted={refreshList} />
       {/* Click a row to select; double-click plays it now (crossfade);
           right-click for the action menu. */}
-      <div className="w-listwrap w-sunken" style={{ flex: 1, minHeight: 0 }}>
-        <table className="w-table">
+      <div className="w-listwrap w-sunken" style={{ flex: 1, minHeight: 0, overflowX: 'hidden' }}>
+        <table className="w-table w-grid">
+          {colgroup}
           <thead>
             <tr>
-              <th>#</th><th>Title</th><th>Artist</th>
-              <th className="w-num">Dur</th><th className="w-num">Mix-in</th>
-              <th className="w-num">BPM</th><th className="w-num">LUFS</th>
-              <th>Added by</th><th></th>
+              <th className="w-num">#<ColResizer onMouseDown={startResize(0)} /></th>
+              <th>Title<ColResizer onMouseDown={startResize(1)} /></th>
+              <th>Artist<ColResizer onMouseDown={startResize(2)} /></th>
+              <th className="w-num">Dur<ColResizer onMouseDown={startResize(3)} /></th>
+              <th className="w-num">Mix-in<ColResizer onMouseDown={startResize(4)} /></th>
+              <th className="w-num">BPM<ColResizer onMouseDown={startResize(5)} /></th>
+              <th className="w-num">LUFS<ColResizer onMouseDown={startResize(6)} /></th>
+              <th>Added by<ColResizer onMouseDown={startResize(7)} /></th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
