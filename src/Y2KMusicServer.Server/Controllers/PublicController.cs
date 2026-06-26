@@ -174,14 +174,39 @@ public sealed class PublicController : ControllerBase
     public async Task<IActionResult> CategorySelect([FromBody] CategorySelectBody? body, CancellationToken ct)
     {
         await using var db = await _dbf.CreateDbContextAsync(ct);
-        var show = (await db.Settings.AsNoTracking().FirstOrDefaultAsync(ct))?.ShowWebCategories ?? false;
-        if (!show) return StatusCode(403, new { error = "category selection is disabled" });
+        var settings = await db.Settings.AsNoTracking().FirstOrDefaultAsync(ct);
+        if (!(settings?.ShowWebCategories ?? false))
+            return StatusCode(403, new { error = "category selection is disabled" });
 
-        // Only allow enabled category ids through.
+        // Only allow enabled category ids through (empty = clear the override).
         var enabled = await db.Categories.AsNoTracking().Where(c => c.Enabled).Select(c => c.Id).ToListAsync(ct);
         var ids = (body?.CategoryIds ?? Array.Empty<int>()).Where(enabled.Contains).ToArray();
+
+        // Set the override first so the rebuild below draws from the picked
+        // categories. Empty clears it and falls back to the Auto DJ schedule.
         _playlist.SetWebCategories(ids);
-        return Ok(new { selected = ids });
+
+        // Apply the switch immediately: replace whatever is queued with tracks
+        // from the new selection (or the schedule) and crossfade to the first of
+        // them as soon as possible, so the music moves to the picks right away.
+        // This needs Auto DJ on — it's what fills the queue; with it off we just
+        // store the override for when it's turned on.
+        if (settings is not { AutoDj: true })
+            return Ok(new { selected = ids, applied = false, reason = "autoDjOff" });
+
+        int? currentTrackId = _engine.GetStatus().TrackId;
+        await _playlist.ClearUpcomingAsync(currentTrackId, ct);
+        int added = await _playlist.TopUpAsync(ct);
+        if (added == 0)
+            return Ok(new { selected = ids, applied = false, reason = "noTracks" });
+
+        // Crossfade off the current track into the first freshly-queued one
+        // ("Next" to a track named on the spot — prepares Deck B and fades now).
+        int? firstUpcoming = await _playlist.NextUpcomingTrackIdAsync(currentTrackId, ct);
+        if (firstUpcoming is int tid)
+            await _engine.NextAsync(tid, ct);
+
+        return Ok(new { selected = ids, applied = true, added });
     }
 
     [HttpPost("next")]

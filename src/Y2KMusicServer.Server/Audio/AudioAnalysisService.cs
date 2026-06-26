@@ -142,9 +142,60 @@ public sealed class AudioAnalysisService
                 _connector.EnsureConnected(root);
         }
 
-        var results = new ConcurrentDictionary<int, Result>();
         int processed = 0, updated = 0, failed = 0;
         long lastEmitTicks = 0;
+
+        // Persist incrementally so an interrupted pass leaves its finished work on
+        // disk. Measurement is CPU-bound and parallel, but SQLite is single-writer,
+        // so completed results are handed to ONE writer task that commits them in
+        // small batches — by count, or after a short interval, whichever comes
+        // first. Because the pass is missing-only, every committed track is skipped
+        // on the next run, so closing mid-pass costs at most the last uncommitted
+        // batch instead of the whole library.
+        const int flushEvery = 50;                    // checkpoint every N measured tracks
+        var flushInterval = TimeSpan.FromSeconds(3);  // …or this often, whichever first
+        var pending = new BlockingCollection<(int Id, Result Res)>();
+
+        var writer = Task.Run(() =>
+        {
+            using var db = _dbf.CreateDbContext();
+            var buf = new List<(int Id, Result Res)>(flushEvery);
+            var lastFlush = DateTime.UtcNow;
+
+            void Flush()
+            {
+                if (buf.Count == 0) return;
+                var map = buf.ToDictionary(x => x.Id, x => x.Res);
+                var ids = map.Keys.ToList();
+                var tracks = db.Tracks.Where(t => ids.Contains(t.Id)).ToList();
+                foreach (var t in tracks)
+                {
+                    var r = map[t.Id];
+                    if (r.Lufs != null) t.LufsIntegrated = r.Lufs;
+                    if (r.Bpm != null)
+                    {
+                        t.Bpm = r.Bpm;
+                        t.BpmConfidence = r.BpmConfidence;
+                        t.BeatPhaseOffsetSec = r.BeatPhase;
+                    }
+                }
+                db.SaveChanges();
+                db.ChangeTracker.Clear();   // one long-lived context — don't accumulate tracked rows
+                buf.Clear();
+                lastFlush = DateTime.UtcNow;
+            }
+
+            // Drain until the producers signal completion and the queue empties.
+            // The take timeout lets a partial batch flush on the interval even while
+            // every worker is busy decoding the next (slow) track.
+            while (!pending.IsCompleted)
+            {
+                if (pending.TryTake(out var rec, 500)) buf.Add(rec);
+                if (buf.Count >= flushEvery || (buf.Count > 0 && DateTime.UtcNow - lastFlush >= flushInterval))
+                    Flush();
+            }
+            Flush();   // final partial batch on clean completion
+        });
 
         Parallel.ForEach(items, new ParallelOptions { MaxDegreeOfParallelism = workers }, item =>
         {
@@ -173,7 +224,7 @@ public sealed class AudioAnalysisService
                 _log.LogDebug(ex, "Analysis failed for {Path}", item.Path);
             }
 
-            if (res.Any) { results[item.Id] = res; Interlocked.Increment(ref updated); }
+            if (res.Any) { pending.Add((item.Id, res)); Interlocked.Increment(ref updated); }
             else Interlocked.Increment(ref failed);
 
             int done = Interlocked.Increment(ref processed);
@@ -193,7 +244,8 @@ public sealed class AudioAnalysisService
             }
         });
 
-        PersistResults(results);
+        pending.CompleteAdding();
+        writer.Wait();   // let the writer commit the last results before we report done
 
         Emit(new AnalysisProgress
         {
@@ -206,31 +258,6 @@ public sealed class AudioAnalysisService
         });
         _log.LogInformation("Audio analysis complete: {Updated}/{Total} analysed, {Failed} skipped.",
             updated, total, failed);
-    }
-
-    private void PersistResults(ConcurrentDictionary<int, Result> results)
-    {
-        if (results.IsEmpty) return;
-        var ids = results.Keys.ToList();
-        const int batch = 200;
-        using var db = _dbf.CreateDbContext();
-        for (int i = 0; i < ids.Count; i += batch)
-        {
-            var slice = ids.GetRange(i, Math.Min(batch, ids.Count - i));
-            var tracks = db.Tracks.Where(t => slice.Contains(t.Id)).ToList();
-            foreach (var t in tracks)
-            {
-                if (!results.TryGetValue(t.Id, out var r)) continue;
-                if (r.Lufs != null) t.LufsIntegrated = r.Lufs;
-                if (r.Bpm != null)
-                {
-                    t.Bpm = r.Bpm;
-                    t.BpmConfidence = r.BpmConfidence;
-                    t.BeatPhaseOffsetSec = r.BeatPhase;
-                }
-            }
-            db.SaveChanges();
-        }
     }
 
     private int ReadWorkers()

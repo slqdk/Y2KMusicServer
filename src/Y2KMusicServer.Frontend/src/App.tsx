@@ -69,6 +69,10 @@ export default function App() {
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const debounce = useRef<number | undefined>(undefined)
+  const catTimer = useRef<number | undefined>(undefined)
+  const selectedRef = useRef<number[]>([])
+  const appliedKey = useRef<string | null>(null)
+  const catKey = (ids: number[]) => [...ids].sort((a, b) => a - b).join(',')
 
   useEffect(() => { try { localStorage.setItem('y2k-listener-theme', theme) } catch { /* ignore */ } }, [theme])
 
@@ -86,6 +90,17 @@ export default function App() {
   }, [refresh])
 
   useEffect(() => { setArtOk(true) }, [np?.trackId])
+
+  // Mirror the live category selection into a ref the debounce timer can read,
+  // and seed the "last applied" baseline the first time categories load so an
+  // unchanged selection never re-applies.
+  useEffect(() => {
+    if (!cats) return
+    selectedRef.current = cats.selected
+    if (appliedKey.current === null) appliedKey.current = catKey(cats.selected)
+  }, [cats])
+
+  useEffect(() => () => window.clearTimeout(catTimer.current), [])
 
   // Debounced search; also records the (settled) term in recent searches.
   useEffect(() => {
@@ -144,17 +159,36 @@ export default function App() {
     } catch { flash('Request failed. Try again.') }
   }
 
-  const toggleCat = async (id: number) => {
-    if (!cats) return
-    const next = cats.selected.includes(id) ? cats.selected.filter(x => x !== id) : [...cats.selected, id]
-    setCats({ ...cats, selected: next })
+  // Commit a category selection: the server sets the override, rebuilds the
+  // queue from those categories (or the schedule when empty), and crossfades to
+  // the first new track. Optimistic toast for immediate feedback.
+  const applyCats = useCallback(async (ids: number[]) => {
+    appliedKey.current = catKey(ids)
+    flash(ids.length ? 'Switching to your picks…' : 'Back to the schedule…')
     try {
       const r = await j<{ selected: number[] }>('/api/category-select', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ categoryIds: next })
+        body: JSON.stringify({ categoryIds: ids }),
       })
-      setCats(c => c ? { ...c, selected: r.selected } : c)
-    } catch { /* the chip simply won't latch */ }
+      setCats(c => (c ? { ...c, selected: r.selected } : c))
+      appliedKey.current = catKey(r.selected)
+    } catch { /* the change just didn't take; leave the chips as they are */ }
+  }, [])
+
+  // Pick/unpick a category: update the chips instantly, then apply 3s after the
+  // last touch — and only if the selection actually changed — so the listener
+  // can keep toggling before it commits and the music crossfades over.
+  const toggleCat = (id: number) => {
+    setCats(prev => {
+      if (!prev) return prev
+      const next = prev.selected.includes(id) ? prev.selected.filter(x => x !== id) : [...prev.selected, id]
+      selectedRef.current = next
+      window.clearTimeout(catTimer.current)
+      catTimer.current = window.setTimeout(() => {
+        if (catKey(selectedRef.current) !== appliedKey.current) applyCats(selectedRef.current)
+      }, 3000)
+      return { ...prev, selected: next }
+    })
   }
 
   const stateLabel = np?.playing ? 'NOW PLAYING' : np?.trackId ? 'PAUSED' : 'OFF AIR'

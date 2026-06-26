@@ -300,6 +300,19 @@ public sealed class PlaylistService
         finally { _mutateGate.Release(); }
     }
 
+    /// <summary>
+    /// Track id of the first entry after the currently playing one, or null if
+    /// there is nothing queued. Used to pick the crossfade target right after a
+    /// queue rebuild (the listener category switch).
+    /// </summary>
+    public async Task<int?> NextUpcomingTrackIdAsync(int? currentTrackId, CancellationToken ct = default)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        var entries = await db.PlaylistEntries.AsNoTracking().OrderBy(e => e.Position).ToListAsync(ct);
+        int curPos = CurrentPosition(entries, currentTrackId);
+        return entries.FirstOrDefault(e => e.Position > curPos)?.TrackId;
+    }
+
     // ── Auto DJ top-up (the selection port) ───────────────────────────────────
 
     /// <summary>

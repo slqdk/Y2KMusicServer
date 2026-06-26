@@ -200,7 +200,7 @@
 .lz-result-dur { font-size: .8rem; color: var(--lz-faint); font-variant-numeric: tabular-nums; }
 
 /* Playlist table */
-.lz-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.lz-table { width: 100%; border-collapse: collapse; font-size: .85rem; table-layout: fixed; }
 .lz-table thead th {
   position: sticky; top: 0; z-index: 1;
   text-align: left; font-size: .64rem; letter-spacing: .1em; font-weight: 700; text-transform: uppercase;
@@ -213,7 +213,7 @@
 .lz-table th.lz-col-by, .lz-table td.lz-col-by { width: 92px; color: var(--lz-faint); }
 .lz-table tbody td { padding: 7px 10px; border-bottom: 1px solid var(--lz-line-soft, var(--lz-line)); vertical-align: middle; }
 .lz-table tbody tr:hover td { background: var(--lz-rowhover); }
-.lz-pl-title { color: var(--lz-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 1px; }
+.lz-pl-title { color: var(--lz-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lz-pl-artist { font-size: .8rem; color: var(--lz-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lz-row-now td { background: var(--lz-sel-row) !important; }
 .lz-row-now .lz-pl-title { color: var(--lz-sel-fg); font-weight: 700; }
