@@ -174,7 +174,10 @@ export default function App() {
         return
       }
       if (!r.ok) { flash('Request failed. Try again.'); return }
-      flash(`Requested “${selected.title ?? 'track'}” — the DJ will see it.`)
+      const d = await r.json().catch(() => null)
+      flash(d?.accepted
+        ? `Added “${selected.title ?? 'track'}” to the queue!`
+        : `Requested “${selected.title ?? 'track'}” — the DJ will see it.`)
       setSelectedId(null)
     } catch { flash('Request failed. Try again.') }
   }

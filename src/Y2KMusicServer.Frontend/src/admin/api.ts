@@ -342,6 +342,7 @@ export interface SettingsDto {
   showListenLive: boolean
   requestLimitEnabled: boolean
   requestIntervalMinutes: number
+  autoAcceptRequests: boolean
 }
 export interface SettingsUpdate {
   nextTriggerPct?: number
@@ -357,6 +358,7 @@ export interface SettingsUpdate {
   showListenLive?: boolean
   requestLimitEnabled?: boolean
   requestIntervalMinutes?: number
+  autoAcceptRequests?: boolean
 }
 export const getSettings = () => req<SettingsDto>('/api/admin/settings')
 export const putSettings = (u: SettingsUpdate) =>

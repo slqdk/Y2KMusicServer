@@ -161,15 +161,27 @@ public sealed class PublicController : ControllerBase
         var name = body.RequesterName?.Trim();
         if (name is { Length: > 40 }) name = name[..40];
 
+        // Auto-accept (web-config.json) short-circuits the DJ approve step: the
+        // request is stored as Accepted and dropped straight into the playlist as
+        // a Request entry, exactly as AdminRequestsController.Accept would.
+        bool autoAccept = web.AutoAcceptRequests;
+
         db.Requests.Add(new Data.Entities.Request
         {
             TrackId = body.TrackId,
             RequesterName = string.IsNullOrWhiteSpace(name) ? null : name,
-            Status = RequestStatus.Pending,
+            Status = autoAccept ? RequestStatus.Accepted : RequestStatus.Pending,
             CreatedAt = DateTime.UtcNow
         });
         await db.SaveChangesAsync(ct);
-        return Ok(new { ok = true });
+
+        if (autoAccept)
+        {
+            int? current = _engine.GetStatus().TrackId;
+            await _playlist.AddAsync(body.TrackId, PlaylistSource.Request, name ?? "Request", current, ct);
+        }
+
+        return Ok(new { ok = true, accepted = autoAccept });
     }
 
     /// <summary>Categories for the listener bar + the current override selection.</summary>

@@ -36,7 +36,8 @@ public sealed class AdminSettingsController : ControllerBase
         bool? SmartMix, bool? SmartBeatFader, int? NextTriggerPct, int? NextFadeSeconds,
         bool? NormalizeEnabled, bool? LimiterEnabled, double? TargetLufs, int? Volume,
         int? ScanWorkers, bool? AllowWebNext, bool? ShowWebCategories, bool? DebugLogging,
-        bool? ShowListenLive, bool? RequestLimitEnabled, int? RequestIntervalMinutes);
+        bool? ShowListenLive, bool? RequestLimitEnabled, int? RequestIntervalMinutes,
+        bool? AutoAcceptRequests);
 
     [HttpGet]
     public async Task<IActionResult> Get(CancellationToken ct)
@@ -80,6 +81,7 @@ public sealed class AdminSettingsController : ControllerBase
         if (u.ShowListenLive is bool sll) web.ShowListenLive = sll;
         if (u.RequestLimitEnabled is bool rle) web.RequestLimitEnabled = rle;
         if (u.RequestIntervalMinutes is int rim) web.RequestIntervalMinutes = rim;
+        if (u.AutoAcceptRequests is bool aar) web.AutoAcceptRequests = aar;
         web = WebConfigStore.Save(_cfg, web);
 
         return Ok(Shape(s, web));
@@ -92,6 +94,6 @@ public sealed class AdminSettingsController : ControllerBase
         s.NormalizeEnabled, s.LimiterEnabled, s.TargetLufs, s.Volume,
         s.StreamingEnabled, s.StreamingBitrate, s.AllowWebNext, s.ShowWebCategories,
         s.DebugLogging,
-        w.ShowListenLive, w.RequestLimitEnabled, w.RequestIntervalMinutes
+        w.ShowListenLive, w.RequestLimitEnabled, w.RequestIntervalMinutes, w.AutoAcceptRequests
     };
 }

@@ -22,6 +22,9 @@ public static class WebConfigStore
 
         /// <summary>Minutes a device must wait between requests when limiting is on.</summary>
         public int RequestIntervalMinutes { get; set; } = 10;
+
+        /// <summary>Accept incoming requests automatically (skip the DJ approve step).</summary>
+        public bool AutoAcceptRequests { get; set; } = false;
     }
 
     private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };

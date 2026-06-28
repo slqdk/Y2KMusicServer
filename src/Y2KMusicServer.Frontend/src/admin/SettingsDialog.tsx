@@ -44,7 +44,7 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
         allowWebNext: s.allowWebNext, showWebCategories: s.showWebCategories,
         debugLogging: s.debugLogging,
         showListenLive: s.showListenLive, requestLimitEnabled: s.requestLimitEnabled,
-        requestIntervalMinutes: s.requestIntervalMinutes
+        requestIntervalMinutes: s.requestIntervalMinutes, autoAcceptRequests: s.autoAcceptRequests
       })
       setS(r); setSaved(true)
     } catch { setErr('Save failed.') } finally { setBusy(false) }
@@ -206,6 +206,7 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
               <fieldset className="w-group">
                 <legend>Web requests</legend>
                 <label className="w-check"><input type="checkbox" checked={s.allowWebNext} onChange={e => patch({ allowWebNext: e.target.checked })} /> Allow website visitors to skip to next song</label>
+                <label className="w-check"><input type="checkbox" checked={s.autoAcceptRequests} onChange={e => patch({ autoAcceptRequests: e.target.checked })} /> Auto-accept requests (skip the approve step)</label>
                 <label className="w-check"><input type="checkbox" checked={s.showWebCategories} onChange={e => patch({ showWebCategories: e.target.checked })} /> Show category selector on website</label>
                 <label className="w-check"><input type="checkbox" checked={s.showListenLive} onChange={e => patch({ showListenLive: e.target.checked })} /> Show &ldquo;Listen Live&rdquo; button on website</label>
                 <label className="w-check"><input type="checkbox" checked={s.requestLimitEnabled} onChange={e => patch({ requestLimitEnabled: e.target.checked })} /> Limit how often a device can request a song</label>
