@@ -277,6 +277,13 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
         return s * (27f + s2) / (27f + 9f * s2);
     }
 
+    // Stream-health unit helpers: audio frames → ms, and ring fill (interleaved
+    // float samples) → ms. int.MaxValue means "never sampled" → reported as -1.
+    private static long FramesToMs(long frames) => frames * 1000 / SampleRate;
+    private static int RingMs(int interleavedSamples)
+        => interleavedSamples == int.MaxValue ? -1
+           : (int)((long)interleavedSamples / Channels * 1000 / SampleRate);
+
     private void DistributeLoop(CancellationToken ct)
     {
         const int chunkMs = 20;
@@ -292,6 +299,18 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
         timeBeginPeriod(1);
         var sw = Stopwatch.StartNew();
         long targetUs = 0;
+
+        // ── Stream-health instrumentation (DebugLogging only) ─────────────────
+        // Aggregated over a ~1 s window and emitted only when a deck actually
+        // starved the mix, so a clean stream logs nothing and a glitchy transition
+        // logs exactly when, on which deck, and how badly. "Dropouts" are the
+        // zero-filled gaps that the ear hears as static; "min ring" is how close the
+        // tap came to running dry.
+        const long healthWindowUs = 1_000_000;
+        long winStartUs = -1;
+        long zfFramesA = 0, zfFramesB = 0;
+        int shortfallsA = 0, shortfallsB = 0;
+        int minRingA = int.MaxValue, minRingB = int.MaxValue;
 
         try
         {
@@ -351,6 +370,20 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
 
                 int readA = a?.Drain(bufA, samplesPerChunk) ?? 0;
                 int readB = b?.Drain(bufB, samplesPerChunk) ?? 0;
+
+                // Stream-health sampling: a live tap that returns less than a full
+                // chunk forces a zero-filled (silent) gap below; record it and how
+                // close the ring is to empty. Cheap — one DeckTap lock per live deck.
+                if (a != null)
+                {
+                    if (readA < samplesPerChunk) { shortfallsA++; zfFramesA += (samplesPerChunk - readA) / Channels; }
+                    int av = a.Available; if (av < minRingA) minRingA = av;
+                }
+                if (b != null)
+                {
+                    if (readB < samplesPerChunk) { shortfallsB++; zfFramesB += (samplesPerChunk - readB) / Channels; }
+                    int av = b.Available; if (av < minRingB) minRingB = av;
+                }
 
                 // ── Mix + soft-clip (silence kept flowing for buffer health) ──
                 int n = samplesPerChunk;
@@ -437,6 +470,25 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
                 }
                 finally { _listenerLock.ExitReadLock(); }
                 if (died != null) PruneListeners(died);
+
+                // ── Stream-health emit: at most once per window, only when Debug is
+                // on AND a deck actually starved the mix (otherwise silent) ────────
+                if (winStartUs < 0) winStartUs = nowUs;
+                else if (nowUs - winStartUs >= healthWindowUs)
+                {
+                    if (_log.IsEnabled(LogLevel.Debug) && (zfFramesA > 0 || zfFramesB > 0))
+                    {
+                        _log.LogDebug(
+                            "Stream health ({Win}ms): A dropouts={ZfA}ms/{SfA} chunks (min ring {MinA}ms) | B dropouts={ZfB}ms/{SfB} chunks (min ring {MinB}ms)",
+                            (nowUs - winStartUs) / 1000,
+                            FramesToMs(zfFramesA), shortfallsA, RingMs(minRingA),
+                            FramesToMs(zfFramesB), shortfallsB, RingMs(minRingB));
+                    }
+                    winStartUs = nowUs;
+                    zfFramesA = zfFramesB = 0;
+                    shortfallsA = shortfallsB = 0;
+                    minRingA = minRingB = int.MaxValue;
+                }
             }
         }
         finally

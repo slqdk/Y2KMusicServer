@@ -55,6 +55,14 @@ public sealed class AudioEngine
     private const double TickMs = 50.0;
     private const float CrossFadeMinVol = 0.001f;
 
+    // How long before the scheduled crossfade trigger an auto/queued Deck B starts
+    // pumping silently, to warm its decode pipeline, the OS file cache (the music
+    // lives on a network share), and the JIT, and to spin up the source's sequential
+    // read-ahead — so the fade does not open on a cold decode that stalls and
+    // crackles. Deck B is re-seeked back to its in-point when the fade actually
+    // starts, so the pre-roll never changes where B enters the mix.
+    private const double PrerollSec = 3.0;
+
     // Fixed format the stream mixes at. Every deck is normalised to this rate
     // (and to stereo) ahead of its DeckTap, so the broadcast header stays
     // constant no matter what the source files are.
@@ -188,6 +196,7 @@ public sealed class AudioEngine
             _deckA.Out.Play();
             if (_crossfading) _deckB?.Out.Play();
             if (_prepared?.Manual == true && _bManualStarted) _prepared.DeckB.Out.Play();
+            if (_prepared?.PrerollStarted == true) _prepared.DeckB.Out.Play();
             _state = PlaybackEngineState.Playing;
         }
         EmitNowPlaying();
@@ -202,6 +211,7 @@ public sealed class AudioEngine
             _deckA.Out.Pause();
             if (_crossfading) _deckB?.Out.Pause();
             if (_prepared?.Manual == true && _bManualStarted) _prepared.DeckB.Out.Pause();
+            if (_prepared?.PrerollStarted == true) _prepared.DeckB.Out.Pause();
             _state = PlaybackEngineState.Paused;
         }
         EmitNowPlaying();
@@ -644,6 +654,23 @@ public sealed class AudioEngine
                 {
                     double pos = 0;
                     try { pos = _deckA.Reader.CurrentTime.TotalSeconds; } catch { }
+
+                    // Warm an auto Deck B ahead of the trigger: start its silent pump
+                    // so the decode pipeline, OS file cache, and read-ahead are hot
+                    // when the fade opens. B is re-seeked to its in-point at fade start
+                    // (StartCrossfade_Locked), so this never moves where B enters.
+                    // Manual B is operator-controlled and never auto-pre-rolled.
+                    if (!_prepared.Manual && !_prepared.PrerollStarted
+                        && pos >= _prepared.TriggerSec - PrerollSec)
+                    {
+                        _prepared.PrerollStarted = true;
+                        _prepared.DeckB.SilentPreroll = true; // suppress its VU/progress until the fade
+                        _prepared.DeckB.Out.Play();
+                        _log.LogDebug(
+                            "Preroll: warming Deck B {Pre:F1}s before trigger (pos {Pos:F2}s, trigger {Trig:F2}s)",
+                            PrerollSec, pos, _prepared.TriggerSec);
+                    }
+
                     if (!_prepared.Manual && pos >= _prepared.TriggerSec)
                     {
                         _log.LogDebug("Trig: fired at pos {Pos:F2}s (target {Target:F2}s)",
@@ -841,11 +868,29 @@ public sealed class AudioEngine
         _fadeStartVolA = _deckA.Vol.Volume;
         _deckBTargetVol = p.TargetVol;
         _deckB = p.DeckB;
-        // A manually-started B has been pumping silently; its tap ring holds ~8s of
-        // buffered silence. Clear it so the stream drains live samples (not the
-        // backlog) the instant the crossfade publishes B's tap. No-op for an auto B
-        // (never pumped, ring empty).
+
+        // If B was pre-rolled (auto warm-up) it has been decoding PAST its in-point
+        // while silent. Re-seek it back so the mix still enters exactly where the
+        // planner chose — the pre-roll only warmed the pipeline / cache / JIT, it must
+        // not advance B. (Manual B is never pre-rolled; it keeps the position the
+        // operator nudged it to.) Clearing SilentPreroll lets B's VU/progress flow now
+        // that it is the live incoming deck.
+        _deckB.SilentPreroll = false;
+        if (p.PrerollStarted)
+        {
+            try { _deckB.Reader.CurrentTime = TimeSpan.FromSeconds(_deckB.InPointSec); } catch { }
+        }
+
+        // Drop B's tap backlog (silent pre-roll / manual-preview samples) so the stream
+        // drains live audio the instant the crossfade publishes B's tap. No-op for an
+        // auto B that was never pre-rolled (ring already empty).
         _deckB.Tap.Reset();
+
+        // Scope both decks' decode-health counters to this fade, so the stats logged at
+        // promotion describe the crossfade window only (DebugLogging diagnosis).
+        _deckA.Tap.ResetStats();
+        _deckB.Tap.ResetStats();
+
         _crossFadePos = 0;
         _crossFadeStep = CrossfadeMath.StepPerTick(TickMs, effFade);
 
@@ -989,9 +1034,21 @@ public sealed class AudioEngine
         }
 
         if (dbg)
+        {
             _log.LogDebug(
                 "Finish: promote Deck B -> A | (pre) A={PreA} B={PreB} | (post) A={PostA} (VU handler rewired)",
                 preA, preB, FmtDesc(_deckA?.Reader.WaveFormat));
+
+            // Decode-health over the fade window (counters reset at StartCrossfade).
+            // High slow / maxRead means a deck could not keep real time during the
+            // fade — the upstream signature of the dropout "static" at the mix edges.
+            if (old != null)
+                _log.LogDebug("  decode A (outgoing): reads={R} slow={S} maxRead={M:F1}ms",
+                    old.Tap.Reads, old.Tap.SlowReads, old.Tap.MaxReadMicros / 1000.0);
+            if (_deckA != null)
+                _log.LogDebug("  decode B (incoming): reads={R} slow={S} maxRead={M:F1}ms",
+                    _deckA.Tap.Reads, _deckA.Tap.SlowReads, _deckA.Tap.MaxReadMicros / 1000.0);
+        }
 
         ResetCrossfadeState_Locked();
         _state = _deckA != null ? PlaybackEngineState.Playing : PlaybackEngineState.Stopped;
@@ -1246,6 +1303,11 @@ public sealed class AudioEngine
 
     private void OnMeter(Deck deck, StreamVolumeEventArgs ev)
     {
+        // An auto Deck B pumps silently before the crossfade to warm its decode path;
+        // don't surface its meters/position to the UI until it is the live incoming
+        // deck (SilentPreroll is cleared at fade start).
+        if (deck.SilentPreroll) return;
+
         var now = Environment.TickCount64;
 
         if (now - deck.LastVuTicks >= 100)
@@ -1357,6 +1419,7 @@ public sealed class AudioEngine
         public required float TargetVol { get; init; }
         public required bool BeatAligned { get; init; }
         public bool Manual { get; init; }   // operator-started Deck B (silent preview): skip auto-fire, crossfade on demand
+        public bool PrerollStarted { get; set; }   // auto Deck B warm-up pump has been started (re-seek to in-point at fade start)
         public string? Reason { get; init; }
 
         // Carried for the verbose mix-decision card (Debug logging only).
@@ -1382,6 +1445,7 @@ public sealed class AudioEngine
 
         public string Label { get; set; } = "A";
         public float BaseVolume { get; set; } = 1f;
+        public bool SilentPreroll { get; set; } // auto warm-up pump running; suppress its UI events
         public double InPointSec { get; set; } // musical in-point (Deck B crossfade marker)
 
         public int TrackId { get; init; }
