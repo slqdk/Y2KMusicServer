@@ -12,11 +12,26 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [saved, setSaved] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
+  // YouTube preflight (its own endpoint; runs on demand, persists nothing).
+  const [ytResult, setYtResult] = useState<api.YouTubeCheckResult | null>(null)
+  const [ytBusy, setYtBusy] = useState(false)
+  const [ytErr, setYtErr] = useState<string | null>(null)
+  const [ytEnabled, setYtEnabled] = useState<boolean | null>(null)
+  const [ytMaxMB, setYtMaxMB] = useState<number | null>(null)
+  const [ytMaxAgeDays, setYtMaxAgeDays] = useState<number | null>(null)
+  const [ytCache, setYtCache] = useState<api.WebCacheStats | null>(null)
+  const [ytClearing, setYtClearing] = useState(false)
+  const [ytClearMsg, setYtClearMsg] = useState<string | null>(null)
+
   useEffect(() => {
     api.getSettings().then(setS).catch(() => setErr('Could not load settings.'))
     api.getAutoDj().then(setAutodj).catch(() => {})
     api.getStream().then(setStream).catch(() => {})
     api.getMixRules().then(setMix).catch(() => {})
+    api.getYouTubeSettings().then(s => {
+      setYtEnabled(s.enabled); setYtMaxMB(s.cacheMaxMB); setYtMaxAgeDays(s.cacheMaxAgeDays)
+    }).catch(() => setYtEnabled(false))
+    api.getYouTubeCache().then(setYtCache).catch(() => {})
   }, [])
 
   const patch = (p: Partial<api.SettingsDto>) => setS(prev => (prev ? { ...prev, ...p } : prev))
@@ -49,6 +64,53 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
       setS(r); setSaved(true)
     } catch { setErr('Save failed.') } finally { setBusy(false) }
   }
+
+  // Runs the YouTube tool-stack preflight. The check can take up to ~a minute
+  // (the live dry-run extract), so the button shows a working state throughout.
+  const runYtCheck = async () => {
+    setYtBusy(true); setYtErr(null); setYtResult(null)
+    try { setYtResult(await api.checkYouTube()) }
+    catch { setYtErr('Check failed to run.') }
+    finally { setYtBusy(false) }
+  }
+
+  // The fetch on/off gate lives in its own store (integrations.json) and applies
+  // immediately, like the Auto DJ / streaming toggles.
+  const toggleYt = async (on: boolean) => {
+    setYtEnabled(on)
+    try { setYtEnabled((await api.setYouTubeSettings({ enabled: on })).enabled) }
+    catch { setYtEnabled(!on) }
+  }
+
+  // Persist both caps together (backend merges the update); 0 = unlimited / off.
+  const saveCaps = async () => {
+    try {
+      const s = await api.setYouTubeSettings({
+        cacheMaxMB: ytMaxMB ?? 0, cacheMaxAgeDays: ytMaxAgeDays ?? 0,
+      })
+      setYtMaxMB(s.cacheMaxMB); setYtMaxAgeDays(s.cacheMaxAgeDays)
+    } catch { /* keep the typed value */ }
+  }
+
+  const clearCache = async () => {
+    setYtClearing(true); setYtClearMsg(null)
+    try {
+      const r = await api.clearYouTubeCache()
+      setYtClearMsg(`Removed ${r.removed}, freed ${(r.freedBytes / 1048576).toFixed(1)} MB`)
+      api.getYouTubeCache().then(setYtCache).catch(() => {})
+    } catch { setYtClearMsg('Clear failed.') }
+    finally { setYtClearing(false) }
+  }
+
+  // Overall banner: red on any critical failure, amber if only optional stages
+  // failed (still usable), green when everything passed.
+  const ytSummary = ytResult
+    ? (!ytResult.ok
+        ? { cls: 'w-err', txt: 'Problems found' }
+        : ytResult.steps.some(st => !st.ok && !st.critical)
+          ? { cls: 'w-yt-warntext', txt: 'Ready — with warnings' }
+          : { cls: 'w-yt-pass', txt: 'All checks passed' })
+    : null
 
   return (
     <div className="w-overlay" onMouseDown={onClose}>
@@ -215,6 +277,84 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
                   <input type="number" min={1} max={1440} value={s.requestIntervalMinutes} disabled={!s.requestLimitEnabled}
                     onChange={e => patch({ requestIntervalMinutes: Number(e.target.value) })} style={{ width: 64 }} />
                   <span className="w-muted">per device</span>
+                </div>
+              </fieldset>
+
+              <fieldset className="w-group">
+                <legend>YouTube integration</legend>
+                <label className="w-check">
+                  <input type="checkbox" checked={ytEnabled ?? false} disabled={ytEnabled === null}
+                    onChange={e => toggleYt(e.target.checked)} />
+                  Enable YouTube fetch (search &amp; play tracks not in your library)
+                </label>
+                <div className="w-muted" style={{ margin: '0 0 6px' }}>
+                  Play tracks that aren&apos;t in your library by fetching them from YouTube
+                  (downloaded to a local cache, then mixed like any other track). Not switched on
+                  yet — this tests that the yt-dlp tool stack works in the service&apos;s own
+                  process context before it is enabled. It downloads nothing.
+                </div>
+                <div className="w-toolbar">
+                  <button className="w-btn" disabled={ytBusy} onClick={runYtCheck}>
+                    {ytBusy ? 'Testing…' : 'Test integration'}
+                  </button>
+                  {ytSummary &&
+                    <span className={ytSummary.cls}>{ytSummary.txt} ({ytResult!.elapsedMs} ms)</span>}
+                  {ytErr && <span className="w-err">{ytErr}</span>}
+                </div>
+                {ytBusy && (
+                  <div className="w-muted" style={{ marginTop: 4 }}>
+                    Running the preflight — the live extraction step can take up to a minute…
+                  </div>
+                )}
+                {ytResult && (
+                  <table className="w-yt-check">
+                    <tbody>
+                      {ytResult.steps.map(st => (
+                        <tr key={st.name}>
+                          <td className="w-yt-status">
+                            <span className={'w-yt-dot ' +
+                              (st.ok ? 'w-yt-ok' : st.critical ? 'w-yt-bad' : 'w-yt-warn')} />
+                          </td>
+                          <td className="w-yt-name">
+                            {st.name}
+                            {!st.ok && !st.critical && <span className="w-muted"> (optional)</span>}
+                          </td>
+                          <td className="w-yt-detail">
+                            {st.detail}
+                            {st.version && <div className="w-muted">{st.version}</div>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+
+                <div className="w-formrow" style={{ marginTop: 8 }}>
+                  <span className="w-muted">
+                    Cache: {ytCache
+                      ? `${ytCache.trackCount} track(s), ${(ytCache.bytes / 1048576).toFixed(1)} MB` +
+                        (ytCache.pinnedCount ? ` (${ytCache.pinnedCount} in use)` : '')
+                      : '…'}
+                  </span>
+                  <span className="w-spacer" />
+                  <button className="w-btn" disabled={ytClearing} onClick={clearCache}>
+                    {ytClearing ? 'Clearing…' : 'Clear cache'}
+                  </button>
+                </div>
+                {ytClearMsg && <div className="w-muted" style={{ marginBottom: 4 }}>{ytClearMsg}</div>}
+                <div className="w-formrow">
+                  <label>Max cache size (MB, 0 = unlimited):</label>
+                  <input type="number" min={0} value={ytMaxMB ?? 0} style={{ width: 72 }}
+                    disabled={ytMaxMB === null}
+                    onChange={e => setYtMaxMB(Math.max(0, Number(e.target.value) || 0))}
+                    onBlur={saveCaps} />
+                </div>
+                <div className="w-formrow">
+                  <label>Max cache age (days, 0 = off):</label>
+                  <input type="number" min={0} value={ytMaxAgeDays ?? 0} style={{ width: 72 }}
+                    disabled={ytMaxAgeDays === null}
+                    onChange={e => setYtMaxAgeDays(Math.max(0, Number(e.target.value) || 0))}
+                    onBlur={saveCaps} />
                 </div>
               </fieldset>
 

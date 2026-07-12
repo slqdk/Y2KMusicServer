@@ -14,6 +14,7 @@
 //  legacy build's StreamingEncoder.DeckTap, de-WinForms'd.
 // ═══════════════════════════════════════════════════════════════════════════
 
+using System.Diagnostics;
 using NAudio.Wave;
 
 namespace Y2KMusicServer.Server.Audio;
@@ -33,6 +34,31 @@ public sealed class DeckTap : ISampleProvider
 
     public WaveFormat WaveFormat => _source.WaveFormat;
 
+    // ── Decode-health stats (DebugLogging diagnosis) ──────────────────────────
+    // Written only by the deck's pump thread (single writer); read occasionally by
+    // the engine thread when it logs a transition. 64-bit aligned reads are atomic
+    // on x64 (the only target), so these need no lock. A "slow read" is one whose
+    // wall-clock cost exceeded the real-time budget for the samples it returned —
+    // i.e. the decode / network-share read could not keep up with playback, which
+    // is exactly what starves the stream ring and produces the dropout "static".
+    private long _reads;
+    private long _slowReads;
+    private long _maxReadMicros;
+
+    public long Reads => _reads;
+    public long SlowReads => _slowReads;
+    public long MaxReadMicros => _maxReadMicros;
+
+    /// <summary>Zero the decode-health counters. The engine calls this at the start
+    /// of a crossfade so the stats it logs at promotion cover the fade window only,
+    /// not the deck's whole prior playback.</summary>
+    public void ResetStats()
+    {
+        _reads = 0;
+        _slowReads = 0;
+        _maxReadMicros = 0;
+    }
+
     public DeckTap(ISampleProvider source)
         => _source = source ?? throw new ArgumentNullException(nameof(source));
 
@@ -44,9 +70,25 @@ public sealed class DeckTap : ISampleProvider
     /// </summary>
     public int Read(float[] buffer, int offset, int count)
     {
+        long startTicks = Stopwatch.GetTimestamp();
         int read = _source.Read(buffer, offset, count);
+        long elapsedMicros = (Stopwatch.GetTimestamp() - startTicks) * 1_000_000L / Stopwatch.Frequency;
+
         if (read > 0)
         {
+            _reads++;
+            if (elapsedMicros > _maxReadMicros) _maxReadMicros = elapsedMicros;
+
+            // Real-time budget for the audio this read produced. Exceeding it means
+            // the pump could not sustain real time on this buffer (an I/O / decode
+            // stall) — the upstream cause of a ring underrun.
+            var wf = _source.WaveFormat;
+            if (wf.SampleRate > 0 && wf.Channels > 0)
+            {
+                long budgetMicros = (long)(read / (double)wf.Channels / wf.SampleRate * 1_000_000.0);
+                if (elapsedMicros > budgetMicros) _slowReads++;
+            }
+
             lock (_lock)
             {
                 for (int i = 0; i < read; i++)

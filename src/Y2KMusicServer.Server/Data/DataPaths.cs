@@ -81,4 +81,32 @@ public static class DataPaths
     /// </summary>
     public static string WebConfigPath(IConfiguration cfg)
         => Path.Combine(DataDir(cfg), "web-config.json");
+
+    /// <summary>
+    /// Optional-integration settings file, at
+    /// <c>&lt;DataPath&gt;\integrations.json</c> — a sibling of
+    /// <c>web-config.json</c>. Holds the third-party integration flags (currently
+    /// the YouTube fetch on/off gate). JSON, not the database (no-migrations rule).
+    /// </summary>
+    public static string IntegrationsConfigPath(IConfiguration cfg)
+        => Path.Combine(DataDir(cfg), "integrations.json");
+
+    /// <summary>
+    /// Download cache for web-fetched tracks, at <c>&lt;DataPath&gt;\webcache</c>.
+    /// A sibling of <c>data</c> / <c>logs</c>, deliberately NOT under any category
+    /// folder — so the folder-scoped library clear (which owns tracks purely by
+    /// path prefix) can never prune these. Each cached track is
+    /// <c>&lt;videoId&gt;.mp3</c> with a matching Tracks row; rebuildable by
+    /// re-fetching.
+    /// </summary>
+    public static string WebCacheDir(IConfiguration cfg)
+        => Path.Combine(DataDir(cfg), "webcache");
+
+    /// <summary>Ensures the web-cache directory exists and returns it.</summary>
+    public static string EnsureWebCacheDir(IConfiguration cfg)
+    {
+        var dir = WebCacheDir(cfg);
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
 }

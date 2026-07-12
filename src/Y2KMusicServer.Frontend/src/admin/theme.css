@@ -576,3 +576,40 @@
 .w-mode-bar { display: flex; align-items: center; gap: 6px; padding: 2px 0; flex-wrap: wrap; }
 .w-mode-label { font-size: 11px; color: var(--w-muted, #444); }
 .w-sect-label { font-size: 11px; font-weight: bold; min-width: 64px; }
+
+/* ── YouTube integration preflight (Settings dialog) ──────────────────────
+   Skin-neutral status table: reads the active skin's vars so borders and font
+   match, with fixed high-contrast dots for pass / warn / fail. Scoped .w-yt-*
+   names so nothing here bleeds into other panels. */
+.w-yt-pass { color: #0a7d2c; font-weight: bold; }
+.w-yt-warntext { color: #9a6a00; font-weight: bold; }
+.w-yt-check { width: 100%; border-collapse: collapse; margin-top: 6px;
+  font: var(--w-fontsize) var(--w-font); }
+.w-yt-check td { padding: 3px 6px; vertical-align: top;
+  border-top: 1px solid var(--w-sh); }
+.w-yt-check tr:first-child td { border-top: 0; }
+.w-yt-status { width: 16px; text-align: center; padding-top: 5px; }
+.w-yt-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, .35); }
+.w-yt-ok { background: #12a150; }
+.w-yt-warn { background: #e0a000; }
+.w-yt-bad { background: #d23b3b; }
+.w-yt-name { white-space: nowrap; font-weight: bold; padding-right: 10px; }
+.w-yt-detail { width: 100%; }
+
+/* ── YouTube search dialog (Add from YouTube) ─────────────────────────────
+   Scrollable results list in a sunken well; each row is title + meta on the
+   left, a status note + Queue / Play-now buttons on the right. Reads the active
+   skin's vars so it matches every theme. */
+.w-yt-results { margin-top: 8px; max-height: 320px; overflow-y: auto;
+  background: var(--w-input-bg, #fff); box-shadow: var(--w-sunken); }
+.w-yt-row { display: flex; align-items: center; gap: 8px; padding: 5px 7px;
+  border-bottom: 1px solid var(--w-sh); }
+.w-yt-row:last-child { border-bottom: 0; }
+.w-yt-info { flex: 1; min-width: 0; }
+.w-yt-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.w-yt-meta { font-size: 11px; color: var(--w-muted, #444);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.w-yt-rowmsg { font-size: 11px; color: var(--w-muted, #444);
+  min-width: 64px; text-align: right; }
+.w-yt-actions { display: flex; gap: 4px; flex-shrink: 0; align-items: center; }

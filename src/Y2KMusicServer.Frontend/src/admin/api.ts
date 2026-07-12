@@ -455,3 +455,98 @@ export async function connectNetworkShare(body: { path: string; username: string
 export const forgetNetworkShare = (host: string) =>
   req<{ removed: boolean; host: string }>(
     `/api/admin/network/${encodeURIComponent(host)}`, { method: 'DELETE' })
+
+
+// ── YouTube integration (preflight check) ───────────────────────────────
+// Read-only diagnostic for the (not-yet-enabled) yt-dlp fetch path: it verifies
+// the tool stack — yt-dlp / ffmpeg / JS runtime / PO-token provider — and does a
+// live dry-run extraction, all in the service's own process context. It can take
+// up to ~a minute, so no timeout is imposed (req uses the browser default).
+// Nothing here downloads media or changes state.
+export interface YouTubeCheckStep {
+  name: string
+  ok: boolean
+  critical: boolean
+  detail: string
+  version: string | null
+}
+export interface YouTubeCheckResult {
+  ok: boolean
+  steps: YouTubeCheckStep[]
+  elapsedMs: number
+}
+export const checkYouTube = () =>
+  req<YouTubeCheckResult>('/api/admin/integrations/youtube/check')
+
+// On/off gate (integrations.json server-side), plus search + fetch. Search is
+// metadata-only; fetch downloads the chosen track into the cache and returns a
+// normal library trackId to queue via addToPlaylist.
+export interface YouTubeSettings { enabled: boolean; cacheMaxMB: number; cacheMaxAgeDays: number }
+
+export interface YouTubeSearchItem {
+  id: string
+  title: string
+  artist: string | null
+  durationSec: number
+  url: string
+}
+export interface YouTubeFetchResult {
+  ok: boolean
+  trackId: number | null
+  title: string | null
+  artist: string | null
+  durationSec: number
+  alreadyCached: boolean
+  error: string | null
+}
+
+export const getYouTubeSettings = () =>
+  req<YouTubeSettings>('/api/admin/integrations/youtube/settings')
+
+export const setYouTubeSettings = (
+  patch: { enabled?: boolean; cacheMaxMB?: number; cacheMaxAgeDays?: number }) =>
+  req<YouTubeSettings>('/api/admin/integrations/youtube/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+
+export const searchYouTube = (q: string, limit = 12) =>
+  req<YouTubeSearchItem[]>(
+    `/api/admin/integrations/youtube/search?q=${encodeURIComponent(q)}&limit=${limit}`)
+
+// Fetch reports failure in the body (502 with { ok:false, error }) as well as via
+// status, so read the JSON either way and surface the server's plain-English error.
+export async function fetchYouTube(videoId: string): Promise<YouTubeFetchResult> {
+  const r = await fetch('/api/admin/integrations/youtube/fetch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ videoId }),
+  })
+  const d = (await r.json().catch(() => ({}))) as Partial<YouTubeFetchResult>
+  return {
+    ok: r.ok && (d.ok ?? false),
+    trackId: d.trackId ?? null,
+    title: d.title ?? null,
+    artist: d.artist ?? null,
+    durationSec: d.durationSec ?? 0,
+    alreadyCached: d.alreadyCached ?? false,
+    error: d.error ?? null,
+  }
+}
+
+// Web-cache housekeeping (ungated — usable even after turning the feature off).
+export interface WebCacheStats {
+  trackCount: number
+  bytes: number
+  pinnedCount: number
+  maxMB: number
+  maxAgeDays: number
+}
+export interface WebCacheClearResult { removed: number; freedBytes: number; remaining: number }
+
+export const getYouTubeCache = () =>
+  req<WebCacheStats>('/api/admin/integrations/youtube/cache')
+
+export const clearYouTubeCache = () =>
+  req<WebCacheClearResult>('/api/admin/integrations/youtube/cache/clear', { method: 'POST' })

@@ -6,6 +6,7 @@ using Y2KMusicServer.Server.Audio;
 using Y2KMusicServer.Server.Data;
 using Y2KMusicServer.Server.Diagnostics;
 using Y2KMusicServer.Server.Hubs;
+using Y2KMusicServer.Server.Integrations;
 using Y2KMusicServer.Server.Network;
 using Y2KMusicServer.Server.Playback;
 using Y2KMusicServer.Server.Scanning;
@@ -99,6 +100,25 @@ public static class Program
             builder.Services.AddHttpClient();
             builder.Services.AddSingleton<GitHubUpdateChecker>();
             builder.Services.AddHostedService<UpdateCheckScheduler>();
+
+            // YouTube integration preflight: a read-only diagnostic that verifies
+            // the (optional, not-yet-enabled) yt-dlp fetch stack — binaries, JS
+            // runtime, PO-token provider, and a live dry-run extract — in this
+            // service's own process context. Exposed via AdminIntegrationsController;
+            // uses the shared IHttpClientFactory above. No background work.
+            builder.Services.AddSingleton<YouTubeProbe>();
+
+            // YouTube fetch path: search YouTube Music and download a chosen track
+            // into the local cache, indexed as an ordinary library track so it plays
+            // through the existing engine. Gated by integrations.json (off by default);
+            // reuses the yt-dlp binary the probe verifies. Exposed via
+            // AdminIntegrationsController. No background work.
+            builder.Services.AddSingleton<YouTubeFetchService>();
+
+            // Web-cache housekeeping: size/count, on-demand clear, and size/age cap
+            // enforcement after each fetch (never evicting a playing/armed/queued
+            // track). Exposed via AdminIntegrationsController. No background work.
+            builder.Services.AddSingleton<WebCacheHousekeeper>();
 
             // Network-share credentials + connector: lets the LocalSystem service
             // authenticate to SMB shares (stored per host, DPAPI-encrypted on disk)
