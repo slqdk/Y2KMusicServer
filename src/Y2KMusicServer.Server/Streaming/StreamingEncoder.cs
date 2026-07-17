@@ -277,6 +277,10 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
         return s * (27f + s2) / (27f + 9f * s2);
     }
 
+    // Invariant two-decimal float for log lines (decimal separator "." on any
+    // host locale, matching the engine's verbose-log contract).
+    private static string Inv(float v) => v.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+
     // Stream-health unit helpers: audio frames → ms, and ring fill (interleaved
     // float samples) → ms. int.MaxValue means "never sampled" → reported as -1.
     private static long FramesToMs(long frames) => frames * 1000 / SampleRate;
@@ -311,6 +315,25 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
         long zfFramesA = 0, zfFramesB = 0;
         int shortfallsA = 0, shortfallsB = 0;
         int minRingA = int.MaxValue, minRingB = int.MaxValue;
+
+        // ── Mix-level instrumentation (DebugLogging only) ─────────────────────
+        // Aggregated over the same ~1 s window as Stream health. Discriminates
+        // where mixing-time "static" enters the chain:
+        //   • peak A / B  — per-deck post-fader peak straight off the taps. A
+        //     deck whose peak pins ≥ ~1.0 (or wildly above) is delivering hot or
+        //     garbage samples BEFORE the mix — points upstream (iso / volume /
+        //     decode) on that deck.
+        //   • peak sum    — the summed signal BEFORE SoftClip. Sustained > 1 is
+        //     the two-decks-hot condition SoftClip then saturates.
+        //   • saturated   — ms of the window the pre-clip sum spent above unity;
+        //     large values mean the "static" may simply be sustained clip fuzz.
+        //   • non-finite  — NaN/Inf samples per deck; any occurrence means a
+        //     filter or decode stage is emitting invalid audio.
+        // Emitted only when Debug is on AND the window was hot / invalid /
+        // starved, so a clean stream still logs nothing.
+        float peakA = 0f, peakB = 0f, peakSum = 0f;
+        long satFrames = 0;
+        int nonFiniteA = 0, nonFiniteB = 0;
 
         try
         {
@@ -383,6 +406,36 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
                 {
                     if (readB < samplesPerChunk) { shortfallsB++; zfFramesB += (samplesPerChunk - readB) / Channels; }
                     int av = b.Available; if (av < minRingB) minRingB = av;
+                }
+
+                // ── Mix-level sampling (Debug only; see window declarations) ──
+                if (_log.IsEnabled(LogLevel.Debug))
+                {
+                    for (int i = 0; i < readA; i++)
+                    {
+                        float v = bufA[i];
+                        if (!float.IsFinite(v)) { nonFiniteA++; continue; }
+                        float av = Math.Abs(v);
+                        if (av > peakA) peakA = av;
+                    }
+                    for (int i = 0; i < readB; i++)
+                    {
+                        float v = bufB[i];
+                        if (!float.IsFinite(v)) { nonFiniteB++; continue; }
+                        float av = Math.Abs(v);
+                        if (av > peakB) peakB = av;
+                    }
+                    int lim = Math.Max(readA, readB);
+                    int satSamples = 0;
+                    for (int i = 0; i < lim; i++)
+                    {
+                        float s = (i < readA ? bufA[i] : 0f) + (i < readB ? bufB[i] : 0f);
+                        if (!float.IsFinite(s)) continue;
+                        float abs = Math.Abs(s);
+                        if (abs > peakSum) peakSum = abs;
+                        if (abs > 1f) satSamples++;
+                    }
+                    satFrames += satSamples / Channels;
                 }
 
                 // ── Mix + soft-clip (silence kept flowing for buffer health) ──
@@ -484,10 +537,29 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
                             FramesToMs(zfFramesA), shortfallsA, RingMs(minRingA),
                             FramesToMs(zfFramesB), shortfallsB, RingMs(minRingB));
                     }
+
+                    // Mix levels: only when the window was hot (near/above unity
+                    // sum), invalid (NaN/Inf), or already starved — a clean
+                    // window logs nothing. Floats are pre-formatted invariantly
+                    // so the decimal separator is "." on any host locale.
+                    if (_log.IsEnabled(LogLevel.Debug)
+                        && (nonFiniteA > 0 || nonFiniteB > 0 || peakSum > 0.98f
+                            || zfFramesA > 0 || zfFramesB > 0))
+                    {
+                        _log.LogDebug(
+                            "Mix levels ({Win}ms): peak A={PeakA} B={PeakB} sum={PeakSum} | saturated {Sat}ms | non-finite A={NfA} B={NfB}",
+                            (nowUs - winStartUs) / 1000,
+                            Inv(peakA), Inv(peakB), Inv(peakSum),
+                            FramesToMs(satFrames), nonFiniteA, nonFiniteB);
+                    }
+
                     winStartUs = nowUs;
                     zfFramesA = zfFramesB = 0;
                     shortfallsA = shortfallsB = 0;
                     minRingA = minRingB = int.MaxValue;
+                    peakA = peakB = peakSum = 0f;
+                    satFrames = 0;
+                    nonFiniteA = nonFiniteB = 0;
                 }
             }
         }
