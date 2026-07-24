@@ -233,7 +233,7 @@ public sealed class GenreLookupService
         var bare = StripAllParens(clean);
         if (!string.IsNullOrWhiteSpace(artist) && bare.Length > 0 && bare != clean)
             queries.Add($"artist:\"{artist.Trim()}\" track:\"{bare}\"");
-        queries.Add($"{artist} {bare.Length > 0 ? bare : clean}".Trim());
+        queries.Add($"{artist} {(bare.Length > 0 ? bare : clean)}".Trim());
 
         List<Candidate> candidates = new();
         foreach (var q in queries)
