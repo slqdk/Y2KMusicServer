@@ -121,6 +121,7 @@ public sealed class AdminLibraryController : ControllerBase
                 lufs = x.Track.LufsIntegrated,
                 x.Track.Type,
                 genreBucket = x.GenreBucket,
+                rawGenre = x.Track.Genre,
                 decade = x.Decade
             })
             .ToList();

@@ -227,7 +227,11 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
                 title="Double-click to queue as next · right-click for more">
                 <td title={t.title ?? ''}>{t.title ?? '(untitled)'}{busyId === t.id ? ' ⟳' : ''}</td>
                 <td title={t.artist ?? ''}>{t.artist ?? '---'}</td>
-                <td>{t.genreBucket}</td>
+                <td title={t.rawGenre ? `Tag genre: ${t.rawGenre}` : 'No genre tag'}>
+                  {t.genreBucket === 'Unknown' && t.rawGenre
+                    ? <>Unknown <span className="w-muted">({t.rawGenre})</span></>
+                    : t.genreBucket}
+                </td>
                 <td>{t.decade != null ? decadeLabel(t.decade) : '---'}</td>
                 <td>{t.type ?? '---'}</td>
                 <td className="w-num">{fmtTime(t.durationSec)}</td>

@@ -38,6 +38,7 @@ export interface TrackDto {
   lufs: number | null
   type: string | null
   genreBucket: string
+  rawGenre: string | null
   decade: number | null
 }
 
