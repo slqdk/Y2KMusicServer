@@ -133,11 +133,15 @@ public sealed class PlaylistService
             .FirstOrDefault();
     }
 
+    /// <summary>Played entries kept visible above the current track (the
+    /// operator's recent-history view); anything older is pruned.</summary>
+    public const int PlayedHistoryKeep = 10;
+
     /// <summary>
-    /// Drops entries that sit BEFORE the currently playing track — they've been
-    /// consumed. The table is kept to "now playing + upcoming", mirroring the
-    /// legacy <c>songsAfterCurrent</c> view. No-op if the current track isn't in
-    /// the playlist.
+    /// Prunes consumed entries, but keeps the last <see cref="PlayedHistoryKeep"/>
+    /// of them: the queue view is "recent history + now playing + upcoming", so
+    /// the operator always sees what just played. No-op if the current track
+    /// isn't in the playlist.
     /// </summary>
     public async Task PruneConsumedAsync(int currentTrackId, CancellationToken ct = default)
     {
@@ -149,7 +153,7 @@ public sealed class PlaylistService
             int curPos = CurrentPosition(entries, currentTrackId);
             if (curPos <= 0) return; // current is head (or absent) — nothing before it.
 
-            var stale = entries.Where(e => e.Position < curPos).ToList();
+            var stale = entries.Where(e => e.Position < curPos - PlayedHistoryKeep).ToList();
             if (stale.Count == 0) return;
 
             db.PlaylistEntries.RemoveRange(stale);

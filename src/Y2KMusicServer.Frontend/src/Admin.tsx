@@ -116,7 +116,7 @@ export default function Admin() {
         <div className="w-right-col">
           <DeckPanel live={live} status={status} refresh={refreshStatus}
             mixRules={mixRules} onToggleSection={toggleSection} />
-          <PlaylistPanel onPlayNow={playNow} />
+          <PlaylistPanel onPlayNow={playNow} nowPlayingTrackId={live.nowPlaying?.trackId ?? null} />
         </div>
       </div>
 

@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import * as api from './api'
 import { fmtTime } from './api'
 import RequestsPanel from './RequestsPanel'
@@ -14,12 +14,14 @@ type RowMenu = { x: number; y: number; entry: api.PlaylistItem }
 type TileMenu = { x: number; y: number; pl: api.SavedPlaylistDto }
 
 export default function PlaylistPanel(
-  { onPlayNow }: { onPlayNow: (trackId: number) => Promise<unknown> | void }
+  { onPlayNow, nowPlayingTrackId }:
+  { onPlayNow: (trackId: number) => Promise<unknown> | void; nowPlayingTrackId: number | null }
 ) {
   const [list, setList] = useState<api.PlaylistItem[]>([])
   const [busy, setBusy] = useState(false)
   const [selId, setSelId] = useState<number | null>(null)
   const [menu, setMenu] = useState<RowMenu | null>(null)
+  const nowRowRef = useRef<HTMLTableRowElement | null>(null)
 
   // Saved playlists: the tile strip, and the "viewing" mode that swaps the
   // live queue for a saved playlist's content until Back is pressed.
@@ -88,6 +90,16 @@ export default function PlaylistPanel(
       window.removeEventListener('keydown', onKey)
     }
   }, [menu, tileMenu])
+
+  // Keep the playing row vertically centred so a couple of just-played songs
+  // stay visible above it and the upcoming ones below. Re-centres on track
+  // change only, so the operator can still scroll around freely in between.
+  useEffect(() => {
+    if (nowPlayingTrackId == null) return
+    const id = window.setTimeout(() =>
+      nowRowRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 150)
+    return () => window.clearTimeout(id)
+  }, [nowPlayingTrackId])
 
   useEffect(() => {
     if (!note) return
@@ -310,12 +322,24 @@ export default function PlaylistPanel(
                 </tr>
               </thead>
               <tbody>
-                {list.map(e => (
-                  <tr key={e.id} className={selId === e.id ? 'w-rowsel' : ''}
+                {(() => {
+                  // First entry matching the playing track = "now" row; rows
+                  // before it are played history (they're retained server-side).
+                  const nowIdx = nowPlayingTrackId == null
+                    ? -1 : list.findIndex(x => x.trackId === nowPlayingTrackId)
+                  return list.map((e, i) => (
+                  <tr key={e.id}
+                    ref={i === nowIdx ? nowRowRef : undefined}
+                    className={[
+                      selId === e.id ? 'w-rowsel' : '',
+                      i === nowIdx ? 'w-rownow' : nowIdx >= 0 && i < nowIdx ? 'w-rowplayed' : ''
+                    ].filter(Boolean).join(' ')}
                     onClick={() => setSelId(e.id)}
                     onDoubleClick={() => playNowEntry(e)}
                     onContextMenu={ev => openMenu(ev, e)}
-                    title="Double-click to play now (crossfade) · right-click for more">
+                    title={i === nowIdx ? 'Now playing'
+                      : nowIdx >= 0 && i < nowIdx ? 'Already played'
+                      : 'Double-click to play now (crossfade) · right-click for more'}>
                     <td className="w-num">{e.position + 1}</td>
                     <td title={e.title ?? ''}>{e.title ?? '(untitled)'}</td>
                     <td title={e.artist ?? ''}>{e.artist ?? '---'}</td>
@@ -329,7 +353,8 @@ export default function PlaylistPanel(
                         onClick={ev => { ev.stopPropagation(); remove(e.id) }}>✕</button>
                     </td>
                   </tr>
-                ))}
+                  ))
+                })()}
                 {list.length === 0 && (
                   <tr><td colSpan={9} className="w-muted" style={{ padding: 8 }}>Queue empty. Add tracks, activate a playlist, or enable Auto DJ.</td></tr>
                 )}

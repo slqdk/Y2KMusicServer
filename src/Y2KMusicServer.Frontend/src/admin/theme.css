@@ -197,6 +197,9 @@
    inherits its own bevel/edge/shadow exactly like .w-panel and .w-dialog. */
 .w-previewbar { align-items: center; }
 .w-previewbar audio { max-width: 100%; }
+/* Live queue: played history above the current track, current highlighted. */
+.w-rowplayed td { color: var(--w-disabled); }
+.w-rownow td { background: var(--w-green, #C6E8C6); font-weight: bold; }
 .w-autodj-on { background: var(--w-green, #C6E8C6) !important; font-weight: bold; }
 /* Saved-playlist tiles (above the live queue) + the viewing-mode header. */
 .w-pltiles { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-bottom: 4px; }

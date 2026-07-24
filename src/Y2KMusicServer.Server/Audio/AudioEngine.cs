@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using NAudio.CoreAudioApi;
+using NAudio.CoreAudioApi.Interfaces;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 using Y2KMusicServer.Server.Data;
@@ -124,6 +125,117 @@ public sealed class AudioEngine
             Priority = ThreadPriority.AboveNormal
         };
         tick.Start();
+
+        // Watch the audio endpoints so local deck output survives the real
+        // world: plugging a headset (default device change), a device appearing
+        // after service start, or starting with none at all. Any relevant event
+        // rebuilds the live decks' outputs on the then-current default device.
+        // Best-effort: without Core Audio (headless CI etc.) the engine just
+        // runs without the watcher.
+        if (OperatingSystem.IsWindows())
+        {
+            try
+            {
+                _mmEnum = new MMDeviceEnumerator();
+                _mmWatch = new EndpointWatcher(this);
+                _mmEnum.RegisterEndpointNotificationCallback(_mmWatch);
+            }
+            catch (Exception ex)
+            {
+                _log.LogDebug(ex, "Audio endpoint watcher unavailable; output follows load-time device only.");
+            }
+        }
+    }
+
+    private MMDeviceEnumerator? _mmEnum;
+    private EndpointWatcher? _mmWatch;
+    private int _rebuildQueued;
+
+    /// <summary>Debounced: endpoint events arrive in bursts (and on COM
+    /// threads), so coalesce them and rebuild ~600 ms later off-thread.</summary>
+    private void ScheduleOutputRebuild()
+    {
+        if (Interlocked.Exchange(ref _rebuildQueued, 1) == 1) return;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(600);
+            Interlocked.Exchange(ref _rebuildQueued, 0);
+            try { RebuildDeckOutputs(); }
+            catch (Exception ex) { _log.LogWarning(ex, "Deck output rebuild failed"); }
+        });
+    }
+
+    /// <summary>Reopens every live deck's output device on the current default
+    /// render device, preserving play state. The stream tap sits upstream of
+    /// the output, so /stream listeners never notice; locally there is a brief
+    /// (~0.1 s) gap at the moment of the swap.</summary>
+    private void RebuildDeckOutputs()
+    {
+        lock (_gate)
+        {
+            foreach (var deck in new[] { _deckA, _deckB, _prepared?.DeckB })
+                if (deck != null)
+                    SwapOutput_Locked(deck);
+        }
+    }
+
+    private void SwapOutput_Locked(Deck deck)
+    {
+        if (deck.StopRequested) return;
+
+        bool wasPlaying = false;
+        try { wasPlaying = deck.Out.PlaybackState == PlaybackState.Playing; } catch { }
+
+        // Unhook the stop handler BEFORE stopping the old device — otherwise the
+        // swap itself would look like the track ending and fire auto-advance.
+        try { if (deck.StoppedHandler != null) deck.Out.PlaybackStopped -= deck.StoppedHandler; } catch { }
+        try { deck.Out.Stop(); } catch { }
+        try { deck.Out.Dispose(); } catch { }
+
+        IWavePlayer nu = CreateDeckOutput(deck.Label);
+        try
+        {
+            nu.Init(deck.Wp);
+        }
+        catch (Exception ex)
+        {
+            _log.LogInformation(ex, "Deck {Deck}: no usable output after device change; silent until one appears.", deck.Label);
+            try { nu.Dispose(); } catch { }
+            nu = new SilentWavePlayer();
+            nu.Init(deck.Wp);
+        }
+
+        deck.Out = nu;
+        if (deck.StoppedHandler != null) nu.PlaybackStopped += deck.StoppedHandler;
+        if (wasPlaying) { try { nu.Play(); } catch { } }
+
+        _log.LogInformation("Deck {Deck}: output reopened on the current default device ({Kind}){Resumed}.",
+            deck.Label, nu is SilentWavePlayer ? "silent" : "sound card", wasPlaying ? ", resumed" : "");
+    }
+
+    /// <summary>Core Audio endpoint listener: any default-render change or a
+    /// device becoming active queues a deck-output rebuild.</summary>
+    private sealed class EndpointWatcher : IMMNotificationClient
+    {
+        private readonly AudioEngine _engine;
+        public EndpointWatcher(AudioEngine engine) => _engine = engine;
+
+        public void OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId)
+        {
+            // Fires once per role; react to a single role to avoid triple rebuilds.
+            if (flow == DataFlow.Render && role == Role.Multimedia)
+                _engine.ScheduleOutputRebuild();
+        }
+
+        public void OnDeviceStateChanged(string deviceId, DeviceState newState)
+        {
+            if (newState == DeviceState.Active)
+                _engine.ScheduleOutputRebuild();
+        }
+
+        public void OnDeviceAdded(string pwstrDeviceId) => _engine.ScheduleOutputRebuild();
+        public void OnDeviceRemoved(string deviceId) { }
+        public void OnPropertyValueChanged(string pwstrDeviceId, PropertyKey key) { }
     }
 
     public event Action<NowPlayingInfo>? NowPlayingChanged;
@@ -1214,20 +1326,12 @@ public sealed class AudioEngine
     /// </summary>
     private IWavePlayer CreateDeckOutput(string label)
     {
-        try
-        {
-            using var devices = new MMDeviceEnumerator();
-            if (devices.HasDefaultAudioEndpoint(DataFlow.Render, Role.Console))
-                return new WaveOutEvent { DesiredLatency = 60, NumberOfBuffers = 3 };
-            _log.LogInformation(
-                "Deck {Deck}: no default render device (headless / LocalSystem service?); using silent output.",
-                label);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex, "Deck {Deck}: audio device probe failed; using silent output.", label);
-        }
-        return new SilentWavePlayer();
+        // Always TRY the sound card — the pre-flight default-device probe used
+        // here previously reported "no device" in some service contexts even
+        // when audio would have worked, forcing silence. Now the attempt itself
+        // decides: Init failure at the call site falls back to SilentWavePlayer,
+        // and the endpoint watcher retries whenever devices change/appear.
+        return new WaveOutEvent { DesiredLatency = 60, NumberOfBuffers = 3 };
     }
 
     private Deck BuildDeck(Track track, float volume, double seekToSec, string label)
@@ -1272,6 +1376,7 @@ public sealed class AudioEngine
         {
             Reader = reader,
             Out = outDev,
+            Wp = wp,
             Meter = meter,
             Vol = vol,
             Iso = iso,
@@ -1447,7 +1552,10 @@ public sealed class AudioEngine
     private sealed class Deck : IDisposable
     {
         public required SafeAudioFileReader Reader { get; init; }
-        public required IWavePlayer Out { get; init; }
+        public required IWavePlayer Out { get; set; }
+        /// <summary>The wave provider feeding the output — kept so a new output
+        /// device can be initialised mid-track when the default changes.</summary>
+        public required NAudio.Wave.IWaveProvider Wp { get; init; }
         public required MeteringSampleProvider Meter { get; init; }
         public required VolumeSampleProvider Vol { get; init; }
         public required IsoFilter Iso { get; init; }

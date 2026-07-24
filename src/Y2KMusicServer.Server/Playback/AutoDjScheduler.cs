@@ -84,10 +84,12 @@ public sealed class AutoDjScheduler : BackgroundService
             return;
         }
 
-        if (!await _playlist.IsAutoDjOnAsync(ct)) return;
         if (status.State != PlaybackEngineState.Playing || status.TrackId is null) return;
 
         // ── Chain: keep the engine armed with the playlist's NEXT entry ───────
+        // Deliberately NOT gated on the Auto DJ toggle: a queue with entries is
+        // a promise to play through — manual adds and activated playlists must
+        // chain regardless. The toggle governs only the automatic REFILL below.
         // Arm Deck B when nothing is queued, OR re-arm when the queued track is
         // no longer the playlist's next entry. The latter is the fix for accepted
         // requests: a request is inserted just ahead of the previously-armed
@@ -104,7 +106,8 @@ public sealed class AutoDjScheduler : BackgroundService
             }
         }
 
-        // ── Top up the playlist when it runs low ──────────────────────────────
+        // ── Top up the playlist when it runs low (Auto DJ only) ───────────────
+        if (!await _playlist.IsAutoDjOnAsync(ct)) return;
         if (!_toppedUpThisTrack)
         {
             int upcoming = await _playlist.UpcomingCountAsync(status.TrackId, ct);
