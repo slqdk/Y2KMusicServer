@@ -16,7 +16,7 @@ const LOAD_ALL = 100000
 // Right-click menu geometry, used only to keep it inside the viewport. The
 // height grows with the saved-playlist list appended under "Add to playlist".
 const MENU_W = 200
-const MENU_BASE_H = 176
+const MENU_BASE_H = 198
 const MENU_ITEM_H = 22
 
 type RowMenu = { x: number; y: number; track: api.TrackDto }
@@ -38,6 +38,7 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
   const [foldersOpen, setFoldersOpen] = useState(false)
   const [genreMapOpen, setGenreMapOpen] = useState(false)
   const [note, setNote] = useState<string | null>(null)
+  const [preview, setPreview] = useState<api.TrackDto | null>(null)
   const debounce = useRef<number | undefined>(undefined)
 
   // Resizable, fixed-width columns:
@@ -183,6 +184,23 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
         {note && <span className="w-muted">{note}</span>}
       </div>
 
+      {/* Preview player: browser-side listen via the raw-audio endpoint. Never
+          touches the decks or /stream; audible on the machine running this
+          admin page. keys the <audio> by track id so switching tracks reloads. */}
+      {preview && (
+        <div className="w-toolbar w-previewbar" style={{ marginTop: 6 }}>
+          <span style={{ fontWeight: 'bold', whiteSpace: 'nowrap' }}>► Preview:</span>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            title={`${preview.title ?? ''} — ${preview.artist ?? ''}`}>
+            {preview.title ?? '(untitled)'} — {preview.artist ?? '---'}
+          </span>
+          <audio key={preview.id} controls autoPlay src={api.trackAudioUrl(preview.id)}
+            style={{ flex: 1, minWidth: 160, height: 24 }} />
+          <button className="w-btn" title="Stop and close the preview"
+            onClick={() => setPreview(null)}>✕</button>
+        </div>
+      )}
+
       {/* Track table. Double-click a row to queue it as the next song; right-click
           for the full action menu (including Add to playlist). */}
       <div className="w-listwrap w-sunken" style={{ flex: 1, minHeight: 0, marginTop: 6, overflowX: 'hidden' }}>
@@ -233,6 +251,9 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
             onClick={() => { addEnd(menu.track.id); setMenu(null) }}>Add to end of queue</li>
           <li className="w-ctxitem" role="menuitem"
             onClick={() => { doPlayNow(menu.track.id); setMenu(null) }}>Play now</li>
+          <li className="w-ctxitem" role="menuitem"
+            title="Listen here in the admin — the decks, queue and stream are untouched"
+            onClick={() => { setPreview(menu.track); setMenu(null) }}>Preview (listen here)</li>
           <li className="w-ctxsep" role="separator" />
           <li className="w-ctxhead" aria-hidden="true">Add to playlist</li>
           {playlists.length === 0 && (

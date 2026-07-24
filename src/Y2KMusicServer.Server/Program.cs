@@ -120,6 +120,10 @@ public static class Program
             // track). Exposed via AdminIntegrationsController. No background work.
             builder.Services.AddSingleton<WebCacheHousekeeper>();
 
+            // Online genre lookup (Deezer): fills untagged tracks' raw genres
+            // in the DB on demand from the Genre map dialog.
+            builder.Services.AddSingleton<GenreLookupService>();
+
             // Network-share credentials + connector: lets the LocalSystem service
             // authenticate to SMB shares (stored per host, DPAPI-encrypted on disk)
             // so it can read music folders on a NAS. The connector wraps the Win32

@@ -21,6 +21,7 @@ export default function GenreMapDialog({ onClose, onChanged }:
   const [busy, setBusy] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [lookup, setLookup] = useState<api.GenreLookupStatus | null>(null)
 
   const refreshRaws = () =>
     api.getRawGenres().then(r => { setRaws(r.items); setUntagged(r.untagged) }).catch(() => {})
@@ -35,6 +36,24 @@ export default function GenreMapDialog({ onClose, onChanged }:
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  // Online-lookup status: poll while the dialog is open; refresh the worklist
+  // and the library behind the dialog when a pass finishes.
+  useEffect(() => {
+    let last = false
+    const tick = () => api.getGenreLookupStatus().then(s => {
+      setLookup(s)
+      if (last && !s.running) { refreshRaws(); onChanged() }
+      last = s.running
+    }).catch(() => {})
+    tick()
+    const id = window.setInterval(tick, 1000)
+    return () => window.clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const startLookup = () => api.startGenreLookup().then(setLookup).catch(() => {})
+  const stopLookup = () => api.stopGenreLookup().then(setLookup).catch(() => {})
 
   const edit = (m: api.GenreMap) => { setMap(m); setDirty(true) }
 
@@ -186,6 +205,25 @@ export default function GenreMapDialog({ onClose, onChanged }:
               </fieldset>
             </div>
           )}
+
+          <fieldset className="w-group" style={{ marginTop: 8 }}>
+            <legend>Online lookup (Deezer)</legend>
+            <div className="w-toolbar" style={{ flexWrap: 'wrap' }}>
+              {!lookup?.running ? (
+                <button className="w-btn" onClick={startLookup}
+                  title="Search Deezer for tracks with no genre tag at all and fill the genre in the library (files are never modified)">
+                  Look up missing genres online
+                </button>
+              ) : (
+                <button className="w-btn" onClick={stopLookup}>Stop</button>
+              )}
+              <span className="w-muted" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {lookup?.running
+                  ? `${lookup.processed}/${lookup.total} — ${lookup.found} found, ${lookup.misses} misses · ${lookup.currentTrack ?? ''}`
+                  : lookup?.message ?? 'Fills tracks that have no genre tag; found genres appear as raw genres above for you to map.'}
+              </span>
+            </div>
+          </fieldset>
 
           <div className="w-toolbar" style={{ marginTop: 8 }}>
             <span className="w-muted">{dirty ? 'Unsaved changes — Save applies to the whole library instantly.' : ''}</span>

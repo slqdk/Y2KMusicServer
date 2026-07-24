@@ -180,8 +180,26 @@ export const getGenreMap = () => req<GenreMap>('/api/admin/genre-map')
 export const putGenreMap = (m: GenreMap) =>
   req<GenreMap>('/api/admin/genre-map',
     { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(m) })
+export interface GenreLookupStatus {
+  running: boolean
+  total: number
+  processed: number
+  found: number
+  misses: number
+  currentTrack: string | null
+  message: string | null
+}
+export const startGenreLookup = () =>
+  req<GenreLookupStatus>('/api/admin/genre-lookup/start', { method: 'POST' })
+export const stopGenreLookup = () =>
+  req<GenreLookupStatus>('/api/admin/genre-lookup/stop', { method: 'POST' })
+export const getGenreLookupStatus = () =>
+  req<GenreLookupStatus>('/api/admin/genre-lookup/status')
 export const getRawGenres = () =>
   req<{ items: RawGenre[]; untagged: number }>('/api/admin/library/raw-genres')
+// Raw audio for the browser-side preview player (never touches the decks or
+// the /stream broadcast). Used as an <audio> src; the server supports seeking.
+export const trackAudioUrl = (trackId: number) => `/api/admin/track/${trackId}/audio`
 export const setGenreOverride = (trackId: number, value: string | null) =>
   req<{ id: number; genreOverride: string | null; genreBucket: string }>(
     `/api/admin/track/${trackId}/genre-override`,

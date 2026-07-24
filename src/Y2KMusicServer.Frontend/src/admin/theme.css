@@ -195,6 +195,8 @@
 
 /* Context menu (right-click in the library) — variable-driven so each skin
    inherits its own bevel/edge/shadow exactly like .w-panel and .w-dialog. */
+.w-previewbar { align-items: center; }
+.w-previewbar audio { max-width: 100%; }
 .w-autodj-on { background: var(--w-green, #C6E8C6) !important; font-weight: bold; }
 /* Saved-playlist tiles (above the live queue) + the viewing-mode header. */
 .w-pltiles { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-bottom: 4px; }

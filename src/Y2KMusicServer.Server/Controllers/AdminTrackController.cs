@@ -17,11 +17,15 @@ public sealed class AdminTrackController : ControllerBase
     private readonly IDbContextFactory<Y2KDbContext> _dbf;
     private readonly IConfiguration _cfg;
 
-    public AdminTrackController(IDbContextFactory<Y2KDbContext> dbf, IConfiguration cfg)
+    public AdminTrackController(IDbContextFactory<Y2KDbContext> dbf, IConfiguration cfg,
+        Y2KMusicServer.Server.Network.NetworkShareConnector connector)
     {
         _dbf = dbf;
         _cfg = cfg;
+        _connector = connector;
     }
+
+    private readonly Y2KMusicServer.Server.Network.NetworkShareConnector _connector;
 
     /// <summary>
     /// Waveform peaks (interleaved min/max per window, signed bytes -127..127)
@@ -221,6 +225,37 @@ public sealed class AdminTrackController : ControllerBase
     /// the track is unknown; a track whose file has moved still returns the stored
     /// fields with <c>fileExists=false</c> and null live properties.
     /// </summary>
+    /// <summary>
+    /// Streams the track's raw audio file for the admin PREVIEW player — a
+    /// browser-side listen that never touches the decks, the live queue, or the
+    /// /stream broadcast. Range requests are enabled so the browser can seek.
+    /// The service reads the file itself (authenticating the share session if
+    /// the track lives on a network folder), so the operator's machine needs no
+    /// access to the music share.
+    /// </summary>
+    [HttpGet("{id:int}/audio")]
+    public async Task<IActionResult> Audio(int id, CancellationToken ct)
+    {
+        string? path;
+        await using (var db = await _dbf.CreateDbContextAsync(ct))
+            path = await db.Tracks.AsNoTracking().Where(t => t.Id == id)
+                .Select(t => t.FilePath).FirstOrDefaultAsync(ct);
+        if (path == null) return NotFound(new { error = "track not found", trackId = id });
+
+        if (OperatingSystem.IsWindows())
+            try { _connector.EnsureConnected(path); } catch { /* best-effort; File.Exists decides */ }
+        if (!System.IO.File.Exists(path)) return NotFound(new { error = "file missing on disk", path });
+
+        var mime = Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".mp3" => "audio/mpeg",
+            ".wav" => "audio/wav",
+            ".flac" => "audio/flac",
+            _ => "application/octet-stream"
+        };
+        return PhysicalFile(path, mime, enableRangeProcessing: true);
+    }
+
     public sealed record GenreOverrideBody(string? Value);
 
     /// <summary>
