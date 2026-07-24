@@ -183,7 +183,7 @@ export default function App() {
     setSelGenres(prev => prev.includes(name) ? prev.filter(g => g !== name) : [...prev, name])
   const toggleDecade = (d: number) =>
     setSelDecades(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d])
-  const decadeLabel = (d: number) => (d === 0 ? '?' : `${String(d).slice(2)}'s`)
+  const decadeLabel = (d: number) => (d === 0 ? '?' : `${d}s`)
 
   const stateLabel = np?.playing ? 'NOW PLAYING' : np?.trackId ? 'PAUSED' : 'OFF AIR'
 

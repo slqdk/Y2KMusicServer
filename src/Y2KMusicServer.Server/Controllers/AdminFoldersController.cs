@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Y2KMusicServer.Server.Audio;
 using Y2KMusicServer.Server.Data;
 using Y2KMusicServer.Server.Scanning;
 
@@ -19,14 +20,16 @@ public sealed class AdminFoldersController : ControllerBase
     private readonly IDbContextFactory<Y2KDbContext> _dbf;
     private readonly IConfiguration _cfg;
     private readonly LibraryScanner _scanner;
+    private readonly AudioAnalysisService _analysis;
     private readonly ILogger<AdminFoldersController> _log;
 
     public AdminFoldersController(IDbContextFactory<Y2KDbContext> dbf, IConfiguration cfg,
-        LibraryScanner scanner, ILogger<AdminFoldersController> log)
+        LibraryScanner scanner, AudioAnalysisService analysis, ILogger<AdminFoldersController> log)
     {
         _dbf = dbf;
         _cfg = cfg;
         _scanner = scanner;
+        _analysis = analysis;
         _log = log;
     }
 
@@ -78,6 +81,13 @@ public sealed class AdminFoldersController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Remove(int id, [FromQuery] bool clearData, CancellationToken ct)
     {
+        // A running scan of this folder must not keep adding its files, and a
+        // running analysis pass must not keep walking a snapshot of tracks that
+        // are about to disappear. Cancel both; a fresh missing-only analysis is
+        // re-kicked below for whatever remains.
+        _scanner.CancelAll();
+        _analysis.CancelAll();
+
         int removedTracks = 0;
         if (clearData)
         {
@@ -91,6 +101,8 @@ public sealed class AdminFoldersController : ControllerBase
 
         _log.LogInformation("Scan folder removed: {Path} (id {Id}), tracks removed: {N}.",
             entry.Path, entry.Id, removedTracks);
+
+        _analysis.TryStart(reanalyzeAll: false, folderId: null); // resume for the remaining library
         return Ok(new { removed = entry.Path, removedTracks });
     }
 
@@ -112,7 +124,10 @@ public sealed class AdminFoldersController : ControllerBase
     [HttpPost("{id:int}/clear-data")]
     public async Task<IActionResult> ClearData(int id, CancellationToken ct)
     {
+        _scanner.CancelAll();   // same rationale as Remove: no ghosts, no stale pass
+        _analysis.CancelAll();
         var removed = await ClearOwnedTracksAsync(id, ct);
+        _analysis.TryStart(reanalyzeAll: false, folderId: null);
         return removed is int n ? Ok(new { removed = n }) : NotFound(new { error = "folder not found", id });
     }
 

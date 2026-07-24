@@ -374,6 +374,13 @@ public sealed class PlaylistService
     // the recently-played rings.
     private readonly Dictionary<int, HashSet<int>> _fedFromPlaylist = new();
 
+    // Auto DJ duration policy: never auto-pick jingle-length or marathon
+    // tracks. Applies ONLY to Auto DJ's own picks — manual adds, saved-playlist
+    // activation, and listener requests are the operator's/listener's explicit
+    // choice and are not gated.
+    private const double MinAutoDjDurationSec = 90;   // 1:30
+    private const double MaxAutoDjDurationSec = 360;  // 6:00
+
     /// <summary>
     /// Picks up to <c>Settings.AutoDjTracks</c> tracks from the saved playlists
     /// whose schedule says they are active right now, and appends them as
@@ -499,6 +506,7 @@ public sealed class PlaylistService
                         bool isFed; lock (_historyLock) isFed = fed.Contains(t.Id);
                         if (isFed) return false;
                         if (excluded.Contains(t.Id)) return false;
+                        if (t.DurationSec < MinAutoDjDurationSec || t.DurationSec > MaxAutoDjDurationSec) return false;
                         if (IsTooSimilar(t, simWindow)) return false;
                         var norm = NormaliseArtist(t.Artist);
                         if (norm.Length > 0 && batchArtists.Contains(norm)) return false;

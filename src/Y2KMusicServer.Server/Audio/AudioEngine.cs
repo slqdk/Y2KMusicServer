@@ -156,10 +156,14 @@ public sealed class AudioEngine
         if (track == null) return LoadResult.NotFound;
         if (!File.Exists(track.FilePath)) return LoadResult.FileMissing;
 
+        // Start at the first audible sample — leading silence never airs on a
+        // cold load. (Sub-¼-second lead-ins aren't worth a seek.)
+        double leadIn = track.LeadInSec is double li && li > 0.25 ? li : 0;
+
         Deck deck;
         try
         {
-            deck = BuildDeck(track, NormalizedVolume(track, settings), 0, "A");
+            deck = BuildDeck(track, NormalizedVolume(track, settings), leadIn, "A");
         }
         catch (Exception ex)
         {
@@ -352,7 +356,9 @@ public sealed class AudioEngine
             else
             {
                 outPoint = 0;
-                inPoint = 0;
+                // No musical in-point known — at least skip the incoming
+                // track's leading silence.
+                inPoint = next.LeadInSec is double nli && nli > 0.25 ? nli : 0;
                 fadeSec = configuredFade;
                 score = 0;
                 beatAligned = false;
@@ -411,19 +417,24 @@ public sealed class AudioEngine
 
             double durA = _deckA.DurationSec;
 
+            // Effective end of A: the last audible sample when analysis measured
+            // it (sanity-ranged), else the file length — so trailing silence
+            // never delays the transition or plays out on air.
+            double endA = _deckA.LeadOutSec is double lo && lo > 1 && lo < durA ? lo : durA;
+
             // By-transition fade rule: a Normal Crossfade can't beat-align (there
             // are no shared bars), so it's bounded by the operator's seconds cap
-            // and placed to land on A's end. Beat-matched crossfades and the moves
-            // keep their bar-based length from the analysis above.
+            // and placed to land on A's (audible) end. Beat-matched crossfades and
+            // the moves keep their bar-based length from the analysis above.
             if (plan.Strategy == Transition.NormalCrossfade && configuredFade > 0)
             {
                 fadeSec = Math.Min(fadeSec, configuredFade);
-                if (durA > 0) outPoint = Math.Max(durA * 0.5, durA - fadeSec);
+                if (endA > 0) outPoint = Math.Max(endA * 0.5, endA - fadeSec);
             }
 
             double trigger = outPoint > 0
                 ? Math.Clamp(outPoint, 0, durA)
-                : durA * Math.Clamp(settings.NextTriggerPct / 100.0, 0.05, 0.99);
+                : endA * Math.Clamp(settings.NextTriggerPct / 100.0, 0.05, 0.99);
 
             oldPrepared = _prepared?.DeckB;
             _prepared = new PreparedNext
@@ -1275,7 +1286,8 @@ public sealed class AudioEngine
             Album = track.Album,
             Bpm = track.Bpm,
             BeatPhaseOffsetSec = track.BeatPhaseOffsetSec,
-            DurationSec = reader.TotalTime.TotalSeconds
+            DurationSec = reader.TotalTime.TotalSeconds,
+            LeadOutSec = track.LeadOutSec
         };
 
         if (seekToSec > 0.1)
@@ -1455,6 +1467,10 @@ public sealed class AudioEngine
         public double? Bpm { get; init; }
         public double? BeatPhaseOffsetSec { get; init; }
         public double DurationSec { get; init; }
+        /// <summary>Last audible sample (sec) from analysis; null = unmeasured.
+        /// The auto-next trigger treats this as the track's end so trailing
+        /// silence never plays out.</summary>
+        public double? LeadOutSec { get; init; }
 
         public EventHandler<StreamVolumeEventArgs>? MeterHandler { get; set; }
         public EventHandler<StoppedEventArgs>? StoppedHandler { get; set; }

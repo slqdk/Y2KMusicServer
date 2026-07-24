@@ -21,16 +21,28 @@ public sealed class LoudnessAnalyzer
     private const double Offset = -0.691; // BS.1770 loudness offset
 
     /// <summary>Integrated LUFS, or null for silence / clips shorter than 400 ms / errors.</summary>
-    public double? AnalyzeFile(string path)
+    public double? AnalyzeFile(string path) => AnalyzeFileFull(path).Lufs;
+
+    public readonly record struct LoudnessResult(double? Lufs, double? LeadInSec, double? LeadOutSec);
+
+    /// <summary>
+    /// One decode, two measurements: integrated LUFS plus the silence bounds —
+    /// the times of the first and last audible samples (|sample| above roughly
+    /// −54 dBFS). The bounds ride a pass-through probe ahead of the K-weighting
+    /// chain, so the loudness numbers are untouched. All null on decode errors.
+    /// </summary>
+    public LoudnessResult AnalyzeFileFull(string path)
     {
         try
         {
             using var reader = new SafeAudioFileReader(path);
-            return MeasureIntegrated(reader);
+            var probe = new SilenceBoundsProbe(reader);
+            var lufs = MeasureIntegrated(probe);
+            return new LoudnessResult(lufs, probe.FirstAudibleSec, probe.LastAudibleSec);
         }
         catch
         {
-            return null;
+            return new LoudnessResult(null, null, null);
         }
     }
 
@@ -180,4 +192,47 @@ public sealed class LoudnessAnalyzer
             return new Biquad(b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0);
         }
     }
+    /// <summary>
+    /// Pass-through sample provider that records where audio actually starts
+    /// and ends. Interleaved-sample aware: positions are converted to seconds
+    /// via the source's sample rate. Audibility threshold 0.002 ≈ −54 dBFS —
+    /// low enough to keep quiet intros, high enough to skip dither/noise floor.
+    /// </summary>
+    private sealed class SilenceBoundsProbe : NAudio.Wave.ISampleProvider
+    {
+        private const float Threshold = 0.002f;
+        private readonly NAudio.Wave.ISampleProvider _src;
+        private long _frames;
+        private long _firstAudible = -1;
+        private long _lastAudible = -1;
+
+        public SilenceBoundsProbe(NAudio.Wave.ISampleProvider src) => _src = src;
+
+        public NAudio.Wave.WaveFormat WaveFormat => _src.WaveFormat;
+
+        public double? FirstAudibleSec =>
+            _firstAudible < 0 ? null : _firstAudible / (double)WaveFormat.SampleRate;
+
+        public double? LastAudibleSec =>
+            _lastAudible < 0 ? null : _lastAudible / (double)WaveFormat.SampleRate;
+
+        public int Read(float[] buffer, int offset, int count)
+        {
+            int n = _src.Read(buffer, offset, count);
+            int ch = Math.Max(1, WaveFormat.Channels);
+            for (int i = 0; i < n; i++)
+            {
+                float v = buffer[offset + i];
+                if (v > Threshold || v < -Threshold)
+                {
+                    long frame = _frames + i / ch;
+                    if (_firstAudible < 0) _firstAudible = frame;
+                    _lastAudible = frame;
+                }
+            }
+            _frames += n / ch;
+            return n;
+        }
+    }
+
 }

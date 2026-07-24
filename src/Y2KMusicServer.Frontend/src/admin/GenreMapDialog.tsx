@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import * as api from './api'
 
 /**
- * The genre-map editor: the buckets the library is filtered by, plus rules
- * mapping raw tag genres onto them. The map applies at query time, so Save
- * re-buckets the whole library instantly — no rescan. The raw-genre worklist
- * (right side) shows every distinct tag genre in the library with its count
- * and where it currently lands; clicking one prefills a rule for it.
+ * The genre-map editor. The worklist (every distinct raw tag genre with its
+ * track count) is the main pane: each row carries an inline bucket selector, so
+ * mapping a raw genre is ONE action — pick the bucket, and an exact rule is
+ * staged. The selector also offers "New bucket …" which creates a bucket named
+ * after the raw and maps to it. Everything stages locally and applies on Save
+ * (query-time map — the whole library re-buckets instantly, no rescan).
  */
 export default function GenreMapDialog({ onClose, onChanged }:
   { onClose: () => void; onChanged: () => void }) {
@@ -14,10 +15,8 @@ export default function GenreMapDialog({ onClose, onChanged }:
   const [map, setMap] = useState<api.GenreMap | null>(null)
   const [raws, setRaws] = useState<api.RawGenre[]>([])
   const [untagged, setUntagged] = useState(0)
+  const [onlyUnmapped, setOnlyUnmapped] = useState(true)
   const [newBucket, setNewBucket] = useState('')
-  const [ruleRaw, setRuleRaw] = useState('')
-  const [ruleSub, setRuleSub] = useState(false)
-  const [ruleBucket, setRuleBucket] = useState('')
   const [busy, setBusy] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -57,6 +56,42 @@ export default function GenreMapDialog({ onClose, onChanged }:
 
   const edit = (m: api.GenreMap) => { setMap(m); setDirty(true) }
 
+  // The bucket a raw genre resolves to under the STAGED (unsaved) map — exact
+  // rule first, then a bucket with the same name; Unknown otherwise. Keeps the
+  // worklist live while mapping, without waiting for Save.
+  const stagedBucket = (raw: string): string => {
+    if (!map) return 'Unknown'
+    const rule = map.rules.find(r => !r.substring && r.raw.toLowerCase() === raw.toLowerCase())
+    if (rule) {
+      const b = map.buckets.find(x => x.toLowerCase() === rule.bucket.toLowerCase())
+      return b ?? 'Unknown'
+    }
+    const direct = map.buckets.find(x => x.toLowerCase() === raw.toLowerCase())
+    return direct ?? 'Unknown'
+  }
+
+  // ONE action per row: choose a bucket → stage an exact rule for the raw
+  // (replacing any earlier exact rule). '' clears the mapping; NEW creates a
+  // bucket named after the raw itself and maps to it.
+  const NEW = '\u0000new'
+  const mapRaw = (raw: string, choice: string) => {
+    if (!map) return
+    const rest = map.rules.filter(r => !(!r.substring && r.raw.toLowerCase() === raw.toLowerCase()))
+    if (choice === '') {
+      edit({ ...map, rules: rest })
+      return
+    }
+    if (choice === NEW) {
+      const name = raw.trim()
+      const buckets = map.buckets.some(b => b.toLowerCase() === name.toLowerCase())
+        ? map.buckets : [...map.buckets, name]
+      // The bucket itself matches the raw by name — no rule needed.
+      edit({ buckets, rules: rest })
+      return
+    }
+    edit({ ...map, rules: [...rest, { raw, substring: false, bucket: choice }] })
+  }
+
   const addBucket = () => {
     const b = newBucket.trim()
     if (!map || !b) return
@@ -74,19 +109,15 @@ export default function GenreMapDialog({ onClose, onChanged }:
     })
   }
 
-  const addRule = () => {
-    const raw = ruleRaw.trim()
-    if (!map || !raw || !ruleBucket) return
-    const rest = map.rules.filter(r =>
-      !(r.raw.toLowerCase() === raw.toLowerCase() && r.substring === ruleSub))
-    edit({ ...map, rules: [...rest, { raw, substring: ruleSub, bucket: ruleBucket }] })
-    setRuleRaw(''); setRuleSub(false)
-  }
+  const visibleRaws = useMemo(
+    () => onlyUnmapped ? raws.filter(r => stagedBucket(r.raw) === 'Unknown') : raws,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [raws, onlyUnmapped, map])
 
-  const removeRule = (i: number) => {
-    if (!map) return
-    edit({ ...map, rules: map.rules.filter((_, j) => j !== i) })
-  }
+  const unmappedCount = useMemo(
+    () => raws.filter(r => stagedBucket(r.raw) === 'Unknown').length,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [raws, map])
 
   const save = async () => {
     if (!map) return
@@ -103,7 +134,7 @@ export default function GenreMapDialog({ onClose, onChanged }:
   return (
     <div className="w-overlay" onMouseDown={onClose}>
       <div className="w-dialog w-raised" onMouseDown={e => e.stopPropagation()}
-        style={{ width: 700, maxWidth: '96vw' }}>
+        style={{ width: 860, maxWidth: '96vw' }}>
         <div className="w-titlebar">
           <span className="w-app">Genre map</span>
           <span style={{ flex: 1 }} />
@@ -115,122 +146,117 @@ export default function GenreMapDialog({ onClose, onChanged }:
           {!map && !err && <div className="w-muted" style={{ padding: 4 }}>Loading…</div>}
 
           {map && (
-            <div style={{ display: 'flex', gap: 10, alignItems: 'stretch' }}>
-              {/* Left: buckets + rules */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <fieldset className="w-group">
-                  <legend>Genre buckets</legend>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
-                    {map.buckets.map(b => (
-                      <span key={b} className="w-raised" style={{ padding: '1px 4px', whiteSpace: 'nowrap' }}>
-                        {b}{' '}
-                        <button className="w-btn" style={{ minHeight: 14, padding: '0 4px' }}
-                          title={`Remove "${b}" (its rules go too; tracks fall back to Unknown)`}
-                          onClick={() => removeBucket(b)}>✕</button>
-                      </span>
-                    ))}
-                    <span className="w-muted" style={{ alignSelf: 'center' }}>+ Unknown (always)</span>
-                  </div>
-                  <div className="w-toolbar">
-                    <input type="text" value={newBucket} style={{ flex: 1 }}
-                      onChange={e => setNewBucket(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') addBucket() }}
-                      placeholder="New bucket, e.g. Dansk Musik" />
-                    <button className="w-btn" disabled={!newBucket.trim()} onClick={addBucket}>Add</button>
-                  </div>
-                </fieldset>
+            <>
+              {/* Buckets: the filter values the library exposes. */}
+              <fieldset className="w-group">
+                <legend>Genre buckets (the library filter)</legend>
+                <div className="w-toolbar" style={{ flexWrap: 'wrap', rowGap: 4 }}>
+                  {map.buckets.map(b => (
+                    <span key={b} className="w-raised" style={{ padding: '1px 4px', whiteSpace: 'nowrap' }}>
+                      {b}{' '}
+                      <button className="w-btn" style={{ minHeight: 14, padding: '0 4px' }}
+                        title={`Remove "${b}" (its mappings go too; those tracks fall back to Unknown)`}
+                        onClick={() => removeBucket(b)}>✕</button>
+                    </span>
+                  ))}
+                  <span className="w-muted">+ Unknown (always)</span>
+                  <span style={{ flex: 1 }} />
+                  <input type="text" value={newBucket} style={{ width: 160 }}
+                    onChange={e => setNewBucket(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') addBucket() }}
+                    placeholder="New bucket…" />
+                  <button className="w-btn" disabled={!newBucket.trim()} onClick={addBucket}>Add</button>
+                </div>
+              </fieldset>
 
-                <fieldset className="w-group" style={{ marginTop: 6 }}>
-                  <legend>Rules (raw tag genre → bucket)</legend>
-                  <div className="w-listwrap w-sunken" style={{ maxHeight: 150 }}>
-                    <table className="w-table">
-                      <tbody>
-                        {map.rules.map((r, i) => (
-                          <tr key={`${r.raw}|${r.substring}|${i}`}>
-                            <td title={r.raw}>{r.raw}</td>
-                            <td className="w-muted">{r.substring ? 'contains' : 'exact'}</td>
-                            <td>→ {r.bucket}</td>
-                            <td style={{ width: 30 }}>
-                              <button className="w-btn" style={{ minHeight: 15, padding: '0 5px' }}
-                                onClick={() => removeRule(i)}>✕</button>
+              {/* The worklist IS the mapper: pick a bucket per raw genre. */}
+              <fieldset className="w-group" style={{ marginTop: 6 }}>
+                <legend>Raw tag genres → bucket</legend>
+                <div className="w-toolbar">
+                  <span className="w-muted">
+                    {raws.length} raw genres, {unmappedCount} unmapped{untagged > 0 ? ` · ${untagged} track(s) with no tag at all` : ''}.
+                    Multi-genre tags ("Rock, Latin, Funk") auto-match on their parts.
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  <label className="w-check">
+                    <input type="checkbox" checked={onlyUnmapped}
+                      onChange={e => setOnlyUnmapped(e.target.checked)} /> only unmapped
+                  </label>
+                </div>
+                <div className="w-listwrap w-sunken" style={{ height: '46vh', minHeight: 220, marginTop: 4 }}>
+                  <table className="w-table">
+                    <thead>
+                      <tr><th>Raw tag genre</th><th className="w-num">Tracks</th><th style={{ width: 200 }}>Bucket</th></tr>
+                    </thead>
+                    <tbody>
+                      {visibleRaws.map(r => {
+                        const cur = stagedBucket(r.raw)
+                        return (
+                          <tr key={r.raw}>
+                            <td title={r.raw} style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.raw}</td>
+                            <td className="w-num">{r.count}</td>
+                            <td>
+                              <select value={cur === 'Unknown' ? '' : cur} style={{ width: '100%' }}
+                                onChange={e => mapRaw(r.raw, e.target.value)}>
+                                <option value="">Unknown</option>
+                                {map.buckets.map(b => <option key={b} value={b}>{b}</option>)}
+                                <option value={NEW}>➕ New bucket “{r.raw}”</option>
+                              </select>
                             </td>
                           </tr>
-                        ))}
-                        {map.rules.length === 0 && (
-                          <tr><td className="w-muted" style={{ padding: 6 }}>No rules yet. A raw genre equal to a bucket name maps by itself; everything else lands in Unknown.</td></tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="w-toolbar" style={{ marginTop: 4, flexWrap: 'wrap' }}>
-                    <input type="text" value={ruleRaw} style={{ flex: 1, minWidth: 120 }}
-                      onChange={e => setRuleRaw(e.target.value)}
-                      placeholder="Raw genre (e.g. Eurodance)" />
-                    <label className="w-check" title="Match anywhere inside the raw genre instead of the whole value">
-                      <input type="checkbox" checked={ruleSub} onChange={e => setRuleSub(e.target.checked)} /> contains
-                    </label>
-                    <select value={ruleBucket} onChange={e => setRuleBucket(e.target.value)}>
-                      <option value="">→ bucket…</option>
-                      {map.buckets.map(b => <option key={b} value={b}>{b}</option>)}
-                    </select>
-                    <button className="w-btn" disabled={!ruleRaw.trim() || !ruleBucket} onClick={addRule}>Add rule</button>
-                  </div>
-                </fieldset>
-              </div>
-
-              {/* Right: raw-genre worklist */}
-              <fieldset className="w-group" style={{ width: 250, display: 'flex', flexDirection: 'column' }}>
-                <legend>Raw genres in the library</legend>
-                <div className="w-muted" style={{ marginBottom: 4 }}>
-                  Click one to prefill a rule.{untagged > 0 ? ` ${untagged} track(s) have no genre tag.` : ''}
-                </div>
-                <div className="w-listwrap w-sunken" style={{ flex: 1, maxHeight: 290 }}>
-                  <table className="w-table">
-                    <tbody>
-                      {raws.map(r => (
-                        <tr key={r.raw} style={{ cursor: 'pointer' }}
-                          title={`Currently → ${r.bucket}`}
-                          onClick={() => { setRuleRaw(r.raw); setRuleSub(false) }}>
-                          <td title={r.raw} style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.raw}</td>
-                          <td className="w-num">{r.count}</td>
-                          <td className={r.bucket === 'Unknown' ? 'w-err' : 'w-muted'}>{r.bucket}</td>
-                        </tr>
-                      ))}
-                      {raws.length === 0 && (
-                        <tr><td className="w-muted" style={{ padding: 6 }}>No raw genres (library empty or untagged).</td></tr>
+                        )
+                      })}
+                      {visibleRaws.length === 0 && (
+                        <tr><td colSpan={3} className="w-muted" style={{ padding: 8 }}>
+                          {onlyUnmapped ? 'Everything is mapped. 🎉 Untick "only unmapped" to review.' : 'No raw genres (library empty or untagged).'}
+                        </td></tr>
                       )}
                     </tbody>
                   </table>
                 </div>
               </fieldset>
-            </div>
-          )}
 
-          <fieldset className="w-group" style={{ marginTop: 8 }}>
-            <legend>Online lookup (Deezer)</legend>
-            <div className="w-toolbar" style={{ flexWrap: 'wrap' }}>
-              {!lookup?.running ? (
-                <button className="w-btn" onClick={startLookup}
-                  title="Search Deezer for tracks with no genre tag at all and fill the genre in the library (files are never modified)">
-                  Look up missing genres online
-                </button>
-              ) : (
-                <button className="w-btn" onClick={stopLookup}>Stop</button>
+              {/* Advanced rules (substring matches etc.) stay editable. */}
+              {map.rules.some(r => r.substring) && (
+                <fieldset className="w-group" style={{ marginTop: 6 }}>
+                  <legend>Contains-rules</legend>
+                  {map.rules.filter(r => r.substring).map((r, i) => (
+                    <div key={`${r.raw}|${i}`} className="w-toolbar">
+                      <span>“…{r.raw}…” → {r.bucket}</span>
+                      <button className="w-btn" style={{ minHeight: 15, padding: '0 5px' }}
+                        onClick={() => edit({ ...map, rules: map.rules.filter(x => x !== r) })}>✕</button>
+                    </div>
+                  ))}
+                </fieldset>
               )}
-              <span className="w-muted" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {lookup?.running
-                  ? `${lookup.processed}/${lookup.total} — ${lookup.found} found, ${lookup.misses} misses · ${lookup.currentTrack ?? ''}`
-                  : lookup?.message ?? 'Fills tracks that have no genre tag; found genres appear as raw genres above for you to map.'}
-              </span>
-            </div>
-          </fieldset>
 
-          <div className="w-toolbar" style={{ marginTop: 8 }}>
-            <span className="w-muted">{dirty ? 'Unsaved changes — Save applies to the whole library instantly.' : ''}</span>
-            <span style={{ flex: 1 }} />
-            <button className="w-btn" disabled={!dirty || busy || !map} onClick={save}>Save</button>
-            <button className="w-btn" onClick={onClose}>Close</button>
-          </div>
+              <fieldset className="w-group" style={{ marginTop: 6 }}>
+                <legend>Online lookup (Deezer)</legend>
+                <div className="w-toolbar" style={{ flexWrap: 'wrap' }}>
+                  {!lookup?.running ? (
+                    <button className="w-btn" onClick={startLookup}
+                      title="Search Deezer for tracks with no genre tag / no album and fill the blanks in the library (files are never modified)">
+                      Look up missing genres online
+                    </button>
+                  ) : (
+                    <button className="w-btn" onClick={stopLookup}>Stop</button>
+                  )}
+                  <span className="w-muted" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {lookup?.running
+                      ? `${lookup.processed}/${lookup.total} — ${lookup.found} found, ${lookup.misses} misses · ${lookup.currentTrack ?? ''}`
+                      : lookup?.message ?? 'Fills tracks that have no genre tag; found genres appear as raw genres above for you to map.'}
+                  </span>
+                </div>
+              </fieldset>
+
+              <div className="w-toolbar" style={{ marginTop: 8 }}>
+                <span className="w-muted">{dirty ? 'Unsaved changes — Save applies to the whole library instantly.' : ''}</span>
+                <span style={{ flex: 1 }} />
+                <button className="w-btn" disabled={!dirty || busy} onClick={save}>Save</button>
+                <button className="w-btn" onClick={onClose}>Close</button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

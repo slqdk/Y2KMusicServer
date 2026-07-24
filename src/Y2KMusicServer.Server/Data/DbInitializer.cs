@@ -54,12 +54,16 @@ public static class DbInitializer
             cmd.CommandText =
                 "SELECT " +
                 "  EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='Categories')," +
-                "  EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='SavedPlaylists')";
+                "  EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='SavedPlaylists')," +
+                // v2.1: the silence-bound columns (EnsureCreated cannot add
+                // columns, so their absence forces the same rebuild).
+                "  EXISTS(SELECT 1 FROM pragma_table_info('Tracks') WHERE name='LeadInSec')";
             using var r = cmd.ExecuteReader();
             r.Read();
             bool hasCategories = r.GetInt64(0) != 0;
             bool hasSavedPlaylists = r.GetInt64(1) != 0;
-            oldSchema = hasCategories || !hasSavedPlaylists;
+            bool hasLeadIn = r.GetInt64(2) != 0;
+            oldSchema = hasCategories || !hasSavedPlaylists || !hasLeadIn;
         }
         catch (Exception ex)
         {
@@ -71,7 +75,7 @@ public static class DbInitializer
         if (!oldSchema) return;
 
         log.LogWarning(
-            "Pre-v2 database detected at {Path} — deleting it (and the track-keyed " +
+            "Pre-v2.1 database detected at {Path} — deleting it (and the track-keyed " +
             "caches) for the library rework. The library repopulates on the next scan.",
             dbPath);
 

@@ -27,6 +27,7 @@ public sealed class LibraryScanner
     private readonly ILogger<LibraryScanner> _log;
 
     private readonly object _gate = new();
+    private volatile bool _abort;
     private readonly Queue<int?> _queue = new(); // folder id, or null = all folders
     private bool _busy; // worker loop active (draining the queue)
     private volatile ScanProgress _current = new() { State = ScanState.Idle };
@@ -68,6 +69,17 @@ public sealed class LibraryScanner
         return true;
     }
 
+    /// <summary>
+    /// Aborts the running scan (nothing read so far is persisted — a partial
+    /// scan of a removed folder must not add ghost tracks) and drops queued
+    /// scans. Used when folders are removed or cleared mid-scan.
+    /// </summary>
+    public void CancelAll()
+    {
+        _abort = true;
+        lock (_gate) _queue.Clear();
+    }
+
     private void DrainQueue()
     {
         while (true)
@@ -93,6 +105,7 @@ public sealed class LibraryScanner
 
     private void Run(int? folderId)
     {
+        _abort = false; // a fresh scan clears any previous cancellation
         Emit(new ScanProgress { State = ScanState.Enumerating });
 
         // (folderPath, nested-folder exclusion prefixes) per target — from the
@@ -191,6 +204,8 @@ public sealed class LibraryScanner
             new ParallelOptions { MaxDegreeOfParallelism = workers },
             item =>
             {
+                if (_abort) return; // folder removed mid-scan — stop reading
+
                 var track = ReadTrack(item);
                 if (track != null)
                 {
@@ -214,6 +229,21 @@ public sealed class LibraryScanner
                         CurrentPath = item
                     });
             });
+
+        if (_abort)
+        {
+            // Discard everything: persisting a partial read of a folder that was
+            // just removed would resurrect its tracks as ghosts.
+            Emit(new ScanProgress
+            {
+                State = ScanState.Completed,
+                FilesFound = found,
+                FilesProcessed = processed,
+                Message = "Cancelled (folders changed); nothing was added.",
+                ScopeFolderId = folderId
+            });
+            return;
+        }
 
         // Persist in batches to bound memory on large libraries.
         using (var db = _dbf.CreateDbContext())

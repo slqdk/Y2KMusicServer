@@ -21,7 +21,7 @@ const MENU_ITEM_H = 22
 
 type RowMenu = { x: number; y: number; track: api.TrackDto }
 
-const decadeLabel = (d: number) => (d === 0 ? 'Unknown' : `${String(d).slice(2)}'s`)
+const decadeLabel = (d: number) => (d === 0 ? 'Unknown' : `${d}s`)
 
 export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: ScanInfo | null; analysis: AnalysisInfo | null; onPlayNow: (trackId: number) => Promise<unknown> | void }) {
   const [facets, setFacets] = useState<api.FacetsDto | null>(null)

@@ -22,6 +22,7 @@ public sealed class AudioAnalysisService
     private readonly ILogger<AudioAnalysisService> _log;
 
     private readonly object _gate = new();
+    private volatile bool _abort;
     private readonly Queue<(bool All, int? Folder)> _queue = new();
     private bool _busy; // worker loop active (draining the queue)
     private volatile AnalysisProgress _current = new() { State = AnalysisState.Idle };
@@ -61,6 +62,19 @@ public sealed class AudioAnalysisService
         return true;
     }
 
+    /// <summary>
+    /// Aborts the running pass (remaining tracks are skipped without decoding;
+    /// results measured so far stay committed) and drops any queued passes.
+    /// Used when folders are removed or cleared, so the pass doesn't keep
+    /// walking a snapshot of tracks that no longer exist. Callers typically
+    /// re-kick a fresh missing-only pass right after.
+    /// </summary>
+    public void CancelAll()
+    {
+        _abort = true;
+        lock (_gate) _queue.Clear();
+    }
+
     private void DrainQueue()
     {
         while (true)
@@ -84,7 +98,7 @@ public sealed class AudioAnalysisService
         }
     }
 
-    private sealed record Item(int Id, string Path, string? Title, bool HasLufs, bool HasBpm);
+    private sealed record Item(int Id, string Path, string? Title, bool HasLufs, bool HasBpm, bool HasBounds);
 
     private sealed class Result
     {
@@ -92,18 +106,22 @@ public sealed class AudioAnalysisService
         public double? Bpm;
         public double? BpmConfidence;
         public double? BeatPhase;
-        public bool Any => Lufs != null || Bpm != null;
+        public double? LeadIn;
+        public double? LeadOut;
+        public bool Any => Lufs != null || Bpm != null || LeadIn != null;
     }
 
     private void Run(bool reanalyzeAll, int? folderId)
     {
+        _abort = false; // a fresh pass clears any previous cancellation
         Emit(new AnalysisProgress { State = AnalysisState.Running, Message = "Selecting tracks" });
 
         List<Item> items;
         using (var db = _dbf.CreateDbContext())
         {
             var q = db.Tracks.AsNoTracking();
-            if (!reanalyzeAll) q = q.Where(t => t.LufsIntegrated == null || t.Bpm == null);
+            if (!reanalyzeAll)
+                q = q.Where(t => t.LufsIntegrated == null || t.Bpm == null || t.LeadInSec == null);
 
             // Folder-scoped pass (chained after a single-folder scan): only that
             // folder's own tracks, with "innermost wins" so nested folders aren't
@@ -119,7 +137,8 @@ public sealed class AudioAnalysisService
             }
 
             items = q.OrderBy(t => t.Id)
-                .Select(t => new Item(t.Id, t.FilePath, t.Title, t.LufsIntegrated != null, t.Bpm != null))
+                .Select(t => new Item(t.Id, t.FilePath, t.Title,
+                    t.LufsIntegrated != null, t.Bpm != null, t.LeadInSec != null))
                 .ToList();
         }
 
@@ -146,6 +165,7 @@ public sealed class AudioAnalysisService
         }
 
         int processed = 0, updated = 0, failed = 0;
+        int probed = 0; // decode-failure probes logged this pass (capped)
         long lastEmitTicks = 0;
 
         // Persist incrementally so an interrupted pass leaves its finished work on
@@ -175,6 +195,8 @@ public sealed class AudioAnalysisService
                 {
                     var r = map[t.Id];
                     if (r.Lufs != null) t.LufsIntegrated = r.Lufs;
+                    if (r.LeadIn != null) t.LeadInSec = r.LeadIn;
+                    if (r.LeadOut != null) t.LeadOutSec = r.LeadOut;
                     if (r.Bpm != null)
                     {
                         t.Bpm = r.Bpm;
@@ -202,18 +224,28 @@ public sealed class AudioAnalysisService
 
         Parallel.ForEach(items, new ParallelOptions { MaxDegreeOfParallelism = workers }, item =>
         {
+            if (_abort) return; // folder removed/cleared mid-pass — stop touching the stale snapshot
+
             var res = new Result();
             bool needLufs = reanalyzeAll || !item.HasLufs;
+            bool needBounds = reanalyzeAll || !item.HasBounds;
             bool needBpm = reanalyzeAll || !item.HasBpm;
 
             try
             {
                 if (File.Exists(item.Path))
                 {
-                    if (needLufs)
+                    // LUFS and the silence bounds share one decode.
+                    if (needLufs || needBounds)
                     {
-                        var l = new LoudnessAnalyzer().AnalyzeFile(item.Path);
-                        if (l is double v && !double.IsNaN(v) && !double.IsInfinity(v)) res.Lufs = v;
+                        var full = new LoudnessAnalyzer().AnalyzeFileFull(item.Path);
+                        if (needLufs && full.Lufs is double v && !double.IsNaN(v) && !double.IsInfinity(v))
+                            res.Lufs = v;
+                        if (needBounds)
+                        {
+                            res.LeadIn = full.LeadInSec;
+                            res.LeadOut = full.LeadOutSec;
+                        }
                     }
                     if (needBpm)
                     {
@@ -228,7 +260,36 @@ public sealed class AudioAnalysisService
             }
 
             if (res.Any) { pending.Add((item.Id, res)); Interlocked.Increment(ref updated); }
-            else Interlocked.Increment(ref failed);
+            else
+            {
+                Interlocked.Increment(ref failed);
+
+                // The analyzers swallow decode errors and return null, which is
+                // right for a bulk pass but hides systemic failures (e.g. the
+                // Media Foundation FLAC decoder missing on N/IoT/Server SKUs,
+                // where EVERY track fails instantly). Probe the first few
+                // failures by opening the file directly and log the real
+                // exception at Warning so the log names the cause.
+                if (Interlocked.Increment(ref probed) <= 3 && File.Exists(item.Path))
+                {
+                    try
+                    {
+                        using var probe = new SafeAudioFileReader(item.Path);
+                        _log.LogWarning(
+                            "Analysis produced no result for {Path} although the file decodes " +
+                            "(silent or shorter than 400 ms?).", item.Path);
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.LogWarning(ex,
+                            "Decode failed for {Path}: {Message} — if every track fails like this, " +
+                            "the OS is missing its Media Foundation audio decoder (Windows N: install " +
+                            "the Media Feature Pack; Windows Server: add the Media Foundation feature), " +
+                            "then reboot. FLAC playback on the decks is affected the same way.",
+                            item.Path, ex.Message);
+                    }
+                }
+            }
 
             int done = Interlocked.Increment(ref processed);
             long now = DateTime.UtcNow.Ticks;
@@ -250,6 +311,18 @@ public sealed class AudioAnalysisService
         pending.CompleteAdding();
         writer.Wait();   // let the writer commit the last results before we report done
 
+        if (_abort)
+        {
+            Emit(new AnalysisProgress
+            {
+                State = AnalysisState.Completed,
+                Total = total, Processed = processed, Updated = updated, Failed = failed,
+                Message = $"Cancelled after {updated} track(s) (library changed)."
+            });
+            _log.LogInformation("Audio analysis cancelled: {Updated} committed before the library changed.", updated);
+            return;
+        }
+
         Emit(new AnalysisProgress
         {
             State = AnalysisState.Completed,
@@ -261,6 +334,10 @@ public sealed class AudioAnalysisService
         });
         _log.LogInformation("Audio analysis complete: {Updated}/{Total} analysed, {Failed} skipped.",
             updated, total, failed);
+        if (updated == 0 && failed == total && total > 0)
+            _log.LogWarning("Every track in this pass failed to analyse — that pattern almost always " +
+                "means the audio decoder is unavailable on this machine (see the decode warnings above), " +
+                "not a problem with the files.");
     }
 
     private int ReadWorkers()

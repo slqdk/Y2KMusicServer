@@ -45,6 +45,18 @@ public sealed class Track
     /// </summary>
     public string? GenreOverride { get; set; }
 
+    /// <summary>Time (sec) of the first audible sample — leading-silence skip
+    /// point. Null = not yet measured. Measured by the analysis pass alongside
+    /// LUFS (same decode); the engine starts cold loads here and prefers it as
+    /// a crossfade in-point when no musical in-point is known.</summary>
+    public double? LeadInSec { get; set; }
+
+    /// <summary>Time (sec) of the last audible sample — the track's effective
+    /// end. Null = not yet measured. The engine places auto-next triggers
+    /// against this instead of the file length, so trailing silence never
+    /// plays out on air.</summary>
+    public double? LeadOutSec { get; set; }
+
     /// <summary>Album-art path or URL. Null = read from file tags on demand.</summary>
     public string? AlbumArt { get; set; }
 
