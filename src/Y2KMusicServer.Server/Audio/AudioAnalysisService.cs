@@ -18,6 +18,7 @@ public sealed class AudioAnalysisService
 {
     private readonly IDbContextFactory<Y2KDbContext> _dbf;
     private readonly NetworkShareConnector _connector;
+    private readonly IConfiguration _cfg;
     private readonly ILogger<AudioAnalysisService> _log;
 
     private readonly object _gate = new();
@@ -25,10 +26,12 @@ public sealed class AudioAnalysisService
     private bool _busy; // worker loop active (draining the queue)
     private volatile AnalysisProgress _current = new() { State = AnalysisState.Idle };
 
-    public AudioAnalysisService(IDbContextFactory<Y2KDbContext> dbf, NetworkShareConnector connector, ILogger<AudioAnalysisService> log)
+    public AudioAnalysisService(IDbContextFactory<Y2KDbContext> dbf, NetworkShareConnector connector,
+        IConfiguration cfg, ILogger<AudioAnalysisService> log)
     {
         _dbf = dbf;
         _connector = connector;
+        _cfg = cfg;
         _log = log;
     }
 
