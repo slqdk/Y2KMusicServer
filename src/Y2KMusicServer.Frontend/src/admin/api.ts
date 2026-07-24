@@ -237,8 +237,11 @@ export const removeSavedPlaylistTrack = (id: number, entryId: number) =>
 // Replace the live queue with a saved playlist (requests survive and play
 // first) and crossfade into it. `action` reports what the engine did.
 export const activateSavedPlaylist = (id: number) =>
-  req<{ activated: number; action: string; playlist: PlaylistItem[] }>(
-    `/api/admin/playlist/activate?playlistId=${id}`, { method: 'POST' })
+  req<{
+    activated: number; action: string
+    queued: number; skippedMissing: number; skippedAlreadyQueued: number
+    playlist: PlaylistItem[]
+  }>(`/api/admin/playlist/activate?playlistId=${id}`, { method: 'POST' })
 export interface PlaylistSlot {
   slotIndex: number
   enabled: boolean

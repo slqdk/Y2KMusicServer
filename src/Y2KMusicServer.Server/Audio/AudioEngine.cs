@@ -1465,6 +1465,33 @@ public sealed class AudioEngine
             {
                 (np, toDispose) = FinishCrossfade_Locked();
             }
+            else if (ReferenceEquals(deck, _deckA) && _prepared != null)
+            {
+                // Deck A hit end-of-file BEFORE the armed trigger fired (decode
+                // length vs. planner out-point rounding, or a trigger inside the
+                // final buffer). Never stop with a loaded next: cut to it now.
+                var p = _prepared;
+                _prepared = null;
+
+                var incoming = p.DeckB;
+                incoming.SilentPreroll = false;
+                if (p.PrerollStarted)
+                {
+                    // The warm-up decoded past the in-point while silent; re-seek
+                    // so the cut still enters where the planner chose.
+                    try { incoming.Reader.CurrentTime = TimeSpan.FromSeconds(incoming.InPointSec); } catch { }
+                }
+                incoming.Tap.Reset(); // drop pre-roll/preview backlog; stream gets live audio
+
+                _activePlan = null;   // a cut runs no move steps
+                _deckB = incoming;
+                (np, toDispose) = FinishCrossfade_Locked(); // promote B → A, full volume
+                try { _deckA!.Out.Play(); } catch { }
+
+                _log.LogInformation(
+                    "Deck A ended before the armed trigger — cut straight to {Title}.",
+                    TrackLabel(_deckA?.Title, _deckA?.Artist));
+            }
             else if (ReferenceEquals(deck, _deckA))
             {
                 _state = PlaybackEngineState.Stopped;

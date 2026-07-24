@@ -116,7 +116,10 @@ export default function Admin() {
         <div className="w-right-col">
           <DeckPanel live={live} status={status} refresh={refreshStatus}
             mixRules={mixRules} onToggleSection={toggleSection} />
-          <PlaylistPanel onPlayNow={playNow} nowPlayingTrackId={live.nowPlaying?.trackId ?? null} />
+          {/* Hub events only flow on changes, so a fresh page load has no
+              nowPlaying until the next track — the REST status fills that gap. */}
+          <PlaylistPanel onPlayNow={playNow}
+            nowPlayingTrackId={live.nowPlaying?.trackId ?? status?.trackId ?? null} />
         </div>
       </div>
 

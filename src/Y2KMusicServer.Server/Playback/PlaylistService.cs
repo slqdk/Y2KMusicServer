@@ -296,6 +296,9 @@ public sealed class PlaylistService
 
     public enum ActivateResult { Ok, NotFound, Empty }
 
+    public sealed record ActivateOutcome(
+        ActivateResult Result, int Added, int SkippedMissing, int SkippedDuplicate);
+
     /// <summary>
     /// Replaces the live queue with a saved playlist: upcoming entries are
     /// cleared EXCEPT pending Request entries (requests survive and play first),
@@ -305,7 +308,7 @@ public sealed class PlaylistService
     /// Tracks whose file is missing, or that already sit in the kept portion,
     /// are skipped. Returns the count appended via <paramref name="added"/>.
     /// </summary>
-    public async Task<ActivateResult> ActivateSavedAsync(
+    public async Task<ActivateOutcome> ActivateSavedAsync(
         int savedPlaylistId, int? currentTrackId, CancellationToken ct = default)
     {
         await _mutateGate.WaitAsync(ct);
@@ -315,14 +318,14 @@ public sealed class PlaylistService
 
             var saved = await db.SavedPlaylists.AsNoTracking()
                 .FirstOrDefaultAsync(p => p.Id == savedPlaylistId, ct);
-            if (saved == null) return ActivateResult.NotFound;
+            if (saved == null) return new ActivateOutcome(ActivateResult.NotFound, 0, 0, 0);
 
             var savedTracks = await db.SavedPlaylistTracks.AsNoTracking()
                 .Where(x => x.SavedPlaylistId == savedPlaylistId)
                 .OrderBy(x => x.Position)
                 .Select(x => new { x.TrackId, x.Track!.FilePath })
                 .ToListAsync(ct);
-            if (savedTracks.Count == 0) return ActivateResult.Empty;
+            if (savedTracks.Count == 0) return new ActivateOutcome(ActivateResult.Empty, 0, 0, 0);
 
             var entries = await db.PlaylistEntries.OrderBy(e => e.Position).ToListAsync(ct);
             int curPos = CurrentPosition(entries, currentTrackId);
@@ -339,10 +342,10 @@ public sealed class PlaylistService
             int nextPos = entries.Except(doomed).Select(e => e.Position)
                 .DefaultIfEmpty(-1).Max() + 1;
 
-            int added = 0, missing = 0;
+            int added = 0, missing = 0, dupes = 0;
             foreach (var s in savedTracks)
             {
-                if (keptIds.Contains(s.TrackId)) continue;
+                if (keptIds.Contains(s.TrackId)) { dupes++; continue; }
                 if (!File.Exists(s.FilePath)) { missing++; continue; }
                 db.PlaylistEntries.Add(new PlaylistEntry
                 {
@@ -364,7 +367,7 @@ public sealed class PlaylistService
             _log.LogInformation("Activated playlist \"{Name}\": {Added} track(s) queued, {Kept} request(s) kept ahead.",
                 saved.Name, added, entries.Except(doomed).Count(e => e.Source == PlaylistSource.Request && e.Position > curPos));
 
-            return ActivateResult.Ok;
+            return new ActivateOutcome(ActivateResult.Ok, added, missing, dupes);
         }
         finally { _mutateGate.Release(); }
     }

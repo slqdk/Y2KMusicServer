@@ -86,9 +86,9 @@ public sealed class AdminPlaylistController : ControllerBase
         int? current = status.TrackId;
 
         var r = await _playlist.ActivateSavedAsync(playlistId, current, ct);
-        if (r == PlaylistService.ActivateResult.NotFound)
+        if (r.Result == PlaylistService.ActivateResult.NotFound)
             return NotFound(new { error = "playlist not found", playlistId });
-        if (r == PlaylistService.ActivateResult.Empty)
+        if (r.Result == PlaylistService.ActivateResult.Empty)
             return UnprocessableEntity(new { error = "playlist is empty", playlistId });
 
         int? first = await _playlist.NextUpcomingTrackIdAsync(current, ct);
@@ -108,7 +108,15 @@ public sealed class AdminPlaylistController : ControllerBase
             }
         }
 
-        return Ok(new { activated = playlistId, action, playlist = await _playlist.GetAsync(ct) });
+        return Ok(new
+        {
+            activated = playlistId,
+            action,
+            queued = r.Added,
+            skippedMissing = r.SkippedMissing,
+            skippedAlreadyQueued = r.SkippedDuplicate,
+            playlist = await _playlist.GetAsync(ct)
+        });
     }
 
     // ── Auto DJ ─────────────────────────────────────────────────────────────

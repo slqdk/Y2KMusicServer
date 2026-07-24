@@ -186,9 +186,14 @@ export default function PlaylistPanel(
   const activate = (pl: api.SavedPlaylistDto) => guard(async () => {
     try {
       const r = await api.activateSavedPlaylist(pl.id)
-      setNote(r.action === 'crossfaded' ? `"${pl.name}" is live — crossfading.`
-        : r.action === 'started' ? `"${pl.name}" is live — playback started.`
-        : `"${pl.name}" queued.`)
+      const extras = [
+        r.skippedAlreadyQueued > 0 ? `${r.skippedAlreadyQueued} already in the queue` : '',
+        r.skippedMissing > 0 ? `${r.skippedMissing} skipped (file missing)` : ''
+      ].filter(Boolean).join(', ')
+      const detail = `${r.queued} queued${extras ? ` — ${extras}` : ''}`
+      setNote(r.action === 'crossfaded' ? `"${pl.name}" is live (${detail}) — crossfading.`
+        : r.action === 'started' ? `"${pl.name}" is live (${detail}) — playback started.`
+        : `"${pl.name}": ${detail}.`)
       setViewing(null)
       await refreshList()
     } catch (e) {
