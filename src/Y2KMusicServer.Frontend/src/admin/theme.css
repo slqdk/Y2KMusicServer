@@ -206,6 +206,7 @@
 @media (max-width: 1500px) { .w-pltiles { grid-template-columns: repeat(5, 1fr); } }
 .w-pltile { padding: 3px 4px; cursor: pointer; text-align: center; }
 .w-pltile.w-viewing { outline: 2px dotted var(--w-accent, var(--w-header)); outline-offset: -3px; }
+.w-tilemenu-btn { position: absolute; top: 1px; right: 1px; min-height: 14px; padding: 0 4px; font-size: 10px; line-height: 12px; }
 .w-pltile .w-cat-name { font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .w-pltile .w-cat-count { font-size: 10px; }
 .w-pltile.w-newtile { color: var(--w-disabled); }

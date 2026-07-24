@@ -228,7 +228,10 @@ export default function PlaylistPanel(
             className={`w-pltile w-raised ${viewing?.id === pl.id ? 'w-viewing' : ''}`}
             onClick={() => setViewing(v => v?.id === pl.id ? null : pl)}
             onContextMenu={e => openTileMenu(e, pl)}
-            title={`Priority ${pl.priority} · ${pl.slotCount} timeslot(s) · right-click for actions`}>
+            style={{ position: 'relative' }}
+            title={`Priority ${pl.priority} · ${pl.slotCount} timeslot(s)`}>
+            <button className="w-btn w-tilemenu-btn" title="Playlist actions (activate / schedule / rename / delete / priority)"
+              onClick={e => { e.stopPropagation(); openTileMenu(e, pl) }}>▾</button>
             <div className="w-cat-name">{pl.name}</div>
             <div className="w-cat-count">{pl.trackCount} tracks</div>
           </div>
@@ -259,6 +262,20 @@ export default function PlaylistPanel(
           <div className="w-viewhead">
             <span>VIEWING: {viewing.name} — saved playlist</span>
             <span style={{ flex: 1 }} />
+            <label title="Auto DJ feed weight: a 5 feeds five times as often as a 1">Prio:{' '}
+              <select value={viewing.priority}
+                onChange={e => {
+                  const v = Number(e.target.value)
+                  setPriority(viewing, v)
+                  setViewing({ ...viewing, priority: v })
+                }}>
+                {[1, 2, 3, 4, 5].map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </label>
+            <button className="w-btn" title="When Auto DJ may feed from this playlist (day/time slots)"
+              onClick={() => setSchedFor(viewing)}>Schedule…</button>
+            <button className="w-btn" onClick={() => { setRenaming(viewing); setRenameVal(viewing.name) }}>Rename…</button>
+            <button className="w-btn" onClick={() => setConfirmDel(viewing)}>Delete…</button>
             <button className="w-btn" disabled={busy}
               title="Replace the live queue with this playlist (requests stay first) and crossfade into it"
               onClick={() => activate(viewing)}>▶ Activate</button>
