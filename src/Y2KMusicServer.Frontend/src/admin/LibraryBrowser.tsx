@@ -44,7 +44,7 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
   // Resizable, fixed-width columns:
   // Title, Artist, Genre, Decade, Type, Dur, BPM, LUFS.
   // New storage key — the old 6-column widths don't fit this table.
-  const { colgroup, startResize } = useColumnWidths('y2k.cols.library2', [28, 24, 12, 7, 6, 7, 7, 9])
+  const { colgroup, startResize } = useColumnWidths('y2k.cols.library2', [23, 19, 17, 11, 6, 5, 6, 6, 7])
 
   const refreshFacets = () => api.getFacets().then(setFacets).catch(() => {})
   const refreshPlaylists = () =>
@@ -210,11 +210,12 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
             <tr>
               <th>Title<ColResizer onMouseDown={startResize(0)} /></th>
               <th>Artist<ColResizer onMouseDown={startResize(1)} /></th>
-              <th>Genre<ColResizer onMouseDown={startResize(2)} /></th>
-              <th>Decade<ColResizer onMouseDown={startResize(3)} /></th>
-              <th>Type<ColResizer onMouseDown={startResize(4)} /></th>
-              <th className="w-num">Dur<ColResizer onMouseDown={startResize(5)} /></th>
-              <th className="w-num">BPM<ColResizer onMouseDown={startResize(6)} /></th>
+              <th>Album<ColResizer onMouseDown={startResize(2)} /></th>
+              <th>Genre<ColResizer onMouseDown={startResize(3)} /></th>
+              <th>Decade<ColResizer onMouseDown={startResize(4)} /></th>
+              <th>Type<ColResizer onMouseDown={startResize(5)} /></th>
+              <th className="w-num">Dur<ColResizer onMouseDown={startResize(6)} /></th>
+              <th className="w-num">BPM<ColResizer onMouseDown={startResize(7)} /></th>
               <th className="w-num">LUFS</th>
             </tr>
           </thead>
@@ -227,10 +228,17 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
                 title="Double-click to queue as next · right-click for more">
                 <td title={t.title ?? ''}>{t.title ?? '(untitled)'}{busyId === t.id ? ' ⟳' : ''}</td>
                 <td title={t.artist ?? ''}>{t.artist ?? '---'}</td>
-                <td title={t.rawGenre ? `Tag genre: ${t.rawGenre}` : 'No genre tag'}>
-                  {t.genreBucket === 'Unknown' && t.rawGenre
-                    ? <>Unknown <span className="w-muted">({t.rawGenre})</span></>
-                    : t.genreBucket}
+                <td title={t.album ?? ''}>{t.album ?? '---'}</td>
+                <td title={t.rawGenre
+                  ? (t.genreBucket === 'Unknown'
+                    ? `Unmapped tag genre "${t.rawGenre}" — add a rule in Genre map…`
+                    : `Tag genre: ${t.rawGenre}`)
+                  : 'No genre tag'}>
+                  {t.genreBucket !== 'Unknown'
+                    ? t.genreBucket
+                    : t.rawGenre && t.rawGenre.trim().toLowerCase() !== 'unknown'
+                      ? <span className="w-muted">{t.rawGenre}</span>
+                      : 'Unknown'}
                 </td>
                 <td>{t.decade != null ? decadeLabel(t.decade) : '---'}</td>
                 <td>{t.type ?? '---'}</td>
@@ -240,7 +248,7 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
               </tr>
             ))}
             {items.length === 0 && (
-              <tr><td colSpan={8} className="w-muted" style={{ padding: 8 }}>No tracks. Add a music folder (Folders…); it scans and analyses automatically.</td></tr>
+              <tr><td colSpan={9} className="w-muted" style={{ padding: 8 }}>No tracks. Add a music folder (Folders…); it scans and analyses automatically.</td></tr>
             )}
           </tbody>
         </table>

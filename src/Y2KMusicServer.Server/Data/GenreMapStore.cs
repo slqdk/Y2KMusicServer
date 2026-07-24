@@ -91,8 +91,26 @@ public static class GenreMapStore
 
         var direct = map.Buckets.FirstOrDefault(
             b => string.Equals(b, raw, StringComparison.OrdinalIgnoreCase));
-        return direct ?? Unknown;
+        if (direct != null) return direct;
+
+        // Multi-genre tags ("Rock, Latin, Funk" / "Dance/Electronic"): try the
+        // parts, in tag order — first part with an exact rule or a bucket of
+        // its own wins. Whole-string rules above always take precedence, so an
+        // operator rule for the full tag still overrides this.
+        foreach (var part in raw.Split(SplitChars, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            foreach (var r in map.Rules)
+                if (!r.Substring && string.Equals(r.Raw, part, StringComparison.OrdinalIgnoreCase))
+                    return NormaliseBucket(map, r.Bucket);
+            var hit = map.Buckets.FirstOrDefault(
+                b => string.Equals(b, part, StringComparison.OrdinalIgnoreCase));
+            if (hit != null) return hit;
+        }
+
+        return Unknown;
     }
+
+    private static readonly char[] SplitChars = { ',', ';', '/', '&', '+' };
 
     /// <summary>The effective genre bucket for a track:
     /// override → mapped raw genre → Unknown.</summary>
