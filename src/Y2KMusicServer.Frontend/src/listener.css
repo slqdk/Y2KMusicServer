@@ -121,6 +121,7 @@
 }
 .lz-chip:hover { background: var(--lz-chip-bg-hover, var(--lz-chip-bg)); }
 .lz-chip::before { content: "◇"; font-size: .7em; opacity: .6; }
+.lz-chipgap { width: 10px; border-left: 1px solid var(--lz-line); margin: 2px 2px; align-self: stretch; }
 .lz-chip.is-on { background: var(--lz-green); color: var(--lz-green-fg); border-color: var(--lz-green-bd, var(--lz-green)); font-weight: 600; }
 .lz-chip.is-on::before { content: "◆"; opacity: 1; }
 .lz-chip-count {

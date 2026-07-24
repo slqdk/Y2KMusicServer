@@ -35,7 +35,6 @@ public sealed class PublicController : ControllerBase
     }
 
     public sealed record RequestBody(int TrackId, string? RequesterName, string? DeviceId);
-    public sealed record CategorySelectBody(int[] CategoryIds);
 
     [HttpGet("nowplaying")]
     public async Task<object> NowPlaying(CancellationToken ct)
@@ -89,26 +88,59 @@ public sealed class PublicController : ControllerBase
     {
         var st = _stream.GetStatus();
         var web = WebConfigStore.Load(_cfg);
-        return Ok(new { enabled = st.Enabled, bitrate = st.Bitrate, listeners = st.Listeners, showListenLive = web.ShowListenLive });
+        // The broadcast is always on (no enable switch); the field is kept so
+        // the listener page's off-air handling stays wired for the future.
+        return Ok(new { enabled = true, bitrate = st.Bitrate, listeners = st.Listeners, showListenLive = web.ShowListenLive });
     }
 
+    /// <summary>
+    /// Listener search + browse. Free-text <paramref name="q"/> plus optional
+    /// comma-separated <paramref name="genre"/> (genre-map buckets, incl.
+    /// "Unknown") and <paramref name="decade"/> (decade start years; 0 =
+    /// unknown decade) filters, mirroring the admin facets. With filters set,
+    /// an empty <paramref name="q"/> browses the filtered library instead of
+    /// returning nothing. Take is clamped 1..30 (browse asks for more than the
+    /// old 6-row search).
+    /// </summary>
     [HttpGet("search")]
-    public async Task<object> Search([FromQuery] string? q, [FromQuery] int take = 6, CancellationToken ct = default)
+    public async Task<object> Search(
+        [FromQuery] string? q, [FromQuery] string? genre, [FromQuery] string? decade,
+        [FromQuery] int take = 6, CancellationToken ct = default)
     {
-        take = Math.Clamp(take, 1, 6);
-        if (string.IsNullOrWhiteSpace(q)) return new { items = Array.Empty<object>() };
+        take = Math.Clamp(take, 1, 30);
 
-        var term = q.Trim();
+        var genres = (genre ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var decades = (decade ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(s => int.TryParse(s, out var d) ? (int?)d : null)
+            .Where(d => d != null).Select(d => d!.Value).ToHashSet();
+
+        bool hasText = !string.IsNullOrWhiteSpace(q);
+        if (!hasText && genres.Count == 0 && decades.Count == 0)
+            return new { items = Array.Empty<object>() };
+
         await using var db = await _dbf.CreateDbContextAsync(ct);
-        var items = await db.Tracks.AsNoTracking()
-            .Where(t =>
+        var query = db.Tracks.AsNoTracking().AsQueryable();
+        if (hasText)
+        {
+            var term = q!.Trim();
+            query = query.Where(t =>
                 (t.Title != null && EF.Functions.Like(t.Title, $"%{term}%")) ||
                 (t.Artist != null && EF.Functions.Like(t.Artist, $"%{term}%")) ||
-                (t.Album != null && EF.Functions.Like(t.Album, $"%{term}%")))
+                (t.Album != null && EF.Functions.Like(t.Album, $"%{term}%")));
+        }
+
+        var rows = await query
             .OrderBy(t => t.Artist).ThenBy(t => t.Title)
+            .ToListAsync(ct);
+
+        var map = GenreMapStore.Load(_cfg);
+        var items = rows
+            .Where(t => genres.Count == 0 || genres.Contains(GenreMapStore.EffectiveGenre(map, t)))
+            .Where(t => decades.Count == 0 || decades.Contains(GenreMapStore.Decade(t.Year) ?? 0))
             .Take(take)
             .Select(t => new { t.Id, t.Title, t.Artist, t.Album, t.DurationSec })
-            .ToListAsync(ct);
+            .ToList();
         return new { items };
     }
 
@@ -184,62 +216,48 @@ public sealed class PublicController : ControllerBase
         return Ok(new { ok = true, accepted = autoAccept });
     }
 
-    /// <summary>Categories for the listener bar + the current override selection.</summary>
-    [HttpGet("categories")]
-    public async Task<object> Categories(CancellationToken ct)
+    /// <summary>
+    /// The listener browse filters: the genre buckets and decades present in
+    /// the library, each with a live count, mirroring the admin facets.
+    /// <c>showSelector</c> carries the operator's Settings toggle (formerly the
+    /// category-selector flag). These filter the request browser only — the
+    /// old play-by-category queue override is retired with the category model
+    /// (Auto DJ is driven by the saved playlists' schedules now).
+    /// </summary>
+    [HttpGet("browse-filters")]
+    public async Task<object> BrowseFilters(CancellationToken ct)
     {
         await using var db = await _dbf.CreateDbContextAsync(ct);
         var show = (await db.Settings.AsNoTracking().FirstOrDefaultAsync(ct))?.ShowWebCategories ?? false;
-        var cats = await db.Categories.AsNoTracking()
-            .Where(c => c.Enabled)
-            .OrderBy(c => c.DisplayOrder)
-            .Select(c => new
-            {
-                c.Id,
-                c.Name,
-                Count = db.Tracks.Count(t => t.CategoryId == c.Id)
-            })
+
+        var rows = await db.Tracks.AsNoTracking()
+            .Select(t => new { t.Genre, t.GenreOverride, t.Year })
             .ToListAsync(ct);
-        return new { showSelector = show, selected = _playlist.GetWebCategories(), categories = cats };
-    }
 
-    [HttpPost("category-select")]
-    public async Task<IActionResult> CategorySelect([FromBody] CategorySelectBody? body, CancellationToken ct)
-    {
-        await using var db = await _dbf.CreateDbContextAsync(ct);
-        var settings = await db.Settings.AsNoTracking().FirstOrDefaultAsync(ct);
-        if (!(settings?.ShowWebCategories ?? false))
-            return StatusCode(403, new { error = "category selection is disabled" });
+        var map = GenreMapStore.Load(_cfg);
+        var byBucket = rows
+            .GroupBy(r => !string.IsNullOrWhiteSpace(r.GenreOverride)
+                ? GenreMapStore.Resolve(map, r.GenreOverride)
+                : GenreMapStore.Resolve(map, r.Genre))
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+        var genres = map.Buckets
+            .Select(b => new { name = b, count = byBucket.TryGetValue(b, out var n) ? n : 0 })
+            .Append(new
+            {
+                name = GenreMapStore.Unknown,
+                count = byBucket.TryGetValue(GenreMapStore.Unknown, out var u) ? u : 0
+            })
+            .Where(g => g.count > 0)
+            .ToList();
 
-        // Only allow enabled category ids through (empty = clear the override).
-        var enabled = await db.Categories.AsNoTracking().Where(c => c.Enabled).Select(c => c.Id).ToListAsync(ct);
-        var ids = (body?.CategoryIds ?? Array.Empty<int>()).Where(enabled.Contains).ToArray();
+        var decades = rows
+            .GroupBy(r => GenreMapStore.Decade(r.Year) ?? 0)
+            .Select(g => new { decade = g.Key, count = g.Count() })
+            .Where(d => d.count > 0)
+            .OrderBy(d => d.decade == 0 ? int.MaxValue : d.decade)
+            .ToList();
 
-        // Set the override first so the rebuild below draws from the picked
-        // categories. Empty clears it and falls back to the Auto DJ schedule.
-        _playlist.SetWebCategories(ids);
-
-        // Apply the switch immediately: replace whatever is queued with tracks
-        // from the new selection (or the schedule) and crossfade to the first of
-        // them as soon as possible, so the music moves to the picks right away.
-        // This needs Auto DJ on — it's what fills the queue; with it off we just
-        // store the override for when it's turned on.
-        if (settings is not { AutoDj: true })
-            return Ok(new { selected = ids, applied = false, reason = "autoDjOff" });
-
-        int? currentTrackId = _engine.GetStatus().TrackId;
-        await _playlist.ClearUpcomingAsync(currentTrackId, ct);
-        int added = await _playlist.TopUpAsync(ct);
-        if (added == 0)
-            return Ok(new { selected = ids, applied = false, reason = "noTracks" });
-
-        // Crossfade off the current track into the first freshly-queued one
-        // ("Next" to a track named on the spot — prepares Deck B and fades now).
-        int? firstUpcoming = await _playlist.NextUpcomingTrackIdAsync(currentTrackId, ct);
-        if (firstUpcoming is int tid)
-            await _engine.NextAsync(tid, ct);
-
-        return Ok(new { selected = ids, applied = true, added });
+        return new { showSelector = show, genres, decades };
     }
 
     [HttpPost("next")]

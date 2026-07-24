@@ -153,11 +153,7 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
               <fieldset className="w-group">
                 <legend>Live Streaming</legend>
                 <div className="w-toolbar">
-                  <label className="w-check">
-                    <input type="checkbox" checked={stream?.enabled ?? false} disabled={!stream || busy}
-                      onChange={e => apply(async () => setStream(await api.setStreamEnabled(e.target.checked)))} />
-                    Enable MP3 stream (/stream)
-                  </label>
+                  <span>The /stream broadcast is always on.</span>
                   <label>Bitrate:</label>
                   <select value={stream?.bitrate ?? 128} disabled={!stream || busy}
                     onChange={e => apply(async () => setStream(await api.setStreamBitrate(Number(e.target.value))))}>
@@ -269,7 +265,7 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
                 <legend>Web requests</legend>
                 <label className="w-check"><input type="checkbox" checked={s.allowWebNext} onChange={e => patch({ allowWebNext: e.target.checked })} /> Allow website visitors to skip to next song</label>
                 <label className="w-check"><input type="checkbox" checked={s.autoAcceptRequests} onChange={e => patch({ autoAcceptRequests: e.target.checked })} /> Auto-accept requests (skip the approve step)</label>
-                <label className="w-check"><input type="checkbox" checked={s.showWebCategories} onChange={e => patch({ showWebCategories: e.target.checked })} /> Show category selector on website</label>
+                <label className="w-check"><input type="checkbox" checked={s.showWebCategories} onChange={e => patch({ showWebCategories: e.target.checked })} /> Show music filters on website (genre / decade)</label>
                 <label className="w-check"><input type="checkbox" checked={s.showListenLive} onChange={e => patch({ showListenLive: e.target.checked })} /> Show &ldquo;Listen Live&rdquo; button on website</label>
                 <label className="w-check"><input type="checkbox" checked={s.requestLimitEnabled} onChange={e => patch({ requestLimitEnabled: e.target.checked })} /> Limit how often a device can request a song</label>
                 <div className="w-formrow">

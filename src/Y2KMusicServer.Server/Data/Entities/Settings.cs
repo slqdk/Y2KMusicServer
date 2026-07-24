@@ -23,8 +23,6 @@ public sealed class Settings
     public bool LimiterEnabled { get; set; }
     public double TargetLufs { get; set; }
     public int Volume { get; set; }
-    public bool StreamingEnabled { get; set; }
-
     /// <summary>Stream bitrate in kbps. Legacy persisted a dropdown index (0=64,
     /// 1=128, 2=192, 3=320); this stores the resolved kbps value directly.</summary>
     public int StreamingBitrate { get; set; }

@@ -32,11 +32,26 @@ function folderOf(path: string): string {
   return m === path ? '—' : m
 }
 
-export default function PropertiesDialog({ trackId, onClose }:
-  { trackId: number; onClose: () => void }) {
+export default function PropertiesDialog({ trackId, onClose, onChanged }:
+  { trackId: number; onClose: () => void; onChanged?: () => void }) {
 
   const [p, setP] = useState<api.TrackProperties | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [buckets, setBuckets] = useState<string[]>([])
+  const [ovBusy, setOvBusy] = useState(false)
+
+  useEffect(() => { api.getGenreMap().then(m => setBuckets(m.buckets)).catch(() => {}) }, [])
+
+  // Set or clear the per-track genre override ('' = follow the map).
+  const applyOverride = async (value: string) => {
+    setOvBusy(true)
+    try {
+      const r = await api.setGenreOverride(trackId, value === '' ? null : value)
+      setP(prev => prev ? { ...prev, genreOverride: r.genreOverride, genreBucket: r.genreBucket } : prev)
+      onChanged?.()
+    } catch { /* leave the dialog as-is */ }
+    finally { setOvBusy(false) }
+  }
 
   useEffect(() => {
     let live = true
@@ -88,6 +103,17 @@ export default function PropertiesDialog({ trackId, onClose }:
                   <dt>Album</dt><dd>{p.album ?? '—'}</dd>
                   <dt>Year</dt><dd>{p.year ?? '—'}</dd>
                   <dt>Genre</dt><dd>{p.genre ?? '—'}</dd>
+                  <dt>Genre bucket</dt>
+                  <dd>
+                    <select value={p.genreOverride ?? ''} disabled={ovBusy}
+                      title="Pin this track to a bucket, or follow the genre map"
+                      onChange={e => applyOverride(e.target.value)}>
+                      <option value="">(follow map: {p.genreOverride ? '…' : p.genreBucket})</option>
+                      {buckets.map(b => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                    {p.genreOverride && <span className="w-muted"> pinned</span>}
+                  </dd>
+                  <dt>Decade</dt><dd>{p.decade != null ? `${p.decade}s` : '—'}</dd>
                 </dl>
               </fieldset>
 
@@ -117,7 +143,6 @@ export default function PropertiesDialog({ trackId, onClose }:
               <fieldset className="w-group">
                 <legend>Library</legend>
                 <dl className="w-props">
-                  <dt>Category</dt><dd>{p.categoryName ?? (p.categoryId != null ? `#${p.categoryId}` : 'unassigned')}</dd>
                   <dt>Track ID</dt><dd>{p.id}</dd>
                   <dt>Scanned</dt><dd>{fmtDate(p.scannedAtUtc)}</dd>
                 </dl>

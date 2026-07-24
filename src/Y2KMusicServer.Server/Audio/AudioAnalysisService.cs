@@ -107,10 +107,10 @@ public sealed class AudioAnalysisService
             // pulled in. Null folder → whole library (a full re-run or direct call).
             if (folderId is int fid)
             {
-                var folder = db.CategoryFolders.AsNoTracking().FirstOrDefault(f => f.Id == fid);
+                var folder = ScanFolderStore.Find(_cfg, fid);
                 if (folder != null)
                 {
-                    var allFolders = db.CategoryFolders.AsNoTracking().Select(f => f.Path).ToList();
+                    var allFolders = ScanFolderStore.AllPaths(_cfg);
                     q = q.OwnedBy(folder.Path, FolderScope.NestedPrefixes(folder.Path, allFolders));
                 }
             }

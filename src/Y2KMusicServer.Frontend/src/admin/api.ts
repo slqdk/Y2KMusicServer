@@ -11,15 +11,22 @@ export type Iso = 'none' | 'bass' | 'vocal' | 'nobass'
 export const isoFromCode = (c: IsoCode | null | undefined): Iso =>
   c === 1 ? 'bass' : c === 2 ? 'vocal' : c === 3 ? 'nobass' : 'none'
 
-export interface CategoryDto {
+export interface FacetCount { name: string; count: number }
+export interface DecadeCount { decade: number; count: number } // 0 = unknown decade
+export interface FacetsDto { formats: FacetCount[]; genres: FacetCount[]; decades: DecadeCount[] }
+
+export interface SavedPlaylistDto {
   id: number
   name: string
-  isCustom: boolean
-  enabled: boolean
-  displayOrder: number
-  folderCount: number
+  priority: number
+  tileOrder: number
   trackCount: number
+  slotCount: number
 }
+
+export interface GenreRule { raw: string; substring: boolean; bucket: string }
+export interface GenreMap { buckets: string[]; rules: GenreRule[] }
+export interface RawGenre { raw: string; count: number; bucket: string }
 
 export interface TrackDto {
   id: number
@@ -30,7 +37,8 @@ export interface TrackDto {
   bpm: number | null
   lufs: number | null
   type: string | null
-  categoryId: number | null
+  genreBucket: string
+  decade: number | null
 }
 
 export interface TracksPage {
@@ -55,9 +63,10 @@ export interface TrackProperties {
   album: string | null
   year: number | null
   genre: string | null
+  genreOverride: string | null
+  genreBucket: string
+  decade: number | null
   type: string | null
-  categoryId: number | null
-  categoryName: string | null
   durationSec: number
   bpm: number | null
   bpmConfidence: number | null
@@ -119,7 +128,6 @@ export interface AutoDjSettings {
 }
 
 export interface StreamStatus {
-  enabled: boolean
   bitrate: number
   listeners: number
   wavListeners: number
@@ -145,21 +153,88 @@ export class ApiError extends Error {
 
 const post = (url: string) => req<unknown>(url, { method: 'POST' })
 
-// ── Library + categories ───────────────────────────────────────────────
-export const getCategories = () => req<CategoryDto[]>('/api/admin/categories')
+// ── Library (flat, faceted) ────────────────────────────────────────────
+export const getFacets = () => req<FacetsDto>('/api/admin/library/facets')
 
-export const setCategoryEnabled = (id: number, on: boolean) =>
-  req<{ id: number; name: string; enabled: boolean }>(
-    `/api/admin/categories/${id}/enable?on=${on}`, { method: 'POST' })
-
-export function getTracks(p: { q?: string; categoryId?: number | null; skip?: number; take?: number }) {
+export interface TrackFilter {
+  q?: string
+  format?: string | null       // 'FLAC' | 'MP3' | 'Other'
+  genre?: string | null        // genre-map bucket, or 'Unknown'
+  decade?: number | null       // decade start year; 0 = unknown decade
+  skip?: number
+  take?: number
+}
+export function getTracks(p: TrackFilter) {
   const qs = new URLSearchParams()
   if (p.q) qs.set('q', p.q)
-  if (p.categoryId != null) qs.set('categoryId', String(p.categoryId))
+  if (p.format) qs.set('format', p.format)
+  if (p.genre) qs.set('genre', p.genre)
+  if (p.decade != null) qs.set('decade', String(p.decade))
   qs.set('skip', String(p.skip ?? 0))
   qs.set('take', String(p.take ?? 100))
   return req<TracksPage>(`/api/admin/library/tracks?${qs.toString()}`)
 }
+
+// ── Genre map (buckets + raw→bucket rules; applied at query time) ───────
+export const getGenreMap = () => req<GenreMap>('/api/admin/genre-map')
+export const putGenreMap = (m: GenreMap) =>
+  req<GenreMap>('/api/admin/genre-map',
+    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(m) })
+export const getRawGenres = () =>
+  req<{ items: RawGenre[]; untagged: number }>('/api/admin/library/raw-genres')
+export const setGenreOverride = (trackId: number, value: string | null) =>
+  req<{ id: number; genreOverride: string | null; genreBucket: string }>(
+    `/api/admin/track/${trackId}/genre-override`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) })
+
+// ── Saved playlists (tiles above the live queue) ────────────────────────
+export const getSavedPlaylists = () =>
+  req<{ playlists: SavedPlaylistDto[]; max: number }>('/api/admin/saved-playlists')
+export const createSavedPlaylist = (name: string) =>
+  req<{ id: number; name: string }>('/api/admin/saved-playlists',
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
+export const renameSavedPlaylist = (id: number, name: string) =>
+  req<{ id: number; name: string }>(`/api/admin/saved-playlists/${id}/rename`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
+export const deleteSavedPlaylist = (id: number) =>
+  req<{ deleted: string }>(`/api/admin/saved-playlists/${id}`, { method: 'DELETE' })
+export const setSavedPlaylistPriority = (id: number, value: number) =>
+  req<{ id: number; priority: number }>(`/api/admin/saved-playlists/${id}/priority?value=${value}`, { method: 'POST' })
+export interface SavedPlaylistTrackDto {
+  entryId: number
+  position: number
+  trackId: number
+  title: string | null
+  artist: string | null
+  durationSec: number
+  bpm: number | null
+  lufs: number | null
+  type: string | null
+}
+export const getSavedPlaylistTracks = (id: number) =>
+  req<{ items: SavedPlaylistTrackDto[] }>(`/api/admin/saved-playlists/${id}/tracks`)
+export const removeSavedPlaylistTrack = (id: number, entryId: number) =>
+  req<{ removed: boolean }>(`/api/admin/saved-playlists/${id}/tracks/${entryId}`, { method: 'DELETE' })
+// Replace the live queue with a saved playlist (requests survive and play
+// first) and crossfade into it. `action` reports what the engine did.
+export const activateSavedPlaylist = (id: number) =>
+  req<{ activated: number; action: string; playlist: PlaylistItem[] }>(
+    `/api/admin/playlist/activate?playlistId=${id}`, { method: 'POST' })
+export interface PlaylistSlot {
+  slotIndex: number
+  enabled: boolean
+  timeFrom: string | null   // "HH:mm"
+  timeTo: string | null     // "HH:mm"
+  daysMask: number          // bit 0 = Monday … bit 6 = Sunday; 0 = every day
+}
+export const getSavedPlaylistSlots = (id: number) =>
+  req<{ slots: PlaylistSlot[] }>(`/api/admin/saved-playlists/${id}/slots`)
+export const putSavedPlaylistSlots = (id: number, slots: PlaylistSlot[]) =>
+  req<{ count: number }>(`/api/admin/saved-playlists/${id}/slots`,
+    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(slots) })
+export const addToSavedPlaylist = (id: number, trackId: number) =>
+  req<{ added: boolean; alreadyPresent?: boolean }>(`/api/admin/saved-playlists/${id}/tracks`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trackId }) })
 
 // ── Track waveform + beat grid (beatgrid editor) ────────────────────────
 export interface WaveformDto {
@@ -236,29 +311,11 @@ export const fillAutoDj = () => post('/api/admin/autodj/fill')
 
 // ── Stream ──────────────────────────────────────────────────────────────
 export const getStream = () => req<StreamStatus>('/api/admin/stream/status')
-export const setStreamEnabled = (on: boolean) =>
-  req<StreamStatus>(`/api/admin/stream/enable?on=${on}`, { method: 'POST' })
 export const setStreamBitrate = (kbps: number) =>
   req<StreamStatus>(`/api/admin/stream/bitrate?kbps=${kbps}`, { method: 'POST' })
 
-// ── Folders / slots / rename / scan ─────────────────────────────────────
-export interface FolderDto { id: number; path: string }
-export interface SlotDto {
-  id: number
-  slotIndex: number
-  enabled: boolean
-  timeFromHHmm: string | null
-  timeToHHmm: string | null
-  daysMask: number
-  priority: number
-}
-export interface SlotInput {
-  enabled: boolean
-  timeFromHHmm: string | null
-  timeToHHmm: string | null
-  daysMask: number
-  priority: number
-}
+// ── Global scan folders / scan ──────────────────────────────────────────
+export interface ScanFolderDto { id: number; path: string; exists: boolean; trackCount: number }
 export interface ScanStatus {
   state: number // 0 Idle, 1 Enumerating, 2 Scanning, 3 Completed, 4 Failed
   filesFound: number
@@ -270,13 +327,18 @@ export interface ScanStatus {
   message: string | null
 }
 
-export const getFolders = (id: number) => req<FolderDto[]>(`/api/admin/categories/${id}/folders`)
-export const addFolder = (id: number, path: string) =>
-  req<{ id: number; path: string; onDiskNow: boolean }>(
-    `/api/admin/categories/${id}/folders`,
+export const getScanFolders = () =>
+  req<{ folders: ScanFolderDto[] }>('/api/admin/folders')
+export const addScanFolder = (path: string) =>
+  req<{ id: number; path: string; exists: boolean }>('/api/admin/folders',
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) })
-export const removeFolder = (id: number, folderId: number) =>
-  req<void>(`/api/admin/categories/${id}/folders/${folderId}`, { method: 'DELETE' })
+export const removeScanFolder = (id: number, clearData: boolean) =>
+  req<{ removed: string; removedTracks: number }>(
+    `/api/admin/folders/${id}?clearData=${clearData}`, { method: 'DELETE' })
+export const rescanScanFolder = (id: number) =>
+  req<ScanStatus>(`/api/admin/folders/${id}/rescan`, { method: 'POST' })
+export const clearScanFolder = (id: number) =>
+  req<{ removed: number }>(`/api/admin/folders/${id}/clear-data`, { method: 'POST' })
 
 // ── Filesystem browse (folder picker) ───────────────────────────────────
 export interface FsEntry { name: string; path: string }
@@ -289,24 +351,8 @@ export interface FsListing {
 export const browseFs = (path?: string | null) =>
   req<FsListing>(`/api/admin/fs${path ? `?path=${encodeURIComponent(path)}` : ''}`)
 
-export const getSlots = (id: number) => req<SlotDto[]>(`/api/admin/categories/${id}/slots`)
-export const putSlots = (id: number, slots: SlotInput[]) =>
-  req<SlotDto[]>(`/api/admin/categories/${id}/slots`,
-    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(slots) })
-
-export const renameCategory = (id: number, name: string) =>
-  req<{ id: number; name: string; isCustom: boolean }>(`/api/admin/categories/${id}/rename`,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
-
-// Per-folder scan + clear. A folder owns the tracks under it minus any deeper
-// assigned folder ("innermost wins"); clear keeps the folder path + schedule.
-export const scanFolder = (categoryId: number, folderId: number) =>
-  req<{ started: boolean }>(`/api/admin/categories/${categoryId}/folders/${folderId}/scan`, { method: 'POST' })
-export const clearFolderData = (categoryId: number, folderId: number) =>
-  req<{ removed: number }>(`/api/admin/categories/${categoryId}/folders/${folderId}/clear-data`, { method: 'POST' })
-
-export const startScan = (categoryId?: number) =>
-  req<ScanStatus>(`/api/admin/scan${categoryId != null ? `?categoryId=${categoryId}` : ''}`, { method: 'POST' })
+export const startScan = (folderId?: number) =>
+  req<ScanStatus>(`/api/admin/scan${folderId != null ? `?folderId=${folderId}` : ''}`, { method: 'POST' })
 export const getScanStatus = () => req<ScanStatus>('/api/admin/scan/status')
 
 export interface AnalyzeStatus {
@@ -334,7 +380,6 @@ export interface SettingsDto {
   limiterEnabled: boolean
   targetLufs: number
   volume: number
-  streamingEnabled: boolean
   streamingBitrate: number
   allowWebNext: boolean
   showWebCategories: boolean

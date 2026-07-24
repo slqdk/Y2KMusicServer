@@ -43,11 +43,6 @@ public sealed class PlaylistService
     private readonly List<string> _recentlyPlayedArtists = new();
     private double _refBpm; // BPM of the last human/seed pick; 0 = unset.
 
-    // Listener-selected categories (the public category bar). When non-empty,
-    // Auto DJ draws only from these, overriding the time-of-day schedule —
-    // the legacy "web category override". Set by the public controller.
-    private volatile int[] _webCategories = Array.Empty<int>();
-
     public PlaylistService(IDbContextFactory<Y2KDbContext> dbf, ILogger<PlaylistService> log, IConfiguration cfg)
     {
         _dbf = dbf;
@@ -101,13 +96,6 @@ public sealed class PlaylistService
         if (list.Count > HistoryCap)
             list.RemoveRange(0, list.Count - HistoryCap);
     }
-
-    /// <summary>Sets the listener-selected category override (empty = no override).</summary>
-    public void SetWebCategories(IEnumerable<int> ids) =>
-        _webCategories = ids.Distinct().ToArray();
-
-    /// <summary>The current listener-selected category override.</summary>
-    public int[] GetWebCategories() => _webCategories;
 
     // ── Queries used by the scheduler ─────────────────────────────────────────
 
@@ -300,14 +288,103 @@ public sealed class PlaylistService
         finally { _mutateGate.Release(); }
     }
 
-    // ── Auto DJ top-up (the selection port) ───────────────────────────────────
+    // ── Saved-playlist activation ─────────────────────────────────────────────
+
+    public enum ActivateResult { Ok, NotFound, Empty }
 
     /// <summary>
-    /// Picks up to <c>Settings.AutoDjTracks</c> tracks and appends them as
-    /// <see cref="PlaylistSource.Auto"/> entries. Faithful port of the legacy
-    /// scorer: BPM window (random while BPM is unknown — Phase 5) × category
-    /// priority weight × artist cooldown, with widen-then-ignore-BPM fallbacks,
-    /// then artist-spread within the batch. Returns the number added.
+    /// Replaces the live queue with a saved playlist: upcoming entries are
+    /// cleared EXCEPT pending Request entries (requests survive and play first),
+    /// then the saved playlist's tracks are appended in order as Schedule
+    /// entries labelled with the playlist's name. The currently playing track is
+    /// untouched; the caller fires the crossfade into the first upcoming entry.
+    /// Tracks whose file is missing, or that already sit in the kept portion,
+    /// are skipped. Returns the count appended via <paramref name="added"/>.
+    /// </summary>
+    public async Task<ActivateResult> ActivateSavedAsync(
+        int savedPlaylistId, int? currentTrackId, CancellationToken ct = default)
+    {
+        await _mutateGate.WaitAsync(ct);
+        try
+        {
+            await using var db = await _dbf.CreateDbContextAsync(ct);
+
+            var saved = await db.SavedPlaylists.AsNoTracking()
+                .FirstOrDefaultAsync(p => p.Id == savedPlaylistId, ct);
+            if (saved == null) return ActivateResult.NotFound;
+
+            var savedTracks = await db.SavedPlaylistTracks.AsNoTracking()
+                .Where(x => x.SavedPlaylistId == savedPlaylistId)
+                .OrderBy(x => x.Position)
+                .Select(x => new { x.TrackId, x.Track!.FilePath })
+                .ToListAsync(ct);
+            if (savedTracks.Count == 0) return ActivateResult.Empty;
+
+            var entries = await db.PlaylistEntries.OrderBy(e => e.Position).ToListAsync(ct);
+            int curPos = CurrentPosition(entries, currentTrackId);
+
+            // Drop every upcoming entry that is not a surviving request.
+            var doomed = entries
+                .Where(e => e.Position > curPos && e.Source != PlaylistSource.Request)
+                .ToList();
+            if (doomed.Count > 0) db.PlaylistEntries.RemoveRange(doomed);
+
+            // Kept portion (current + requests): never immediately duplicated.
+            var keptIds = entries.Except(doomed).Select(e => e.TrackId).ToHashSet();
+
+            int nextPos = entries.Except(doomed).Select(e => e.Position)
+                .DefaultIfEmpty(-1).Max() + 1;
+
+            int added = 0, missing = 0;
+            foreach (var s in savedTracks)
+            {
+                if (keptIds.Contains(s.TrackId)) continue;
+                if (!File.Exists(s.FilePath)) { missing++; continue; }
+                db.PlaylistEntries.Add(new PlaylistEntry
+                {
+                    TrackId = s.TrackId,
+                    Position = nextPos++,
+                    Source = PlaylistSource.Schedule,
+                    AddedBy = saved.Name,
+                    AddedAt = DateTime.UtcNow
+                });
+                added++;
+            }
+
+            await db.SaveChangesAsync(ct);
+            await RenumberAsync(db, ct);
+
+            if (missing > 0)
+                _log.LogWarning("Activate \"{Name}\": {Missing} track(s) skipped (file missing).",
+                    saved.Name, missing);
+            _log.LogInformation("Activated playlist \"{Name}\": {Added} track(s) queued, {Kept} request(s) kept ahead.",
+                saved.Name, added, entries.Except(doomed).Count(e => e.Source == PlaylistSource.Request && e.Position > curPos));
+
+            return ActivateResult.Ok;
+        }
+        finally { _mutateGate.Release(); }
+    }
+
+    // ── Auto DJ top-up (playlist-sourced) ─────────────────────────────────────
+
+    // No-repeat memory: per saved playlist, the track ids Auto DJ has fed from
+    // it since its last reshuffle. When every track in a playlist has been fed,
+    // the set resets and the playlist starts over. In-memory (guarded by
+    // _historyLock), deliberately not persisted — a restart starts fresh, like
+    // the recently-played rings.
+    private readonly Dictionary<int, HashSet<int>> _fedFromPlaylist = new();
+
+    /// <summary>
+    /// Picks up to <c>Settings.AutoDjTracks</c> tracks from the saved playlists
+    /// whose schedule says they are active right now, and appends them as
+    /// <see cref="PlaylistSource.Schedule"/> entries labelled with the source
+    /// playlist's name. Per pick: the source playlist is chosen by
+    /// priority-weighted random (priority 1–5 = weight, so a 5 feeds five times
+    /// as often as a 1), then the track inside it by the legacy scorer — BPM
+    /// window against the reference tempo (random while unknown) × artist
+    /// cooldown, widen-then-ignore-BPM fallbacks, similarity suppression, and
+    /// no repeats until the playlist is exhausted (then it reshuffles). With no
+    /// active playlist the top-up is a no-op. Returns the number added.
     /// </summary>
     public async Task<int> TopUpAsync(CancellationToken ct = default)
     {
@@ -322,41 +399,38 @@ public sealed class PlaylistService
             int tracksToAdd = Math.Clamp(settings.AutoDjTracks <= 0 ? 3 : settings.AutoDjTracks, 1, 20);
             double bpmRange = Math.Max(0, settings.AutoDjBpmDev);
 
-            var categories = await db.Categories.AsNoTracking()
-                .Include(c => c.Slots).ToListAsync(ct);
-            var catById = categories.ToDictionary(c => c.Id);
+            // ── Active playlists (schedule + content) ─────────────────────────
+            var now = DateTime.Now;
+            var playlists = await db.SavedPlaylists.AsNoTracking()
+                .Include(pl => pl.Slots)
+                .ToListAsync(ct);
+            var active = playlists.Where(pl => IsPlaylistActiveNow(pl, now)).ToList();
+            if (active.Count == 0)
+            {
+                _log.LogDebug("Auto DJ top-up skipped: no saved playlist has an active timeslot right now.");
+                return 0;
+            }
 
-            var library = await db.Tracks.AsNoTracking().ToListAsync(ct);
-            if (library.Count == 0) return 0;
+            // Member tracks per active playlist, in one query.
+            var activeIds = active.Select(pl => pl.Id).ToHashSet();
+            var membership = await db.SavedPlaylistTracks.AsNoTracking()
+                .Where(x => activeIds.Contains(x.SavedPlaylistId))
+                .Select(x => new { x.SavedPlaylistId, Track = x.Track! })
+                .ToListAsync(ct);
+            var tracksByPl = membership
+                .GroupBy(x => x.SavedPlaylistId)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.Track).ToList());
+            active.RemoveAll(pl => !tracksByPl.ContainsKey(pl.Id) || tracksByPl[pl.Id].Count == 0);
+            if (active.Count == 0)
+            {
+                _log.LogDebug("Auto DJ top-up skipped: the active playlist(s) are empty.");
+                return 0;
+            }
 
             var entries = await db.PlaylistEntries.AsNoTracking()
                 .OrderBy(e => e.Position).ToListAsync(ct);
-            var trackById = library.ToDictionary(t => t.Id);
-
-            var now = DateTime.Now;
-
-            // Decision #1: with no schedule slots anywhere (no slot UI before
-            // Phase 4), fall back to "every ENABLED category is active" so Auto
-            // DJ is testable. Logged so it's never silent.
-            bool noSlotsAnywhere = categories.All(c => c.Slots.Count == 0);
-            if (noSlotsAnywhere && settings.AutoDj)
-                _log.LogInformation("Auto DJ: no category schedule slots configured — " +
-                                    "treating enabled categories as active (pre-Phase-4 fallback).");
-
-            // Listener category override: when set, it replaces the schedule.
-            var webCats = _webCategories;
-            if (webCats.Length > 0)
-                _log.LogDebug("Auto DJ: listener category override active ({Count} categories).", webCats.Length);
-
-            // Guard: if nothing is active, Auto DJ is a no-op (legacy behaviour).
-            bool anyActive =
-                library.Any(t => t.CategoryId == null) ||
-                categories.Any(c => IsCategoryActiveForAutoDj(c, now, noSlotsAnywhere, webCats));
-            if (!anyActive)
-            {
-                _log.LogDebug("Auto DJ top-up skipped: no active category right now.");
-                return 0;
-            }
+            var trackById = membership.Select(x => x.Track)
+                .GroupBy(t => t.Id).ToDictionary(g => g.Key, g => g.First());
 
             // Reference BPM: in-memory seed, else the current head's tempo.
             double refBpm;
@@ -369,7 +443,7 @@ public sealed class PlaylistService
             }
             bool randomMode = bpmRange <= 0 || refBpm <= 30;
 
-            // Exclusion = already queued + recently played.
+            // Exclusion = already queued + recently played; history snapshots.
             int[] recentSnapshot;
             string[] recentArtistsSnapshot;
             lock (_historyLock)
@@ -388,121 +462,191 @@ public sealed class PlaylistService
                 .Select(e => trackById.TryGetValue(e.TrackId, out var t) ? NormaliseArtist(t.Artist) : "")
                 .ToList();
 
-            bool Eligible(Track t)
-            {
-                if (excluded.Contains(t.Id)) return false;
-                if (!File.Exists(t.FilePath)) return false;
-                if (IsTooSimilar(t, simWindow)) return false;
-                // Category filter: uncategorised always passes; else must be enabled.
-                if (t.CategoryId is int cid)
-                {
-                    if (!catById.TryGetValue(cid, out var cat) || !cat.Enabled) return false;
-                    if (!IsCategoryActiveForAutoDj(cat, now, noSlotsAnywhere, webCats)) return false;
-                }
-                return true;
-            }
-
-            double PriorityWeight(Track t) =>
-                t.CategoryId is int cid && catById.TryGetValue(cid, out var cat)
-                    ? GetCategoryPriorityWeight(cat, now)
-                    : 3.0;
-
-            var candidates = new List<(Track track, double score)>();
-            foreach (var t in library)
-            {
-                if (!Eligible(t)) continue;
-
-                double score;
-                if (!randomMode && t.Bpm is > 30)
-                {
-                    double diff = Math.Abs(t.Bpm.Value - refBpm);
-                    if (diff > bpmRange) continue;
-                    score = 1.0 - (diff / bpmRange);
-                }
-                else
-                {
-                    score = 0.5; // random mode: equally eligible
-                }
-
-                score *= PriorityWeight(t);
-                score *= ArtistCooldownPenalty(t.Artist, upcomingArtists, recentArtistsSnapshot);
-                candidates.Add((t, score));
-            }
-
-            // Fallback 1: widen the BPM window ×2 (skipped in random mode).
-            if (candidates.Count == 0 && !randomMode && refBpm > 30)
-            {
-                double widened = bpmRange * 2.0;
-                foreach (var t in library)
-                {
-                    if (!Eligible(t) || t.Bpm is not > 30) continue;
-                    double diff = Math.Abs(t.Bpm.Value - refBpm);
-                    if (diff <= widened)
-                        candidates.Add((t, 0.3 - (diff / widened) * 0.2));
-                }
-            }
-
-            // Fallback 2: ignore BPM entirely.
-            if (candidates.Count == 0)
-                foreach (var t in library)
-                    if (Eligible(t))
-                        candidates.Add((t, 0.1));
-
-            if (candidates.Count == 0) return 0;
-
             var rng = Random.Shared;
-            candidates.Sort((a, b) =>
+            var picks = new List<(Track Track, string PlaylistName)>();
+            var batchArtists = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // ── One pick at a time: playlist by priority weight, then track ───
+            for (int slot = 0; slot < tracksToAdd; slot++)
             {
-                int c = b.score.CompareTo(a.score);
-                return c != 0 ? c : rng.Next(-1, 2);
-            });
+                Track? pick = null;
+                string? pickedFrom = null;
 
-            // Pick, enforcing one-artist-per-batch over a shuffled top pool.
-            int poolSize = Math.Min(candidates.Count, Math.Max(tracksToAdd * 6, 20));
-            var pool = candidates.GetRange(0, poolSize);
-            for (int i = pool.Count - 1; i > 0; i--) { int j = rng.Next(i + 1); (pool[i], pool[j]) = (pool[j], pool[i]); }
-
-            var picks = new List<Track>();
-            var usedTracks = new HashSet<int>();
-            var usedArtists = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var (track, _) in pool)
-            {
-                if (picks.Count >= tracksToAdd) break;
-                if (!usedTracks.Add(track.Id)) continue;
-                var norm = NormaliseArtist(track.Artist);
-                if (!string.IsNullOrEmpty(norm) && !usedArtists.Add(norm)) { usedTracks.Remove(track.Id); continue; }
-                picks.Add(track);
-            }
-
-            // Safety: if artist-spread left us short, fill ignoring that rule.
-            if (picks.Count < tracksToAdd)
-                foreach (var (track, _) in pool)
+                // Try a few playlist draws so one temporarily-dry playlist
+                // (everything queued / too similar) doesn't stall the batch.
+                var remaining = new List<SavedPlaylist>(active);
+                for (int attempt = 0; pick == null && remaining.Count > 0; attempt++)
                 {
-                    if (picks.Count >= tracksToAdd) break;
-                    if (usedTracks.Add(track.Id)) picks.Add(track);
+                    var pl = WeightedPick(remaining, rng);
+                    var members = tracksByPl[pl.Id];
+
+                    // No-repeat: skip tracks already fed from this playlist;
+                    // reshuffle (reset) once every member has been fed.
+                    HashSet<int> fed;
+                    lock (_historyLock)
+                    {
+                        if (!_fedFromPlaylist.TryGetValue(pl.Id, out fed!))
+                            _fedFromPlaylist[pl.Id] = fed = new HashSet<int>();
+                        if (members.All(m => fed.Contains(m.Id)))
+                        {
+                            fed.Clear();
+                            _log.LogInformation("Auto DJ: playlist \"{Name}\" exhausted — reshuffling.", pl.Name);
+                        }
+                    }
+
+                    bool Eligible(Track t)
+                    {
+                        bool isFed; lock (_historyLock) isFed = fed.Contains(t.Id);
+                        if (isFed) return false;
+                        if (excluded.Contains(t.Id)) return false;
+                        if (IsTooSimilar(t, simWindow)) return false;
+                        var norm = NormaliseArtist(t.Artist);
+                        if (norm.Length > 0 && batchArtists.Contains(norm)) return false;
+                        if (!File.Exists(t.FilePath)) return false;
+                        return true;
+                    }
+
+                    double Score(Track t, double bpmScore) =>
+                        bpmScore * ArtistCooldownPenalty(t.Artist, upcomingArtists, recentArtistsSnapshot);
+
+                    var scored = new List<(Track t, double s)>();
+                    foreach (var t in members)
+                    {
+                        if (!Eligible(t)) continue;
+                        if (!randomMode && t.Bpm is > 30)
+                        {
+                            double diff = Math.Abs(t.Bpm.Value - refBpm);
+                            if (diff > bpmRange) continue;
+                            scored.Add((t, Score(t, 1.0 - diff / bpmRange)));
+                        }
+                        else
+                        {
+                            scored.Add((t, Score(t, 0.5)));
+                        }
+                    }
+
+                    // Fallback 1: widen the BPM window ×2 (skipped in random mode).
+                    if (scored.Count == 0 && !randomMode && refBpm > 30)
+                    {
+                        double widened = bpmRange * 2.0;
+                        foreach (var t in members)
+                        {
+                            if (!Eligible(t) || t.Bpm is not > 30) continue;
+                            double diff = Math.Abs(t.Bpm.Value - refBpm);
+                            if (diff <= widened)
+                                scored.Add((t, Score(t, 0.3 - (diff / widened) * 0.2)));
+                        }
+                    }
+
+                    // Fallback 2: ignore BPM entirely.
+                    if (scored.Count == 0)
+                        foreach (var t in members)
+                            if (Eligible(t))
+                                scored.Add((t, Score(t, 0.1)));
+
+                    if (scored.Count == 0)
+                    {
+                        // This playlist has nothing eligible right now — draw
+                        // another (without replacement) for this pick.
+                        remaining.Remove(pl);
+                        continue;
+                    }
+
+                    // Weighted-random over the scored candidates keeps variety
+                    // while still favouring the best BPM/cooldown fits.
+                    pick = WeightedPickTrack(scored, rng);
+                    pickedFrom = pl.Name;
+
+                    lock (_historyLock) fed.Add(pick.Id);
                 }
+
+                if (pick == null) break; // every active playlist is dry — stop the batch
+
+                picks.Add((pick, pickedFrom!));
+                excluded.Add(pick.Id);
+                var normPick = NormaliseArtist(pick.Artist);
+                if (normPick.Length > 0) batchArtists.Add(normPick);
+                upcomingArtists.Add(normPick);
+                simWindow.Add((pick.Artist ?? "", pick.Title ?? ""));
+            }
 
             if (picks.Count == 0) return 0;
 
             int nextPos = entries.Count == 0 ? 0 : entries[^1].Position + 1;
-            foreach (var pick in picks)
+            foreach (var (track, plName) in picks)
                 db.PlaylistEntries.Add(new PlaylistEntry
                 {
-                    TrackId = pick.Id,
+                    TrackId = track.Id,
                     Position = nextPos++,
-                    // Schedule-driven when a real time-slot is active; Auto (the
-                    // enabled-category fallback) when no slots are configured.
-                    Source = noSlotsAnywhere ? PlaylistSource.Auto : PlaylistSource.Schedule,
-                    AddedBy = noSlotsAnywhere ? "Auto" : "Schedule",
+                    Source = PlaylistSource.Schedule,
+                    AddedBy = plName,
                     AddedAt = DateTime.UtcNow
                 });
             await db.SaveChangesAsync(ct);
 
-            _log.LogInformation("Auto DJ added {Count} track(s){Mode}.",
-                picks.Count, randomMode ? " (random mode — BPM not yet analysed)" : $" (±{bpmRange} BPM of {refBpm:F0})");
+            _log.LogInformation("Auto DJ added {Count} track(s) from {Playlists}{Mode}.",
+                picks.Count,
+                string.Join(", ", picks.Select(p => p.PlaylistName).Distinct()),
+                randomMode ? " (random mode — BPM not yet known)" : $" (±{bpmRange} BPM of {refBpm:F0})");
             return picks.Count;
         }
         finally { _mutateGate.Release(); }
+    }
+
+    /// <summary>Priority-weighted random draw: priority 1–5 is the weight, so a
+    /// priority-5 playlist is drawn five times as often as a priority-1.</summary>
+    private static SavedPlaylist WeightedPick(IReadOnlyList<SavedPlaylist> pls, Random rng)
+    {
+        int total = pls.Sum(p => Math.Clamp(p.Priority, 1, 5));
+        int r = rng.Next(total);
+        foreach (var p in pls)
+        {
+            r -= Math.Clamp(p.Priority, 1, 5);
+            if (r < 0) return p;
+        }
+        return pls[^1];
+    }
+
+    /// <summary>Score-weighted random draw over the candidate tracks.</summary>
+    private static Track WeightedPickTrack(List<(Track t, double s)> scored, Random rng)
+    {
+        double total = scored.Sum(x => Math.Max(0.001, x.s));
+        double r = rng.NextDouble() * total;
+        foreach (var (t, s) in scored)
+        {
+            r -= Math.Max(0.001, s);
+            if (r < 0) return t;
+        }
+        return scored[^1].t;
+    }
+
+    /// <summary>True when any of the playlist's enabled slots covers the given
+    /// moment. A playlist with no slots is never schedule-active.</summary>
+    private static bool IsPlaylistActiveNow(SavedPlaylist pl, DateTime now)
+    {
+        if (pl.Slots.Count == 0) return false;
+        int todayDow = ((int)now.DayOfWeek + 6) % 7; // Mon=0 … Sun=6
+        TimeSpan nowTime = now.TimeOfDay;
+        foreach (var slot in pl.Slots)
+        {
+            if (!slot.Enabled) continue;
+            if (SlotCoversNow(slot, todayDow, nowTime)) return true;
+        }
+        return false;
+    }
+
+    private static bool SlotCoversNow(SavedPlaylistSlot slot, int todayDow, TimeSpan nowTime)
+    {
+        // DaysMask: bit 0 = Monday … bit 6 = Sunday. 0 = every day (legacy: no
+        // days ticked ⇒ applies daily).
+        if (slot.DaysMask != 0 && (slot.DaysMask & (1 << todayDow)) == 0) return false;
+
+        if (!TimeSpan.TryParse(slot.TimeFromHHmm, out var from)) return false;
+        if (!TimeSpan.TryParse(slot.TimeToHHmm, out var to)) return false;
+
+        return from <= to
+            ? nowTime >= from && nowTime <= to    // same-day range
+            : nowTime >= from || nowTime <= to;   // overnight wrap (e.g. 22:00–02:00)
     }
 
     // ── Position helpers ──────────────────────────────────────────────────────
@@ -632,68 +776,6 @@ public sealed class PlaylistService
         return 1.0;
     }
 
-    /// <summary>
-    /// True if a category should feed Auto DJ right now. Uncategorised tracks
-    /// are handled by the caller. When a listener category override is set
-    /// (<paramref name="webCats"/> non-empty) it replaces the schedule entirely.
-    /// Otherwise: at least one enabled slot must cover the current day + time,
-    /// or — with the pre-Phase-4 no-slots fallback — the category just needs to
-    /// be enabled.
-    /// </summary>
-    private static bool IsCategoryActiveForAutoDj(Category cat, DateTime now, bool noSlotsFallback, int[] webCats)
-    {
-        // Listener override wins over the schedule when present.
-        if (webCats.Length > 0) return Array.IndexOf(webCats, cat.Id) >= 0;
-        if (noSlotsFallback) return cat.Enabled;
-        if (cat.Slots.Count == 0) return false;
-
-        int todayDow = ((int)now.DayOfWeek + 6) % 7; // Mon=0 … Sun=6
-        TimeSpan nowTime = now.TimeOfDay;
-
-        foreach (var slot in cat.Slots)
-        {
-            if (!slot.Enabled) continue;
-            if (!SlotCoversNow(slot, todayDow, nowTime)) continue;
-            return true;
-        }
-        return false;
-    }
-
-    /// <summary>
-    /// Priority weight of the active slot covering now: priority 1 → ×5.0 …
-    /// priority 5 → ×1.0. Neutral 3.0 when uncategorised or no active slot
-    /// (including the pre-Phase-4 no-slots fallback).
-    /// </summary>
-    private static double GetCategoryPriorityWeight(Category cat, DateTime now)
-    {
-        if (cat.Slots.Count == 0) return 3.0;
-
-        int todayDow = ((int)now.DayOfWeek + 6) % 7;
-        TimeSpan nowTime = now.TimeOfDay;
-
-        foreach (var slot in cat.Slots)
-        {
-            if (!slot.Enabled) continue;
-            if (!SlotCoversNow(slot, todayDow, nowTime)) continue;
-            int pri = Math.Clamp(slot.Priority, 1, 5);
-            return 6.0 - pri; // 1→5.0 … 5→1.0
-        }
-        return 3.0;
-    }
-
-    private static bool SlotCoversNow(CategorySlot slot, int todayDow, TimeSpan nowTime)
-    {
-        // DaysMask: bit 0 = Monday … bit 6 = Sunday. 0 = every day (legacy: no
-        // days ticked ⇒ applies daily).
-        if (slot.DaysMask != 0 && (slot.DaysMask & (1 << todayDow)) == 0) return false;
-
-        if (!TimeSpan.TryParse(slot.TimeFromHHmm, out var from)) return false;
-        if (!TimeSpan.TryParse(slot.TimeToHHmm, out var to)) return false;
-
-        return from <= to
-            ? nowTime >= from && nowTime <= to    // same-day range
-            : nowTime >= from || nowTime <= to;   // overnight wrap (e.g. 22:00–02:00)
-    }
 }
 
 // ── DTOs (server → admin JSON; mirrors how PlaybackStatus lives in Audio) ──────

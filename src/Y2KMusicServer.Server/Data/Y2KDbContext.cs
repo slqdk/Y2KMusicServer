@@ -7,15 +7,19 @@ namespace Y2KMusicServer.Server.Data;
 /// The EF Core context backing the SQLite database at
 /// <c>{DataPath}/data/y2k.db</c>. Created via <see cref="IDbContextFactory{TContext}"/>;
 /// never held for the lifetime of a singleton service.
+/// Schema v2: the category model is gone (one global folder list feeds a flat
+/// library, filtered by format / genre / decade at query time) and saved
+/// playlists carry the schedule slots Auto DJ runs on. See DbInitializer for
+/// the recreate-on-old-schema rule.
 /// </summary>
 public sealed class Y2KDbContext : DbContext
 {
     public Y2KDbContext(DbContextOptions<Y2KDbContext> options) : base(options) { }
 
     public DbSet<Track> Tracks => Set<Track>();
-    public DbSet<Category> Categories => Set<Category>();
-    public DbSet<CategoryFolder> CategoryFolders => Set<CategoryFolder>();
-    public DbSet<CategorySlot> CategorySlots => Set<CategorySlot>();
+    public DbSet<SavedPlaylist> SavedPlaylists => Set<SavedPlaylist>();
+    public DbSet<SavedPlaylistTrack> SavedPlaylistTracks => Set<SavedPlaylistTrack>();
+    public DbSet<SavedPlaylistSlot> SavedPlaylistSlots => Set<SavedPlaylistSlot>();
     public DbSet<PlaylistEntry> PlaylistEntries => Set<PlaylistEntry>();
     public DbSet<Request> Requests => Set<Request>();
     public DbSet<MixCache> MixCache => Set<MixCache>();
@@ -29,27 +33,32 @@ public sealed class Y2KDbContext : DbContext
         {
             e.Property(t => t.FilePath).IsRequired();
             e.HasIndex(t => t.FilePath).IsUnique();
-            e.HasOne(t => t.Category)
-                .WithMany()
-                .HasForeignKey(t => t.CategoryId)
-                .OnDelete(DeleteBehavior.SetNull);
         });
 
-        b.Entity<Category>(e =>
+        b.Entity<SavedPlaylist>(e =>
         {
-            e.Property(c => c.Name).IsRequired();
-            e.HasMany(c => c.Folders)
-                .WithOne(f => f.Category!)
-                .HasForeignKey(f => f.CategoryId)
+            e.Property(p => p.Name).IsRequired();
+            e.HasMany(p => p.Tracks)
+                .WithOne(t => t.Playlist!)
+                .HasForeignKey(t => t.SavedPlaylistId)
                 .OnDelete(DeleteBehavior.Cascade);
-            e.HasMany(c => c.Slots)
-                .WithOne(s => s.Category!)
-                .HasForeignKey(s => s.CategoryId)
+            e.HasMany(p => p.Slots)
+                .WithOne(s => s.Playlist!)
+                .HasForeignKey(s => s.SavedPlaylistId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        b.Entity<CategorySlot>()
-            .HasIndex(s => new { s.CategoryId, s.SlotIndex })
+        b.Entity<SavedPlaylistTrack>(e =>
+        {
+            e.HasIndex(t => new { t.SavedPlaylistId, t.Position });
+            e.HasOne(t => t.Track)
+                .WithMany()
+                .HasForeignKey(t => t.TrackId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<SavedPlaylistSlot>()
+            .HasIndex(s => new { s.SavedPlaylistId, s.SlotIndex })
             .IsUnique();
 
         b.Entity<PlaylistEntry>(e =>

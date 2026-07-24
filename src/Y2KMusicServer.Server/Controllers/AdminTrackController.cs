@@ -221,6 +221,28 @@ public sealed class AdminTrackController : ControllerBase
     /// the track is unknown; a track whose file has moved still returns the stored
     /// fields with <c>fileExists=false</c> and null live properties.
     /// </summary>
+    public sealed record GenreOverrideBody(string? Value);
+
+    /// <summary>
+    /// Sets or clears the per-track genre override. A non-empty value pins the
+    /// track to that genre bucket regardless of the map; null/empty follows the
+    /// map again. The value is normalised against the current buckets at query
+    /// time, so an override naming a later-deleted bucket degrades to Unknown.
+    /// </summary>
+    [HttpPost("{id:int}/genre-override")]
+    public async Task<IActionResult> SetGenreOverride(int id, [FromBody] GenreOverrideBody? body, CancellationToken ct)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        var t = await db.Tracks.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (t is null) return NotFound(new { error = "track not found", trackId = id });
+
+        t.GenreOverride = string.IsNullOrWhiteSpace(body?.Value) ? null : body!.Value!.Trim();
+        await db.SaveChangesAsync(ct);
+
+        var map = GenreMapStore.Load(_cfg);
+        return Ok(new { id = t.Id, genreOverride = t.GenreOverride, genreBucket = GenreMapStore.EffectiveGenre(map, t) });
+    }
+
     [HttpGet("{id:int}/properties")]
     public async Task<IActionResult> Properties(int id, CancellationToken ct)
     {
@@ -229,10 +251,7 @@ public sealed class AdminTrackController : ControllerBase
         var t = await db.Tracks.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (t is null) return NotFound(new { error = "track not found", trackId = id });
 
-        string? categoryName = null;
-        if (t.CategoryId is int cid)
-            categoryName = await db.Categories
-                .Where(c => c.Id == cid).Select(c => c.Name).FirstOrDefaultAsync(ct);
+        var map = GenreMapStore.Load(_cfg);
 
         var path = t.FilePath;
         var exists = System.IO.File.Exists(path);
@@ -251,9 +270,10 @@ public sealed class AdminTrackController : ControllerBase
             album = t.Album,
             year = t.Year,
             genre = t.Genre,
+            genreOverride = t.GenreOverride,
+            genreBucket = GenreMapStore.EffectiveGenre(map, t),
+            decade = GenreMapStore.Decade(t.Year),
             type = t.Type,
-            categoryId = t.CategoryId,
-            categoryName,
             durationSec = t.DurationSec,
             bpm = t.Bpm,
             bpmConfidence = t.BpmConfidence,

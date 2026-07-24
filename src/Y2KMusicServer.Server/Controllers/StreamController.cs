@@ -5,7 +5,9 @@ using Y2KMusicServer.Server.Streaming;
 namespace Y2KMusicServer.Server.Controllers;
 
 /// <summary>
-/// The live broadcast endpoint and its small admin control surface.
+/// The live broadcast endpoint and its small admin control surface. The
+/// broadcast is always on — there is no enable switch; the only setting is
+/// the MP3 bitrate.
 ///
 /// <para><c>GET /stream</c> serves the mixed output of both decks. Format is
 /// chosen by the <c>format</c> query parameter:</para>
@@ -38,14 +40,6 @@ public sealed class StreamController : ControllerBase
     public async Task Stream([FromQuery] string? format)
     {
         var ct = HttpContext.RequestAborted;
-
-        if (!_enc.IsEnabled)
-        {
-            Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-            Response.ContentType = "text/plain; charset=utf-8";
-            await Response.WriteAsync("Streaming is not enabled.", ct);
-            return;
-        }
 
         bool mp3 = string.Equals(format, "mp3", StringComparison.OrdinalIgnoreCase);
 
@@ -87,13 +81,6 @@ public sealed class StreamController : ControllerBase
 
     [HttpGet("/api/admin/stream/status")]
     public StreamStatus Status() => _enc.GetStatus();
-
-    [HttpPost("/api/admin/stream/enable")]
-    public async Task<IActionResult> Enable([FromQuery] bool on, CancellationToken ct)
-    {
-        await _enc.SetEnabledAsync(on, ct);
-        return Ok(_enc.GetStatus());
-    }
 
     [HttpPost("/api/admin/stream/bitrate")]
     public async Task<IActionResult> Bitrate([FromQuery] int kbps, CancellationToken ct)

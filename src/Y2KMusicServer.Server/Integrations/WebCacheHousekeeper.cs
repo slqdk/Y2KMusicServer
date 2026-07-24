@@ -116,6 +116,10 @@ public sealed class WebCacheHousekeeper
         if (st.NextTrackId is int n) pinned.Add(n);
         foreach (var id in await db.PlaylistEntries.Select(p => p.TrackId).Distinct().ToListAsync(ct))
             pinned.Add(id);
+        // Saved-playlist membership pins too: an operator-curated list must not
+        // lose tracks to cache eviction.
+        foreach (var id in await db.SavedPlaylistTracks.Select(p => p.TrackId).Distinct().ToListAsync(ct))
+            pinned.Add(id);
         return pinned;
     }
 
@@ -131,7 +135,7 @@ public sealed class WebCacheHousekeeper
     private async Task<long> RemoveAsync(Y2KDbContext db, List<WebTrackFile> items, CancellationToken ct)
     {
         var ids = items.Select(i => i.Id).ToList();
-        // Delete order mirrors the folder-clear in AdminCategoriesController.
+        // Delete order mirrors the folder-clear in AdminFoldersController.
         await db.PlaylistEntries.Where(p => ids.Contains(p.TrackId)).ExecuteDeleteAsync(ct);
         await db.Requests.Where(r => ids.Contains(r.TrackId)).ExecuteDeleteAsync(ct);
         await db.MixCache.Where(m => ids.Contains(m.FromTrackId) || ids.Contains(m.ToTrackId)).ExecuteDeleteAsync(ct);

@@ -195,6 +195,21 @@
 
 /* Context menu (right-click in the library) — variable-driven so each skin
    inherits its own bevel/edge/shadow exactly like .w-panel and .w-dialog. */
+.w-autodj-on { background: var(--w-green, #C6E8C6) !important; font-weight: bold; }
+/* Saved-playlist tiles (above the live queue) + the viewing-mode header. */
+.w-pltiles { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-bottom: 4px; }
+@media (max-width: 1500px) { .w-pltiles { grid-template-columns: repeat(5, 1fr); } }
+.w-pltile { padding: 3px 4px; cursor: pointer; text-align: center; }
+.w-pltile.w-viewing { outline: 2px dotted var(--w-accent, var(--w-header)); outline-offset: -3px; }
+.w-pltile .w-cat-name { font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.w-pltile .w-cat-count { font-size: 10px; }
+.w-pltile.w-newtile { color: var(--w-disabled); }
+.w-viewhead {
+  display: flex; align-items: center; gap: 6px; padding: 2px 6px; margin-bottom: 4px;
+  background: #F4E4B0; border: 1px solid #B89A45; color: #4A3A00; font-weight: bold;
+}
+.w-ctxhead { padding: 2px 8px; font-weight: bold; color: var(--w-disabled); cursor: default; list-style: none; }
+.w-ctxitem.w-ctxdisabled { color: var(--w-disabled); pointer-events: none; }
 .w-ctxmenu {
   position: fixed; z-index: 60; min-width: 168px;
   margin: 0; padding: 2px; list-style: none;

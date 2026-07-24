@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import * as api from './api'
 import { fmtTime } from './api'
 import type { ScanInfo, AnalysisInfo } from './useHub'
-import CategoryDialog from './CategoryDialog'
 import PropertiesDialog from './PropertiesDialog'
+import FoldersDialog from './FoldersDialog'
+import GenreMapDialog from './GenreMapDialog'
 import ScanBar from './ScanBar'
 import AnalyzeBar from './AnalyzeBar'
 import { useColumnWidths, ColResizer } from './useColumns'
@@ -12,40 +13,55 @@ import { useColumnWidths, ColResizer } from './useColumns'
 // in one request (the server clamps it to its own ceiling).
 const LOAD_ALL = 100000
 
-// Right-click menu geometry, used only to keep it inside the viewport.
-const MENU_W = 184
-const MENU_H = 156
+// Right-click menu geometry, used only to keep it inside the viewport. The
+// height grows with the saved-playlist list appended under "Add to playlist".
+const MENU_W = 200
+const MENU_BASE_H = 176
+const MENU_ITEM_H = 22
 
 type RowMenu = { x: number; y: number; track: api.TrackDto }
 
+const decadeLabel = (d: number) => (d === 0 ? 'Unknown' : `${String(d).slice(2)}'s`)
+
 export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: ScanInfo | null; analysis: AnalysisInfo | null; onPlayNow: (trackId: number) => Promise<unknown> | void }) {
-  const [cats, setCats] = useState<api.CategoryDto[]>([])
-  const [catErr, setCatErr] = useState<string | null>(null)
+  const [facets, setFacets] = useState<api.FacetsDto | null>(null)
+  const [playlists, setPlaylists] = useState<api.SavedPlaylistDto[]>([])
   const [q, setQ] = useState('')
-  const [categoryId, setCategoryId] = useState<number | null>(null)
+  const [format, setFormat] = useState<string | null>(null)
+  const [genre, setGenre] = useState<string | null>(null)
+  const [decade, setDecade] = useState<number | null>(null)
   const [page, setPage] = useState<api.TracksPage | null>(null)
   const [selId, setSelId] = useState<number | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
-  const [dialogCat, setDialogCat] = useState<api.CategoryDto | null>(null)
   const [menu, setMenu] = useState<RowMenu | null>(null)
   const [propsId, setPropsId] = useState<number | null>(null)
+  const [foldersOpen, setFoldersOpen] = useState(false)
+  const [genreMapOpen, setGenreMapOpen] = useState(false)
+  const [note, setNote] = useState<string | null>(null)
   const debounce = useRef<number | undefined>(undefined)
 
-  // Resizable, fixed-width columns: Title, Artist, Category, Dur, BPM, LUFS.
-  const { colgroup, startResize } = useColumnWidths('y2k.cols.library', [34, 30, 14, 7, 7, 8])
+  // Resizable, fixed-width columns:
+  // Title, Artist, Genre, Decade, Type, Dur, BPM, LUFS.
+  // New storage key — the old 6-column widths don't fit this table.
+  const { colgroup, startResize } = useColumnWidths('y2k.cols.library2', [28, 24, 12, 7, 6, 7, 7, 9])
 
-  const refreshCats = () => api.getCategories().then(setCats).catch(() => {})
-  useEffect(() => { refreshCats() }, [])
+  const refreshFacets = () => api.getFacets().then(setFacets).catch(() => {})
+  const refreshPlaylists = () =>
+    api.getSavedPlaylists().then(r => setPlaylists(r.playlists)).catch(() => {})
+  useEffect(() => { refreshFacets(); refreshPlaylists() }, [])
 
-  const loadTracks = (qv: string, cat: number | null) =>
-    api.getTracks({ q: qv, categoryId: cat, take: LOAD_ALL }).then(setPage).catch(() => setPage(null))
+  const loadTracks = (qv: string, f: string | null, g: string | null, d: number | null) =>
+    api.getTracks({ q: qv, format: f, genre: g, decade: d, take: LOAD_ALL })
+      .then(setPage).catch(() => setPage(null))
 
   // Debounced search; immediate on filter change.
   useEffect(() => {
     window.clearTimeout(debounce.current)
-    debounce.current = window.setTimeout(() => loadTracks(q, categoryId), 250)
+    debounce.current = window.setTimeout(() => loadTracks(q, format, genre, decade), 250)
     return () => window.clearTimeout(debounce.current)
-  }, [q, categoryId])
+  }, [q, format, genre, decade])
+
+  const refreshAll = () => { refreshFacets(); refreshPlaylists(); loadTracks(q, format, genre, decade) }
 
   // Dismiss the row menu on any click, scroll, resize, or Escape. The menu
   // item's own onClick runs first (it bubbles to the React root before this
@@ -66,32 +82,23 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
     }
   }, [menu])
 
-  const catName = useMemo(() => {
-    const m = new Map<number, string>()
-    cats.forEach(c => m.set(c.id, c.name))
-    return m
-  }, [cats])
-
-  const toggleEnable = async (c: api.CategoryDto) => {
-    setCatErr(null)
-    try { await api.setCategoryEnabled(c.id, !c.enabled); await refreshCats() }
-    catch (e) {
-      setCatErr(e instanceof api.ApiError && e.status === 422
-        ? `"${c.name}" needs a folder before it can be enabled.`
-        : `Could not toggle "${c.name}".`)
-    }
-  }
+  // Auto-clear the transient "added to X" note.
+  useEffect(() => {
+    if (!note) return
+    const id = window.setTimeout(() => setNote(null), 2500)
+    return () => window.clearTimeout(id)
+  }, [note])
 
   const rowAct = async (id: number, fn: () => Promise<unknown>) => {
     setBusyId(id)
     try { await fn() } catch { /* ignore */ } finally { setBusyId(null) }
   }
 
-  // Add the track to the playlist as a manual pick (it lands ahead of the
+  // Add the track to the live queue as a manual pick (it lands ahead of the
   // auto-fill). Double-click and the "Play as next song" menu item share this.
   const playNext = (id: number) => rowAct(id, () => api.addToPlaylist(id, 'Manual'))
 
-  // Append the track to the very end of the playlist (still a manual pick).
+  // Append the track to the very end of the live queue (still a manual pick).
   const addEnd = (id: number) => rowAct(id, () => api.addToPlaylist(id, 'Manual', true))
 
   // Crossfade to the track now (or load + play it if nothing is on air); the
@@ -102,53 +109,64 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
   // the row shows the new values.
   const rescanOne = (id: number) => rowAct(id, async () => {
     await api.rescanTrack(id)
-    await loadTracks(q, categoryId)
+    refreshAll()
+  })
+
+  // Add the track to a saved playlist (dup-tolerant server-side).
+  const addToSaved = (trackId: number, pl: api.SavedPlaylistDto) => rowAct(trackId, async () => {
+    const r = await api.addToSavedPlaylist(pl.id, trackId)
+    setNote(r.added ? `Added to "${pl.name}".` : `Already in "${pl.name}".`)
+    refreshPlaylists()
   })
 
   const openMenu = (e: ReactMouseEvent, t: api.TrackDto) => {
     e.preventDefault()
     setSelId(t.id)
+    const h = MENU_BASE_H + Math.max(1, playlists.length) * MENU_ITEM_H
     const x = Math.max(4, Math.min(e.clientX, window.innerWidth - MENU_W - 4))
-    const y = Math.max(4, Math.min(e.clientY, window.innerHeight - MENU_H - 4))
+    const y = Math.max(4, Math.min(e.clientY, window.innerHeight - h - 4))
     setMenu({ x, y, track: t })
   }
 
   const total = page?.total ?? 0
   const items = page?.items ?? []
+  const filtered = format != null || genre != null || decade != null || q.trim() !== ''
 
   return (
     <div className="w-panel w-raised w-libpanel">
-      <div className="w-panelhead">Library {page && <span style={{ fontWeight: 'normal' }}>— {total} tracks</span>}</div>
+      <div className="w-panelhead">Library {page && <span style={{ fontWeight: 'normal' }}>— {total} tracks{filtered ? ' (filtered)' : ''}</span>}</div>
 
-      {/* Categories */}
-      <div className="w-cats">
-        {cats.map(c => {
-          const on = c.enabled
-          const active = categoryId === c.id
-          return (
-            <div key={c.id}
-              className={`w-cat w-raised ${on ? 'w-on' : 'w-off'} ${active ? 'w-active' : ''}`}
-              onClick={() => setCategoryId(active ? null : c.id)}
-              title={active ? 'Click to clear filter' : 'Click to filter library by this category'}>
-              <div className="w-cat-name">{c.name}</div>
-              <div className="w-cat-count">{c.trackCount} tracks</div>
-              <div style={{ display: 'flex', gap: 2 }}>
-                <button className="w-btn" style={{ flex: 1 }} disabled={!on && c.folderCount === 0}
-                  onClick={e => { e.stopPropagation(); toggleEnable(c) }}
-                  title={!on && c.folderCount === 0 ? 'Add a folder first (⚙ Settings)' : ''}>
-                  {on ? 'Disable' : 'Enable'}
-                </button>
-                <button className="w-btn" title="Folders, schedule, rescan, clear"
-                  onClick={e => { e.stopPropagation(); setDialogCat(c) }}>⚙</button>
-              </div>
-            </div>
-          )
-        })}
+      {/* Filter bar: Format / Genre / Decade facets + free-text search. */}
+      <div className="w-toolbar" style={{ flexWrap: 'wrap' }}>
+        <label>Format:</label>
+        <select value={format ?? ''} onChange={e => setFormat(e.target.value || null)}>
+          <option value="">All</option>
+          {facets?.formats.map(f => (
+            <option key={f.name} value={f.name}>{f.name} ({f.count})</option>
+          ))}
+        </select>
+        <label>Genre:</label>
+        <select value={genre ?? ''} onChange={e => setGenre(e.target.value || null)}>
+          <option value="">All</option>
+          {facets?.genres.map(g => (
+            <option key={g.name} value={g.name}>{g.name} ({g.count})</option>
+          ))}
+        </select>
+        <label>Decade:</label>
+        <select value={decade == null ? '' : String(decade)}
+          onChange={e => setDecade(e.target.value === '' ? null : Number(e.target.value))}>
+          <option value="">All</option>
+          {facets?.decades.map(d => (
+            <option key={d.decade} value={d.decade}>{decadeLabel(d.decade)} ({d.count})</option>
+          ))}
+        </select>
+        <span className="w-spacer" style={{ flex: 1 }} />
+        <button className="w-btn" onClick={() => setFoldersOpen(true)} title="The folders the library scans">Folders…</button>
+        <button className="w-btn" onClick={() => setGenreMapOpen(true)} title="Map raw tag genres onto your genre buckets">Genre map…</button>
       </div>
-      {catErr && <div className="w-err" style={{ marginTop: 4 }}>{catErr}</div>}
 
-      <ScanBar live={scan} onComplete={() => { refreshCats(); loadTracks(q, categoryId) }} />
-      <AnalyzeBar live={analysis} onComplete={() => loadTracks(q, categoryId)} />
+      <ScanBar live={scan} onComplete={refreshAll} />
+      <AnalyzeBar live={analysis} onComplete={() => loadTracks(q, format, genre, decade)} />
 
       {/* Search */}
       <div className="w-toolbar">
@@ -156,15 +174,17 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
         <input type="search" value={q} style={{ flex: 1 }}
           onChange={e => setQ(e.target.value)}
           placeholder="title / artist / album" />
-        {categoryId != null && (
-          <button className="w-btn" onClick={() => setCategoryId(null)}>
-            Clear: {catName.get(categoryId) ?? categoryId}
+        {filtered && (
+          <button className="w-btn"
+            onClick={() => { setQ(''); setFormat(null); setGenre(null); setDecade(null) }}>
+            Clear filters
           </button>
         )}
+        {note && <span className="w-muted">{note}</span>}
       </div>
 
       {/* Track table. Double-click a row to queue it as the next song; right-click
-          for the full action menu. */}
+          for the full action menu (including Add to playlist). */}
       <div className="w-listwrap w-sunken" style={{ flex: 1, minHeight: 0, marginTop: 6, overflowX: 'hidden' }}>
         <table className="w-table w-grid">
           {colgroup}
@@ -172,9 +192,11 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
             <tr>
               <th>Title<ColResizer onMouseDown={startResize(0)} /></th>
               <th>Artist<ColResizer onMouseDown={startResize(1)} /></th>
-              <th>Category<ColResizer onMouseDown={startResize(2)} /></th>
-              <th className="w-num">Dur<ColResizer onMouseDown={startResize(3)} /></th>
-              <th className="w-num">BPM<ColResizer onMouseDown={startResize(4)} /></th>
+              <th>Genre<ColResizer onMouseDown={startResize(2)} /></th>
+              <th>Decade<ColResizer onMouseDown={startResize(3)} /></th>
+              <th>Type<ColResizer onMouseDown={startResize(4)} /></th>
+              <th className="w-num">Dur<ColResizer onMouseDown={startResize(5)} /></th>
+              <th className="w-num">BPM<ColResizer onMouseDown={startResize(6)} /></th>
               <th className="w-num">LUFS</th>
             </tr>
           </thead>
@@ -187,28 +209,41 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
                 title="Double-click to queue as next · right-click for more">
                 <td title={t.title ?? ''}>{t.title ?? '(untitled)'}{busyId === t.id ? ' ⟳' : ''}</td>
                 <td title={t.artist ?? ''}>{t.artist ?? '---'}</td>
-                <td>{t.categoryId != null ? (catName.get(t.categoryId) ?? '?') : '---'}</td>
+                <td>{t.genreBucket}</td>
+                <td>{t.decade != null ? decadeLabel(t.decade) : '---'}</td>
+                <td>{t.type ?? '---'}</td>
                 <td className="w-num">{fmtTime(t.durationSec)}</td>
                 <td className="w-num">{t.bpm != null ? Math.round(t.bpm) : '---'}</td>
                 <td className="w-num">{t.lufs != null ? t.lufs.toFixed(1) : '---'}</td>
               </tr>
             ))}
             {items.length === 0 && (
-              <tr><td colSpan={6} className="w-muted" style={{ padding: 8 }}>No tracks. Assign a folder to a category; it scans and analyses automatically.</td></tr>
+              <tr><td colSpan={8} className="w-muted" style={{ padding: 8 }}>No tracks. Add a music folder (Folders…); it scans and analyses automatically.</td></tr>
             )}
           </tbody>
         </table>
       </div>
 
       {menu && (
-        <ul className="w-ctxmenu" role="menu" style={{ left: menu.x, top: menu.y }}
+        <ul className="w-ctxmenu" role="menu" style={{ left: menu.x, top: menu.y, minWidth: MENU_W }}
           onContextMenu={e => e.preventDefault()}>
           <li className="w-ctxitem" role="menuitem"
             onClick={() => { playNext(menu.track.id); setMenu(null) }}>Play as next song</li>
           <li className="w-ctxitem" role="menuitem"
-            onClick={() => { addEnd(menu.track.id); setMenu(null) }}>Add to end of playlist</li>
+            onClick={() => { addEnd(menu.track.id); setMenu(null) }}>Add to end of queue</li>
           <li className="w-ctxitem" role="menuitem"
             onClick={() => { doPlayNow(menu.track.id); setMenu(null) }}>Play now</li>
+          <li className="w-ctxsep" role="separator" />
+          <li className="w-ctxhead" aria-hidden="true">Add to playlist</li>
+          {playlists.length === 0 && (
+            <li className="w-ctxitem w-ctxdisabled">(no playlists yet)</li>
+          )}
+          {playlists.map(pl => (
+            <li key={pl.id} className="w-ctxitem" role="menuitem" style={{ paddingLeft: 18 }}
+              onClick={() => { addToSaved(menu.track.id, pl); setMenu(null) }}>
+              {pl.name} <span className="w-muted">({pl.trackCount})</span>
+            </li>
+          ))}
           <li className="w-ctxsep" role="separator" />
           <li className="w-ctxitem" role="menuitem"
             onClick={() => { rescanOne(menu.track.id); setMenu(null) }}>Rescan this song</li>
@@ -217,16 +252,16 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
         </ul>
       )}
 
-      {dialogCat && (
-        <CategoryDialog
-          category={dialogCat}
-          onClose={() => setDialogCat(null)}
-          onChanged={() => { refreshCats(); loadTracks(q, categoryId) }}
-        />
+      {foldersOpen && (
+        <FoldersDialog onClose={() => setFoldersOpen(false)} onChanged={refreshAll} />
+      )}
+
+      {genreMapOpen && (
+        <GenreMapDialog onClose={() => setGenreMapOpen(false)} onChanged={refreshAll} />
       )}
 
       {propsId != null && (
-        <PropertiesDialog trackId={propsId} onClose={() => setPropsId(null)} />
+        <PropertiesDialog trackId={propsId} onClose={() => setPropsId(null)} onChanged={refreshAll} />
       )}
     </div>
   )

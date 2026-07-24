@@ -7,11 +7,11 @@ using Y2KMusicServer.Server.Network;
 namespace Y2KMusicServer.Server.Scanning;
 
 /// <summary>
-/// Walks each category's folders, reads tags + duration, and writes
-/// <see cref="Track"/> rows. A straight port of the legacy scan: tags only,
-/// no BPM or LUFS analysis (those arrive in Phase 5). Files already in the
-/// library are skipped; a file claimed by an earlier category (by
-/// <c>DisplayOrder</c>) wins, matching the legacy first-wins behaviour.
+/// Walks the global scan-folder list (<see cref="ScanFolderStore"/>), reads
+/// tags + duration, and writes <see cref="Track"/> rows. Tags only — BPM/LUFS
+/// arrive via the analysis pass. Files already in the library are skipped;
+/// with categories retired there is no per-category ownership, only the
+/// "innermost assigned folder wins" scoping used by folder-scoped operations.
 ///
 /// The scanner holds no ASP.NET dependency — it raises <see cref="Progress"/>
 /// events; <c>ScanHubBroadcaster</c> forwards them to the SignalR hub.
@@ -23,17 +23,20 @@ public sealed class LibraryScanner
 
     private readonly IDbContextFactory<Y2KDbContext> _dbf;
     private readonly NetworkShareConnector _connector;
+    private readonly IConfiguration _cfg;
     private readonly ILogger<LibraryScanner> _log;
 
     private readonly object _gate = new();
-    private readonly Queue<(int? Cat, int? Folder)> _queue = new();
+    private readonly Queue<int?> _queue = new(); // folder id, or null = all folders
     private bool _busy; // worker loop active (draining the queue)
     private volatile ScanProgress _current = new() { State = ScanState.Idle };
 
-    public LibraryScanner(IDbContextFactory<Y2KDbContext> dbf, NetworkShareConnector connector, ILogger<LibraryScanner> log)
+    public LibraryScanner(IDbContextFactory<Y2KDbContext> dbf, NetworkShareConnector connector,
+        IConfiguration cfg, ILogger<LibraryScanner> log)
     {
         _dbf = dbf;
         _connector = connector;
+        _cfg = cfg;
         _log = log;
     }
 
@@ -44,32 +47,19 @@ public sealed class LibraryScanner
     public bool IsScanning { get { lock (_gate) return _busy; } }
 
     /// <summary>
-    /// Queues a scan of every category that has folders (or just one category if
-    /// an id is given). Scans run one at a time in FIFO order — see
-    /// <see cref="Enqueue"/>. Always returns true.
-    /// </summary>
-    public bool TryStart(int? categoryId = null) => Enqueue(categoryId, null);
-
-    /// <summary>
-    /// Queues a scan of a single folder (and its sub-tree, minus any deeper
-    /// assigned folder — "innermost folder wins"). The chained analysis pass is
-    /// scoped to just this folder's tracks. Always returns true.
-    /// </summary>
-    public bool TryStart(int categoryId, int folderId) => Enqueue(categoryId, folderId);
-
-    /// <summary>
-    /// Queues a scan request and makes sure the background worker is running.
-    /// Only one scan runs at a time; further requests wait in FIFO order, so
-    /// pressing rescan on several folders stacks them up instead of being
-    /// rejected. An identical request already waiting is coalesced. Always
+    /// Queues a scan of the whole global folder list, or of a single assigned
+    /// folder by its <see cref="ScanFolderStore"/> id (its sub-tree, minus any
+    /// deeper assigned folder — "innermost folder wins"; the chained analysis
+    /// pass is scoped to just that folder's tracks). Scans run one at a time in
+    /// FIFO order; an identical request already waiting is coalesced. Always
     /// returns true (the request is accepted, to run now or shortly).
     /// </summary>
-    private bool Enqueue(int? categoryId, int? folderId)
+    public bool TryStart(int? folderId = null)
     {
         lock (_gate)
         {
-            if (!_queue.Any(j => j.Cat == categoryId && j.Folder == folderId))
-                _queue.Enqueue((categoryId, folderId));
+            if (!_queue.Contains(folderId))
+                _queue.Enqueue(folderId);
             if (_busy) return true; // a worker is already draining the queue
             _busy = true;
         }
@@ -82,16 +72,16 @@ public sealed class LibraryScanner
     {
         while (true)
         {
-            (int? Cat, int? Folder) job;
+            int? folderId;
             lock (_gate)
             {
                 if (_queue.Count == 0) { _busy = false; return; }
-                job = _queue.Dequeue();
+                folderId = _queue.Dequeue();
             }
 
             try
             {
-                Run(job.Cat, job.Folder);
+                Run(folderId);
             }
             catch (Exception ex)
             {
@@ -101,45 +91,37 @@ public sealed class LibraryScanner
         }
     }
 
-    private void Run(int? categoryId, int? folderId)
+    private void Run(int? folderId)
     {
         Emit(new ScanProgress { State = ScanState.Enumerating });
 
-        // (categoryId, folderPath, nested-folder exclusion prefixes) per target.
-        List<(int CategoryId, string Folder, List<string> Exclude)> targets;
-        HashSet<string> existing;
+        // (folderPath, nested-folder exclusion prefixes) per target — from the
+        // global scan-folder store, not the database. Folders nested inside a
+        // target are scanned on their own, not here (innermost wins).
+        var store = ScanFolderStore.Load(_cfg);
+        var allFolders = store.Folders.Select(f => f.Path).ToList();
 
+        List<(string Folder, List<string> Exclude)> targets;
+        if (folderId is int fid)
+        {
+            var folder = store.Folders.FirstOrDefault(f => f.Id == fid);
+            if (folder == null)
+            {
+                Emit(new ScanProgress { State = ScanState.Completed, Message = "Folder not found.", ScopeFolderId = folderId });
+                return;
+            }
+            targets = new() { (folder.Path, FolderScope.NestedPrefixes(folder.Path, allFolders)) };
+        }
+        else
+        {
+            targets = store.Folders
+                .Select(f => (f.Path, FolderScope.NestedPrefixes(f.Path, allFolders)))
+                .ToList();
+        }
+
+        HashSet<string> existing;
         using (var db = _dbf.CreateDbContext())
         {
-            // Every assigned folder path, to compute the innermost-wins exclusions
-            // (folders nested inside a target are scanned on their own, not here).
-            var allFolders = db.CategoryFolders.Select(f => f.Path).ToList();
-
-            if (folderId is int fid)
-            {
-                var folder = db.CategoryFolders.FirstOrDefault(f => f.Id == fid);
-                if (folder == null)
-                {
-                    Emit(new ScanProgress { State = ScanState.Completed, Message = "Folder not found.", ScopeFolderId = folderId });
-                    return;
-                }
-                targets = new() { (folder.CategoryId, folder.Path, FolderScope.NestedPrefixes(folder.Path, allFolders)) };
-            }
-            else
-            {
-                var cats = db.Categories
-                    .Include(c => c.Folders)
-                    .Where(c => c.Folders.Count > 0)
-                    .Where(c => categoryId == null || c.Id == categoryId)
-                    .OrderBy(c => c.DisplayOrder)
-                    .ToList();
-
-                targets = cats
-                    .SelectMany(c => c.Folders.Select(f =>
-                        (c.Id, f.Path, FolderScope.NestedPrefixes(f.Path, allFolders))))
-                    .ToList();
-            }
-
             existing = db.Tracks
                 .Select(t => t.FilePath)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -149,9 +131,9 @@ public sealed class LibraryScanner
         // already-scanned files are skipped, and grows as folders claim files,
         // giving first-wins for any remaining cross-folder dupes.
         var claimed = new HashSet<string>(existing, StringComparer.OrdinalIgnoreCase);
-        var work = new List<(int CategoryId, string Path)>();
+        var work = new List<string>();
 
-        foreach (var (catId, folder, exclude) in targets)
+        foreach (var (folder, exclude) in targets)
         {
             // Authenticate to the server first if this is a network folder (using
             // the stored credential for its host). No-op for local folders or
@@ -180,7 +162,7 @@ public sealed class LibraryScanner
                 if (exclude.Count > 0 && exclude.Any(p => file.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
                     continue;
                 if (claimed.Add(file)) // Add returns false when already present
-                    work.Add((catId, file));
+                    work.Add(file);
             }
         }
 
@@ -209,7 +191,7 @@ public sealed class LibraryScanner
             new ParallelOptions { MaxDegreeOfParallelism = workers },
             item =>
             {
-                var track = ReadTrack(item.Path, item.CategoryId);
+                var track = ReadTrack(item);
                 if (track != null)
                 {
                     results.Add(track);
@@ -229,7 +211,7 @@ public sealed class LibraryScanner
                         FilesProcessed = done,
                         Added = Volatile.Read(ref added),
                         Skipped = Volatile.Read(ref skipped),
-                        CurrentPath = item.Path
+                        CurrentPath = item
                     });
             });
 
@@ -257,7 +239,7 @@ public sealed class LibraryScanner
         });
     }
 
-    private Track? ReadTrack(string path, int categoryId)
+    private Track? ReadTrack(string path)
     {
         try
         {
@@ -292,7 +274,6 @@ public sealed class LibraryScanner
                 Year = year,
                 Type = Path.GetExtension(path).TrimStart('.').ToUpperInvariant(),
                 DurationSec = duration,
-                CategoryId = categoryId,
                 ScannedAt = DateTime.UtcNow
             };
         }

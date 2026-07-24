@@ -92,7 +92,7 @@ public sealed class AdminSettingsController : ControllerBase
         s.SmartMix, s.SmartBeatFader, s.NextTriggerPct, s.NextFadeSeconds,
         s.AutoDj, s.AutoDjTracks, s.AutoDjBpmDev, s.ScanWorkers,
         s.NormalizeEnabled, s.LimiterEnabled, s.TargetLufs, s.Volume,
-        s.StreamingEnabled, s.StreamingBitrate, s.AllowWebNext, s.ShowWebCategories,
+        s.StreamingBitrate, s.AllowWebNext, s.ShowWebCategories,
         s.DebugLogging,
         w.ShowListenLive, w.RequestLimitEnabled, w.RequestIntervalMinutes, w.AutoAcceptRequests
     };

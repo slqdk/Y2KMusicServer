@@ -159,7 +159,7 @@ public sealed class AudioEngine
         Deck deck;
         try
         {
-            deck = BuildDeck(track, NormalizedVolume(track, settings), 0, "A", settings.StreamingEnabled);
+            deck = BuildDeck(track, NormalizedVolume(track, settings), 0, "A");
         }
         catch (Exception ex)
         {
@@ -394,7 +394,7 @@ public sealed class AudioEngine
         Deck deckB;
         try
         {
-            deckB = BuildDeck(next, 0f, inPoint, "B", settings.StreamingEnabled);
+            deckB = BuildDeck(next, 0f, inPoint, "B");
             deckB.BaseVolume = targetVol;
             deckB.InPointSec = inPoint;
         }
@@ -1190,37 +1190,36 @@ public sealed class AudioEngine
     // ── Deck building + event helpers ─────────────────────────────────────────
 
     /// <summary>
-    /// Picks a deck's audio output. While streaming, decks pump silently and the
-    /// live stream taps the chain. With streaming off, play to the default sound
-    /// card so the operator hears the decks locally — but only when a device is
-    /// actually reachable. A LocalSystem Windows Service runs in Session 0 with no
-    /// audio endpoint, so there the probe reports no devices and we stay silent;
-    /// run the server interactively (console / as the logged-in user) for local
-    /// sound. Changing the streaming setting takes effect on the next deck build
+    /// Picks a deck's audio output. Decks play to the default sound card whenever
+    /// a render device is actually reachable, so the operator hears the decks
+    /// locally — and the live stream taps the chain either way (the DeckTap sits
+    /// upstream of the output device, so streaming and local sound are
+    /// independent). A LocalSystem Windows Service runs in Session 0 with no
+    /// audio endpoint, so there the probe reports no devices and the deck falls
+    /// back to the silent pump; run the server interactively (console / as the
+    /// logged-in user) for local sound. The choice is made when a deck is built,
+    /// so a device appearing or vanishing takes effect on the next deck build
     /// (next load / crossfade), not the deck already playing.
     /// </summary>
-    private IWavePlayer CreateDeckOutput(bool streaming, string label)
+    private IWavePlayer CreateDeckOutput(string label)
     {
-        if (!streaming)
+        try
         {
-            try
-            {
-                using var devices = new MMDeviceEnumerator();
-                if (devices.HasDefaultAudioEndpoint(DataFlow.Render, Role.Console))
-                    return new WaveOutEvent { DesiredLatency = 60, NumberOfBuffers = 3 };
-                _log.LogInformation(
-                    "Deck {Deck}: streaming off but no default render device (headless / LocalSystem service?); using silent output.",
-                    label);
-            }
-            catch (Exception ex)
-            {
-                _log.LogWarning(ex, "Deck {Deck}: audio device probe failed; using silent output.", label);
-            }
+            using var devices = new MMDeviceEnumerator();
+            if (devices.HasDefaultAudioEndpoint(DataFlow.Render, Role.Console))
+                return new WaveOutEvent { DesiredLatency = 60, NumberOfBuffers = 3 };
+            _log.LogInformation(
+                "Deck {Deck}: no default render device (headless / LocalSystem service?); using silent output.",
+                label);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Deck {Deck}: audio device probe failed; using silent output.", label);
         }
         return new SilentWavePlayer();
     }
 
-    private Deck BuildDeck(Track track, float volume, double seekToSec, string label, bool streaming)
+    private Deck BuildDeck(Track track, float volume, double seekToSec, string label)
     {
         var reader = new SafeAudioFileReader(track.FilePath);
 
@@ -1245,7 +1244,7 @@ public sealed class AudioEngine
         var tap = new DeckTap(vol);                         // post-fader capture for the live stream
 
         var wp = new SampleToWaveProvider(tap);
-        IWavePlayer outDev = CreateDeckOutput(streaming, label);
+        IWavePlayer outDev = CreateDeckOutput(label);
         try
         {
             outDev.Init(wp);

@@ -178,7 +178,6 @@ public sealed class YouTubeFetchService
                 Album = album,
                 Type = "MP3",
                 DurationSec = duration,
-                CategoryId = null,
                 ScannedAt = DateTime.UtcNow
             };
             db.Tracks.Add(track);
@@ -243,7 +242,7 @@ public sealed class YouTubeFetchService
     // Remove a just-fetched track that turned out unplayable: its playlist entries
     // (defensive — the fetch gate means it isn't queued yet), any request / mix-cache
     // rows, then the track, then the cache file. Mirrors the folder-clear delete
-    // order in AdminCategoriesController.
+    // order in AdminFoldersController.
     private async Task PruneTrackAsync(int trackId, string path, CancellationToken ct)
     {
         try

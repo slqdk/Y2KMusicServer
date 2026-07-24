@@ -92,8 +92,25 @@ public static class DataPaths
         => Path.Combine(DataDir(cfg), "integrations.json");
 
     /// <summary>
+    /// Global scan-folder list, at <c>&lt;DataPath&gt;\scan-folders.json</c> —
+    /// a sibling of <c>mixrules.json</c>. The one place music folders are
+    /// assigned (the per-category folder model is retired). JSON, not the
+    /// database, so the list survives a schema recreate.
+    /// </summary>
+    public static string ScanFoldersPath(IConfiguration cfg)
+        => Path.Combine(DataDir(cfg), "scan-folders.json");
+
+    /// <summary>
+    /// Operator-editable genre map, at <c>&lt;DataPath&gt;\genre-map.json</c> —
+    /// buckets + raw-tag→bucket rules, applied at query time so edits re-bucket
+    /// the library instantly without a rescan.
+    /// </summary>
+    public static string GenreMapPath(IConfiguration cfg)
+        => Path.Combine(DataDir(cfg), "genre-map.json");
+
+    /// <summary>
     /// Download cache for web-fetched tracks, at <c>&lt;DataPath&gt;\webcache</c>.
-    /// A sibling of <c>data</c> / <c>logs</c>, deliberately NOT under any category
+    /// A sibling of <c>data</c> / <c>logs</c>, deliberately NOT under any assigned scan
     /// folder — so the folder-scoped library clear (which owns tracks purely by
     /// path prefix) can never prune these. Each cached track is
     /// <c>&lt;videoId&gt;.mp3</c> with a matching Tracks row; rebuildable by

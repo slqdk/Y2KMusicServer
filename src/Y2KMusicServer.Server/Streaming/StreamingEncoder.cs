@@ -43,7 +43,6 @@ public enum StreamFormat { Wav, Mp3 }
 
 public sealed record StreamStatus
 {
-    public bool Enabled { get; init; }
     public int Bitrate { get; init; }
     public int Listeners { get; init; }
     public int WavListeners { get; init; }
@@ -109,7 +108,6 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
     private readonly IDbContextFactory<Y2KDbContext> _dbf;
     private readonly ILogger<StreamingEncoder> _log;
 
-    private volatile bool _enabled;
     private volatile int _bitrate = 128;
 
     private readonly object _tapLock = new();
@@ -137,7 +135,6 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
         _log = log;
     }
 
-    public bool IsEnabled => _enabled;
     public int Bitrate => _bitrate;
 
     // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -151,7 +148,6 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
             var s = await db.Settings.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
             if (s != null)
             {
-                _enabled = s.StreamingEnabled;
                 _bitrate = NormaliseBitrate(s.StreamingBitrate);
             }
         }
@@ -172,8 +168,8 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
         _distThread.Start();
 
         _log.LogInformation(
-            "Streaming encoder started (enabled={Enabled}, bitrate={Bitrate} kbps, {Rate} Hz / {Ch} ch).",
-            _enabled, _bitrate, SampleRate, Channels);
+            "Streaming encoder started (always on, bitrate={Bitrate} kbps, {Rate} Hz / {Ch} ch).",
+            _bitrate, SampleRate, Channels);
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
@@ -191,12 +187,6 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
     }
 
     // ── Public control surface (used by StreamController) ────────────────────────
-
-    public async Task SetEnabledAsync(bool on, CancellationToken ct = default)
-    {
-        _enabled = on;
-        await PersistAsync(s => s.StreamingEnabled = on, ct);
-    }
 
     public async Task SetBitrateAsync(int kbps, CancellationToken ct = default)
     {
@@ -220,7 +210,6 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
 
         return new StreamStatus
         {
-            Enabled = _enabled,
             Bitrate = _bitrate,
             Listeners = wav + mp3,
             WavListeners = wav,
@@ -362,8 +351,6 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
                     Thread.SpinWait(10);
                 }
                 if (ct.IsCancellationRequested) break;
-
-                if (!_enabled) { TearDownLame(); continue; }
 
                 // ── Listener census ───────────────────────────────────────────
                 int mp3Count = 0, totalCount = 0;

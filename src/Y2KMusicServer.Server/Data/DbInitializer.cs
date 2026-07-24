@@ -1,56 +1,112 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Y2KMusicServer.Server.Data.Entities;
 
 namespace Y2KMusicServer.Server.Data;
 
 /// <summary>
-/// First-run database setup. Creates the schema (no migrations yet — current
-/// instances are greenfield, with no deployed database to evolve and the only
-/// durable data arriving later via the legacy import) and seeds the 14
-/// categories plus the singleton <see cref="Settings"/> row when absent.
-/// Idempotent: safe to run on every startup.
+/// Database setup. Creates the schema directly from the model
+/// (<c>EnsureCreated</c>, no migrations) and seeds the singleton
+/// <see cref="Settings"/> row when absent. Idempotent per startup.
+///
+/// <para><b>Schema v2 recreate rule:</b> the library rework (categories
+/// retired, saved playlists added, Track reshaped) changed the schema, and
+/// EnsureCreated cannot evolve an existing database. A database from the old
+/// schema — detected by the presence of a <c>Categories</c> table or the
+/// absence of the v2 <c>SavedPlaylists</c> table — is <b>deleted and rebuilt
+/// empty</b>, together with the per-track caches keyed by the old track ids
+/// (peaks, structure) and the web download cache. Accepted during development;
+/// the library is repopulated by a rescan of the global folder list.</para>
 /// </summary>
 public static class DbInitializer
 {
-    private static readonly string[] BuiltInCategories =
-        { "Pop", "Rock", "Metal", "Dance", "Techno", "Country", "Classical" };
-
     public static void Initialize(IServiceProvider services, IConfiguration cfg)
     {
         var factory = services.GetRequiredService<IDbContextFactory<Y2KDbContext>>();
-        using var db = factory.CreateDbContext();
+        var log = services.GetRequiredService<ILoggerFactory>().CreateLogger("DbInitializer");
 
+        RecreateIfOldSchema(cfg, log);
+
+        using var db = factory.CreateDbContext();
         db.Database.EnsureCreated();
 
-        SeedCategories(db);
         SeedSettings(db, cfg);
 
         db.SaveChanges();
     }
 
-    private static void SeedCategories(Y2KDbContext db)
+    /// <summary>
+    /// Deletes a pre-v2 database (plus the track-id-keyed caches and the web
+    /// download cache) so EnsureCreated can build the current schema. A missing
+    /// or already-v2 database is left alone.
+    /// </summary>
+    private static void RecreateIfOldSchema(IConfiguration cfg, ILogger log)
     {
-        if (db.Categories.Any()) return;
+        var dbPath = DataPaths.DbPath(cfg);
+        if (!File.Exists(dbPath)) return;
 
-        var order = 0;
+        bool oldSchema;
+        try
+        {
+            using var conn = new SqliteConnection($"Data Source={dbPath};Mode=ReadOnly");
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                "SELECT " +
+                "  EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='Categories')," +
+                "  EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='SavedPlaylists')";
+            using var r = cmd.ExecuteReader();
+            r.Read();
+            bool hasCategories = r.GetInt64(0) != 0;
+            bool hasSavedPlaylists = r.GetInt64(1) != 0;
+            oldSchema = hasCategories || !hasSavedPlaylists;
+        }
+        catch (Exception ex)
+        {
+            // Unreadable database — treat as old/corrupt and rebuild.
+            log.LogWarning(ex, "Could not inspect the database schema; rebuilding.");
+            oldSchema = true;
+        }
 
-        foreach (var name in BuiltInCategories)
-            db.Categories.Add(new Category
-            {
-                Name = name,
-                IsCustom = false,
-                Enabled = false,
-                DisplayOrder = order++
-            });
+        if (!oldSchema) return;
 
-        for (var i = 1; i <= 7; i++)
-            db.Categories.Add(new Category
-            {
-                Name = $"Custom{i}",
-                IsCustom = true,
-                Enabled = false,
-                DisplayOrder = order++
-            });
+        log.LogWarning(
+            "Pre-v2 database detected at {Path} — deleting it (and the track-keyed " +
+            "caches) for the library rework. The library repopulates on the next scan.",
+            dbPath);
+
+        SqliteConnection.ClearAllPools(); // release file handles before deleting
+        TryDelete(dbPath, log);
+        TryDelete(dbPath + "-wal", log);
+        TryDelete(dbPath + "-shm", log);
+
+        // Track-id-keyed caches are meaningless against a fresh id space.
+        TryDeleteDirContents(DataPaths.PeaksDir(cfg), log);
+        TryDeleteDirContents(DataPaths.StructureDir(cfg), log);
+
+        // Web-cache files' Track rows died with the database; without them the
+        // files are unreachable orphans — drop them too (rebuildable by re-fetch).
+        TryDeleteDirContents(DataPaths.WebCacheDir(cfg), log);
+    }
+
+    private static void TryDelete(string path, ILogger log)
+    {
+        try { if (File.Exists(path)) File.Delete(path); }
+        catch (Exception ex) { log.LogWarning(ex, "Could not delete {Path}", path); }
+    }
+
+    private static void TryDeleteDirContents(string dir, ILogger log)
+    {
+        try
+        {
+            if (!Directory.Exists(dir)) return;
+            foreach (var f in Directory.EnumerateFiles(dir))
+                try { File.Delete(f); } catch (Exception ex) { log.LogWarning(ex, "Could not delete {Path}", f); }
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning(ex, "Could not clean {Dir}", dir);
+        }
     }
 
     private static void SeedSettings(Y2KDbContext db, IConfiguration cfg)
@@ -77,7 +133,6 @@ public static class DbInitializer
             LimiterEnabled = true,
             TargetLufs = targetLufs,
             Volume = 80,
-            StreamingEnabled = false,
             StreamingBitrate = 128,
             AllowWebNext = false,
             ShowWebCategories = true,

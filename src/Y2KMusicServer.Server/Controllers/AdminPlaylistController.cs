@@ -72,6 +72,45 @@ public sealed class AdminPlaylistController : ControllerBase
         return Ok(new { removed, playlist = await _playlist.GetAsync(ct) });
     }
 
+    /// <summary>
+    /// Activates a saved playlist: the live queue is replaced by its tracks
+    /// (pending requests survive and play first), and the engine crossfades off
+    /// the current track into the first upcoming entry. With the engine
+    /// stopped, the first entry is loaded and started instead of crossfaded.
+    /// 404 unknown playlist, 422 empty playlist.
+    /// </summary>
+    [HttpPost("playlist/activate")]
+    public async Task<IActionResult> Activate([FromQuery] int playlistId, CancellationToken ct)
+    {
+        var status = _engine.GetStatus();
+        int? current = status.TrackId;
+
+        var r = await _playlist.ActivateSavedAsync(playlistId, current, ct);
+        if (r == PlaylistService.ActivateResult.NotFound)
+            return NotFound(new { error = "playlist not found", playlistId });
+        if (r == PlaylistService.ActivateResult.Empty)
+            return UnprocessableEntity(new { error = "playlist is empty", playlistId });
+
+        int? first = await _playlist.NextUpcomingTrackIdAsync(current, ct);
+        string action = "queuedOnly";
+        if (first is int tid)
+        {
+            if (status.State == PlaybackEngineState.Playing && current != null)
+            {
+                var q = await _engine.NextAsync(tid, ct);
+                action = q == QueueResult.Ok ? "crossfaded" : $"crossfadeFailed:{q}";
+            }
+            else
+            {
+                var l = await _engine.LoadAsync(tid, ct);
+                if (l == LoadResult.Ok) { _engine.Play(); action = "started"; }
+                else action = $"loadFailed:{l}";
+            }
+        }
+
+        return Ok(new { activated = playlistId, action, playlist = await _playlist.GetAsync(ct) });
+    }
+
     // ── Auto DJ ─────────────────────────────────────────────────────────────
 
     /// <summary>Forces a top-up now (handy for testing). Returns the count added.</summary>

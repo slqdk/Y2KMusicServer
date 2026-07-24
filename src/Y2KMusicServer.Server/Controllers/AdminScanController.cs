@@ -18,13 +18,13 @@ public sealed class AdminScanController : ControllerBase
     public AdminScanController(LibraryScanner scanner) => _scanner = scanner;
 
     /// <summary>
-    /// Starts a scan. Optional <c>categoryId</c> scans a single category;
-    /// omit it to scan every category that has folders. 202 on start,
-    /// 409 if a scan is already running.
+    /// Starts a scan. Optional <c>folderId</c> (a global scan-folder id) scans
+    /// that single folder; omit it to scan the whole folder list. Always 202 —
+    /// requests queue FIFO behind a running scan.
     /// </summary>
     [HttpPost]
-    public IActionResult Start([FromQuery] int? categoryId)
-        => _scanner.TryStart(categoryId)
+    public IActionResult Start([FromQuery] int? folderId)
+        => _scanner.TryStart(folderId)
             ? Accepted(_scanner.Current)
             : Conflict(_scanner.Current);
 

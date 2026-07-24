@@ -1,11 +1,10 @@
-using Microsoft.EntityFrameworkCore;
 using Y2KMusicServer.Server.Data;
 
 namespace Y2KMusicServer.Server.Network;
 
 /// <summary>
 /// On startup, re-authenticates the service's session to the servers behind any
-/// network (<c>\\server\share</c>) category folders, using the stored
+/// network (<c>\\server\share</c>) scan folders, using the stored
 /// credentials. WNet sessions do not survive a service restart, so without this
 /// a network-stored track could not be read by playback or the analysis pass
 /// until a browse or scan happened to re-establish the session. The scanner and
@@ -19,16 +18,16 @@ namespace Y2KMusicServer.Server.Network;
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public sealed class NetworkShareReconnectService : BackgroundService
 {
-    private readonly IDbContextFactory<Y2KDbContext> _dbf;
+    private readonly IConfiguration _cfg;
     private readonly NetworkShareConnector _connector;
     private readonly ILogger<NetworkShareReconnectService> _log;
 
     public NetworkShareReconnectService(
-        IDbContextFactory<Y2KDbContext> dbf,
+        IConfiguration cfg,
         NetworkShareConnector connector,
         ILogger<NetworkShareReconnectService> log)
     {
-        _dbf = dbf;
+        _cfg = cfg;
         _connector = connector;
         _log = log;
     }
@@ -42,8 +41,7 @@ public sealed class NetworkShareReconnectService : BackgroundService
         List<string> shareRoots;
         try
         {
-            await using var db = await _dbf.CreateDbContextAsync(stoppingToken);
-            var paths = await db.CategoryFolders.Select(f => f.Path).ToListAsync(stoppingToken);
+            var paths = ScanFolderStore.AllPaths(_cfg);
 
             // Dedupe to one connect per share root, so several folders on the same
             // share don't each pay a connection timeout when the host is offline.
@@ -56,7 +54,7 @@ public sealed class NetworkShareReconnectService : BackgroundService
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "Network reconnect: could not read category folders");
+            _log.LogWarning(ex, "Network reconnect: could not read the scan-folder list");
             return;
         }
 

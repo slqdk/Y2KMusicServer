@@ -18,8 +18,9 @@ interface NowPlaying {
 }
 interface StreamInfo { enabled: boolean; bitrate: number; listeners: number; showListenLive: boolean }
 interface SearchItem { id: number; title: string | null; artist: string | null; album: string | null; durationSec: number }
-interface CatItem { id: number; name: string; count: number }
-interface CatState { showSelector: boolean; selected: number[]; categories: CatItem[] }
+interface FilterCount { name: string; count: number }
+interface DecadeCount { decade: number; count: number } // 0 = unknown decade
+interface BrowseFilters { showSelector: boolean; genres: FilterCount[]; decades: DecadeCount[] }
 interface PlaylistRow { position: number; trackId: number; title: string | null; artist: string | null; durationSec: number; source: string | null }
 
 const THEMES: [string, string][] = [
@@ -69,7 +70,9 @@ export default function App() {
   const [theme, setTheme] = useState<string>(readTheme)
   const [np, setNp] = useState<NowPlaying | null>(null)
   const [stream, setStream] = useState<StreamInfo | null>(null)
-  const [cats, setCats] = useState<CatState | null>(null)
+  const [filters, setFilters] = useState<BrowseFilters | null>(null)
+  const [selGenres, setSelGenres] = useState<string[]>([])
+  const [selDecades, setSelDecades] = useState<number[]>([])
   const [playlist, setPlaylist] = useState<PlaylistRow[]>([])
   const [q, setQ] = useState('')
   const [results, setResults] = useState<SearchItem[]>([])
@@ -82,10 +85,6 @@ export default function App() {
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const debounce = useRef<number | undefined>(undefined)
-  const catTimer = useRef<number | undefined>(undefined)
-  const selectedRef = useRef<number[]>([])
-  const appliedKey = useRef<string | null>(null)
-  const catKey = (ids: number[]) => [...ids].sort((a, b) => a - b).join(',')
 
   useEffect(() => { try { localStorage.setItem('y2k-listener-theme', theme) } catch { /* ignore */ } }, [theme])
 
@@ -97,37 +96,34 @@ export default function App() {
 
   useEffect(() => {
     refresh()
-    j<CatState>('/api/categories').then(setCats).catch(() => {})
+    j<BrowseFilters>('/api/browse-filters').then(setFilters).catch(() => {})
     const id = setInterval(refresh, 3000)
     return () => clearInterval(id)
   }, [refresh])
 
   useEffect(() => { setArtOk(true) }, [np?.trackId])
 
-  // Mirror the live category selection into a ref the debounce timer can read,
-  // and seed the "last applied" baseline the first time categories load so an
-  // unchanged selection never re-applies.
-  useEffect(() => {
-    if (!cats) return
-    selectedRef.current = cats.selected
-    if (appliedKey.current === null) appliedKey.current = catKey(cats.selected)
-  }, [cats])
-
-  useEffect(() => () => window.clearTimeout(catTimer.current), [])
-
-  // Debounced search; also records the (settled) term in recent searches.
+  // Debounced search / browse: a text term, the genre/decade chips, or both.
+  // With chips set and no term, the filtered library is browsed. A settled
+  // text term is recorded in recent searches.
   useEffect(() => {
     window.clearTimeout(debounce.current)
     const term = q.trim()
-    if (!term) { setResults([]); setSelectedId(null); return }
+    const filtered = selGenres.length > 0 || selDecades.length > 0
+    if (!term && !filtered) { setResults([]); setSelectedId(null); return }
     debounce.current = window.setTimeout(() => {
-      j<{ items: SearchItem[] }>(`/api/search?q=${encodeURIComponent(term)}`)
-        .then(d => { setResults(d.items); pushRecent(term) })
+      const qs = new URLSearchParams()
+      if (term) qs.set('q', term)
+      if (selGenres.length > 0) qs.set('genre', selGenres.join(','))
+      if (selDecades.length > 0) qs.set('decade', selDecades.join(','))
+      qs.set('take', term ? '10' : '24')
+      j<{ items: SearchItem[] }>(`/api/search?${qs.toString()}`)
+        .then(d => { setResults(d.items); if (term) pushRecent(term) })
         .catch(() => setResults([]))
     }, 250)
     return () => window.clearTimeout(debounce.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q])
+  }, [q, selGenres, selDecades])
 
   // If the broadcast drops while we're listening, stop the player.
   useEffect(() => { if (stream && !stream.enabled && live) stopStream() // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -182,37 +178,12 @@ export default function App() {
     } catch { flash('Request failed. Try again.') }
   }
 
-  // Commit a category selection: the server sets the override, rebuilds the
-  // queue from those categories (or the schedule when empty), and crossfades to
-  // the first new track. Optimistic toast for immediate feedback.
-  const applyCats = useCallback(async (ids: number[]) => {
-    appliedKey.current = catKey(ids)
-    flash(ids.length ? 'Switching to your picks…' : 'Back to the schedule…')
-    try {
-      const r = await j<{ selected: number[] }>('/api/category-select', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ categoryIds: ids }),
-      })
-      setCats(c => (c ? { ...c, selected: r.selected } : c))
-      appliedKey.current = catKey(r.selected)
-    } catch { /* the change just didn't take; leave the chips as they are */ }
-  }, [])
-
-  // Pick/unpick a category: update the chips instantly, then apply 3s after the
-  // last touch — and only if the selection actually changed — so the listener
-  // can keep toggling before it commits and the music crossfades over.
-  const toggleCat = (id: number) => {
-    setCats(prev => {
-      if (!prev) return prev
-      const next = prev.selected.includes(id) ? prev.selected.filter(x => x !== id) : [...prev.selected, id]
-      selectedRef.current = next
-      window.clearTimeout(catTimer.current)
-      catTimer.current = window.setTimeout(() => {
-        if (catKey(selectedRef.current) !== appliedKey.current) applyCats(selectedRef.current)
-      }, 3000)
-      return { ...prev, selected: next }
-    })
-  }
+  // Toggle a browse chip (multi-select; both axes combine as AND).
+  const toggleGenre = (name: string) =>
+    setSelGenres(prev => prev.includes(name) ? prev.filter(g => g !== name) : [...prev, name])
+  const toggleDecade = (d: number) =>
+    setSelDecades(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d])
+  const decadeLabel = (d: number) => (d === 0 ? '?' : `${String(d).slice(2)}'s`)
 
   const stateLabel = np?.playing ? 'NOW PLAYING' : np?.trackId ? 'PAUSED' : 'OFF AIR'
 
@@ -292,18 +263,28 @@ export default function App() {
         </div>
       </div>
 
-      {/* ── Category band ────────────────────────────────────────────── */}
-      {cats?.showSelector && cats.categories.length > 0 && (
+      {/* ── Browse band: genre + decade filters (mirrors the admin) ──── */}
+      {filters?.showSelector && (filters.genres.length > 0 || filters.decades.length > 0) && (
         <div className="lz-catband">
-          <div className="lz-label">♫ Play by category</div>
+          <div className="lz-label">♫ Browse the music</div>
           <div className="lz-chips">
-            {cats.categories.map(c => (
-              <button key={c.id} className={`lz-chip${cats.selected.includes(c.id) ? ' is-on' : ''}`} onClick={() => toggleCat(c.id)}>
-                {c.name}<span className="lz-chip-count">{c.count}</span>
+            {filters.genres.map(g => (
+              <button key={g.name} className={`lz-chip${selGenres.includes(g.name) ? ' is-on' : ''}`} onClick={() => toggleGenre(g.name)}>
+                {g.name}<span className="lz-chip-count">{g.count}</span>
+              </button>
+            ))}
+            {filters.decades.length > 0 && <span className="lz-chipgap" aria-hidden="true" />}
+            {filters.decades.map(d => (
+              <button key={d.decade} className={`lz-chip${selDecades.includes(d.decade) ? ' is-on' : ''}`} onClick={() => toggleDecade(d.decade)}>
+                {decadeLabel(d.decade)}<span className="lz-chip-count">{d.count}</span>
               </button>
             ))}
           </div>
-          <div className="lz-cathint">{cats.selected.length === 0 ? 'Following the schedule.' : 'Auto DJ is drawing from your picks.'}</div>
+          <div className="lz-cathint">
+            {selGenres.length === 0 && selDecades.length === 0
+              ? 'Pick a genre or decade to browse, or just search.'
+              : 'Showing songs matching your picks — tap one to request it.'}
+          </div>
         </div>
       )}
 
@@ -328,8 +309,8 @@ export default function App() {
         <section className="lz-panel lz-results">
           <div className="lz-panel-head">Search results{results.length > 0 && <span style={{ fontWeight: 400, opacity: .8 }}>{results.length}</span>}</div>
           <div className="lz-panel-body">
-            {!q.trim()
-              ? <div className="lz-empty">Start typing to search…</div>
+            {!q.trim() && selGenres.length === 0 && selDecades.length === 0
+              ? <div className="lz-empty">Start typing to search, or pick a genre / decade above…</div>
               : results.length === 0
                 ? <div className="lz-empty">No matches.</div>
                 : <ul className="lz-results-list">

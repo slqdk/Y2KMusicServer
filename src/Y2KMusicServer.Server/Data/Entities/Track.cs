@@ -38,8 +38,12 @@ public sealed class Track
     /// </summary>
     public double? LufsIntegrated { get; set; }
 
-    public int? CategoryId { get; set; }
-    public Category? Category { get; set; }
+    /// <summary>
+    /// Operator-set genre bucket that overrides the genre-map resolution of the
+    /// raw tag <see cref="Genre"/>. Null = follow the map. The effective bucket
+    /// is computed at query time (GenreMapStore.EffectiveGenre), never stored.
+    /// </summary>
+    public string? GenreOverride { get; set; }
 
     /// <summary>Album-art path or URL. Null = read from file tags on demand.</summary>
     public string? AlbumArt { get; set; }
