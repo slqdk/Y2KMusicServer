@@ -118,6 +118,11 @@ public sealed class AudioEngine
         _log = log;
         _cfg = cfg;
 
+        // Operator switch for local (server-machine) sound. Persisted as JSON
+        // (audio-config.json, no-migrations rule); default true = the
+        // historical always-try-the-sound-card behaviour.
+        _localAudio = AudioConfigStore.Load(cfg).LocalAudioEnabled;
+
         var tick = new Thread(TickLoop)
         {
             IsBackground = true,
@@ -150,6 +155,86 @@ public sealed class AudioEngine
     private MMDeviceEnumerator? _mmEnum;
     private EndpointWatcher? _mmWatch;
     private int _rebuildQueued;
+
+    // Operator switch: decks try the sound card (true) or are forced to the
+    // silent pump (false). The stream tap is upstream of the output either way.
+    private volatile bool _localAudio = true;
+
+    /// <summary>Whether decks currently try the machine's sound card.</summary>
+    public bool LocalAudioEnabled => _localAudio;
+
+    /// <summary>
+    /// Turns local (server-machine) sound on or off, rebuilding every live
+    /// deck's output immediately via the same swap machinery the endpoint
+    /// watcher uses — play state and position are preserved, and /stream
+    /// listeners never notice. Persisting the flag is the caller's job
+    /// (the admin endpoint saves it to audio-config.json).
+    /// </summary>
+    public void SetLocalAudio(bool enabled)
+    {
+        if (_localAudio == enabled) return;
+        _localAudio = enabled;
+        _log.LogInformation("Local audio {State} by operator; rebuilding deck outputs.",
+            enabled ? "ENABLED" : "DISABLED");
+        try { RebuildDeckOutputs(); }
+        catch (Exception ex) { _log.LogWarning(ex, "Deck output rebuild after local-audio toggle failed"); }
+    }
+
+    /// <summary>
+    /// Diagnostic snapshot for the tray / admin: the local-audio flag, the
+    /// default render device as THIS process sees it (LocalSystem in a
+    /// session with no audio endpoint sees none — the usual reason for
+    /// silence), and what output each live deck actually got.
+    /// </summary>
+    public Y2KMusicServer.Shared.LocalAudioStatusDto GetLocalAudioStatus()
+    {
+        string? device = null;
+        int count = 0;
+        if (OperatingSystem.IsWindows())
+        {
+            try
+            {
+                // Fresh enumerator per call: cheap, and avoids COM-thread
+                // affinity questions around the long-lived watcher instance.
+                using var e = new MMDeviceEnumerator();
+                try { count = e.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active).Count; }
+                catch { }
+                try
+                {
+                    using var d = e.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                    device = d.FriendlyName;
+                }
+                catch { /* no default render device visible to this process */ }
+            }
+            catch { /* Core Audio unavailable */ }
+        }
+
+        var decks = new List<Y2KMusicServer.Shared.LocalAudioDeckDto>();
+        lock (_gate)
+        {
+            foreach (var deck in new[] { _deckA, _deckB, _prepared?.DeckB })
+            {
+                if (deck == null) continue;
+                string state = "?";
+                try { state = deck.Out.PlaybackState.ToString(); } catch { }
+                decks.Add(new Y2KMusicServer.Shared.LocalAudioDeckDto
+                {
+                    Deck = deck.Label,
+                    Output = deck.Out is SilentWavePlayer ? "silent" : "sound card",
+                    State = state,
+                    Track = string.IsNullOrEmpty(deck.Artist) ? deck.Title : $"{deck.Artist} – {deck.Title}"
+                });
+            }
+        }
+
+        return new Y2KMusicServer.Shared.LocalAudioStatusDto
+        {
+            Enabled = _localAudio,
+            DefaultDevice = device,
+            RenderDeviceCount = count,
+            Decks = decks
+        };
+    }
 
     /// <summary>Debounced: endpoint events arrive in bursts (and on COM
     /// threads), so coalesce them and rebuild ~600 ms later off-thread.</summary>
@@ -1326,11 +1411,17 @@ public sealed class AudioEngine
     /// </summary>
     private IWavePlayer CreateDeckOutput(string label)
     {
-        // Always TRY the sound card — the pre-flight default-device probe used
-        // here previously reported "no device" in some service contexts even
-        // when audio would have worked, forcing silence. Now the attempt itself
-        // decides: Init failure at the call site falls back to SilentWavePlayer,
-        // and the endpoint watcher retries whenever devices change/appear.
+        // Operator switch first: with local audio off, decks always get the
+        // silent pump (the stream tap sits upstream, so /stream is unaffected).
+        if (!_localAudio)
+            return new SilentWavePlayer();
+
+        // Otherwise always TRY the sound card — the pre-flight default-device
+        // probe used here previously reported "no device" in some service
+        // contexts even when audio would have worked, forcing silence. Now the
+        // attempt itself decides: Init failure at the call site falls back to
+        // SilentWavePlayer, and the endpoint watcher retries whenever devices
+        // change/appear.
         return new WaveOutEvent { DesiredLatency = 60, NumberOfBuffers = 3 };
     }
 

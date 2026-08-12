@@ -83,6 +83,14 @@ public static class DataPaths
         => Path.Combine(DataDir(cfg), "web-config.json");
 
     /// <summary>
+    /// Audio-output settings file, at <c>&lt;DataPath&gt;\audio-config.json</c> —
+    /// a sibling of <c>web-config.json</c>. Holds the local-audio (server
+    /// speakers) on/off switch. JSON, not the database (no-migrations rule).
+    /// </summary>
+    public static string AudioConfigPath(IConfiguration cfg)
+        => Path.Combine(DataDir(cfg), "audio-config.json");
+
+    /// <summary>
     /// Optional-integration settings file, at
     /// <c>&lt;DataPath&gt;\integrations.json</c> — a sibling of
     /// <c>web-config.json</c>. Holds the third-party integration flags (currently

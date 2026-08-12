@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.ServiceProcess;
@@ -61,8 +62,11 @@ public sealed class TrayApp : IDisposable
     private WinForms.ToolStripMenuItem? _stopItem;
     private WinForms.ToolStripMenuItem? _restartItem;
     private WinForms.ToolStripMenuItem? _updateItem;
+    private WinForms.ToolStripMenuItem? _localAudioItem;
+    private WinForms.ToolStripMenuItem? _localAudioInfoItem;
 
     private ServiceStatusDto? _lastStatus;
+    private LocalAudioStatusDto? _lastAudio;
     private bool _running;
 
     public void Initialise()
@@ -152,6 +156,15 @@ public sealed class TrayApp : IDisposable
 
         menu.Items.Add(new WinForms.ToolStripSeparator());
 
+        _localAudioItem = new WinForms.ToolStripMenuItem("Play audio on this computer") { Enabled = false };
+        _localAudioItem.Click += async (_, _) => await ToggleLocalAudioAsync();
+        menu.Items.Add(_localAudioItem);
+
+        _localAudioInfoItem = new WinForms.ToolStripMenuItem("Audio: (unknown)") { Enabled = false };
+        menu.Items.Add(_localAudioInfoItem);
+
+        menu.Items.Add(new WinForms.ToolStripSeparator());
+
         _updateItem = new WinForms.ToolStripMenuItem("Check for updates");
         _updateItem.Click += async (_, _) => await CheckForUpdatesAsync(interactive: true);
         menu.Items.Add(_updateItem);
@@ -178,6 +191,21 @@ public sealed class TrayApp : IDisposable
             _lastStatus = null;
             _running = false;
         }
+
+        if (_running)
+        {
+            try
+            {
+                _lastAudio = await _http.GetFromJsonAsync<LocalAudioStatusDto>(
+                    BaseUrl + "/api/admin/audio/local", _cts.Token);
+            }
+            catch { _lastAudio = null; }   // older service without the endpoint
+        }
+        else
+        {
+            _lastAudio = null;
+        }
+
         UpdateUi();
     }
 
@@ -223,6 +251,55 @@ public sealed class TrayApp : IDisposable
                 ? $"Install update v{_lastStatus.Update.LatestVersion}…"
                 : "Check for updates";
         }
+
+        if (_localAudioItem is not null)
+        {
+            _localAudioItem.Enabled = _lastAudio is not null;
+            _localAudioItem.Checked = _lastAudio?.Enabled == true;
+        }
+
+        if (_localAudioInfoItem is not null)
+        {
+            if (_lastAudio is null)
+            {
+                _localAudioInfoItem.Text = _running
+                    ? "Audio: (service has no audio endpoint yet)"
+                    : "Audio: (unknown)";
+            }
+            else
+            {
+                var dev = _lastAudio.DefaultDevice
+                          ?? $"no render device visible ({_lastAudio.RenderDeviceCount} active)";
+                var decks = _lastAudio.Decks.Count == 0
+                    ? "no decks live"
+                    : string.Join(", ", _lastAudio.Decks.Select(d => $"{d.Deck}: {d.Output}"));
+                _localAudioInfoItem.Text = Truncate($"Audio: {decks}  •  {dev}", 120);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Flips the server-side local-audio flag. The service persists it
+    /// (audio-config.json) and rebuilds the live decks' outputs in place —
+    /// no restart, no effect on the /stream broadcast.
+    /// </summary>
+    private async Task ToggleLocalAudioAsync()
+    {
+        if (_lastAudio is null) return;
+        var target = !_lastAudio.Enabled;
+        try
+        {
+            var resp = await _http.PostAsync(
+                BaseUrl + $"/api/admin/audio/local?enabled={(target ? "true" : "false")}", null, _cts.Token);
+            resp.EnsureSuccessStatusCode();
+            _lastAudio = await resp.Content.ReadFromJsonAsync<LocalAudioStatusDto>(cancellationToken: _cts.Token);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("Could not toggle local audio: " + ex.Message, "Y2K",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        UpdateUi();
     }
 
     private static string Truncate(string s, int max) =>
