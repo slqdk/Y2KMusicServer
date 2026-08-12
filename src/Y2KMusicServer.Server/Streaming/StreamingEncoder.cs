@@ -287,6 +287,13 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
         var mixed = new float[samplesPerChunk];
         var pcm16 = new byte[samplesPerChunk * 2];
 
+        // Black-box capture of the post-mix (post-SoftClip) signal — what every
+        // listener actually receives, PCM-quantisation aside. Dumped alongside
+        // the deck rings so a heard glitch can be attributed: present in a deck
+        // ring = upstream (decode/iso/volume); only in the mix = summing/clip.
+        var mixRing = new CaptureRing(10, SampleRate, Channels);
+        var mixRingReg = AudioBlackBox.Register(() => "mix", mixRing);
+
         // 1 ms timer resolution so the WaitOne sleeps are accurate; without it a
         // default Windows system can oversleep 30+ ms, skipping cycles → silence.
         timeBeginPeriod(1);
@@ -450,6 +457,8 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
                     if (limit < n) Array.Clear(mixed, limit, n - limit);
                 }
 
+                mixRing.Write(mixed, 0, n);   // black box: what listeners hear
+
                 // ── Float → PCM16 LE ──────────────────────────────────────────
                 for (int i = 0; i < n; i++)
                 {
@@ -552,6 +561,7 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
         }
         finally
         {
+            mixRingReg.Dispose();
             timeEndPeriod(1);
             TearDownLame();
         }

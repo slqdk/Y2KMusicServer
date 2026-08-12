@@ -35,4 +35,14 @@ public sealed class AdminAudioController : ControllerBase
         _engine.SetLocalAudio(enabled);
         return _engine.GetLocalAudioStatus();
     }
+
+    /// <summary>
+    /// Dumps the audio black box: every live capture ring (deck taps + the
+    /// post-mix ring) is written as a float WAV of its last ~10 s to the data
+    /// folder's <c>diagnostics</c> directory. Used by the tray's dump item;
+    /// also fired automatically on a detected anomaly when DebugLogging is on.
+    /// </summary>
+    [HttpPost("blackbox/dump")]
+    public BlackBoxDumpDto DumpBlackBox()
+        => new() { Files = AudioBlackBox.DumpAll(DataPaths.EnsureDiagnosticsDir(_cfg)) };
 }

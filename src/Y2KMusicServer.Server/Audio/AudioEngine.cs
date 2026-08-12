@@ -69,6 +69,11 @@ public sealed class AudioEngine
     // constant no matter what the source files are.
     private const int StreamSampleRate = 44100;
 
+    // Rolling black-box capture per deck tap (and the encoder's post-mix ring):
+    // enough to contain a whole transition around a heard glitch, small enough
+    // (~3.5 MB per ring) to keep always-on.
+    private const int BlackBoxSeconds = 10;
+
     private readonly IDbContextFactory<Y2KDbContext> _dbf;
     private readonly ILogger<AudioEngine> _log;
     private readonly IConfiguration _cfg;
@@ -178,6 +183,52 @@ public sealed class AudioEngine
             enabled ? "ENABLED" : "DISABLED");
         try { RebuildDeckOutputs(); }
         catch (Exception ex) { _log.LogWarning(ex, "Deck output rebuild after local-audio toggle failed"); }
+    }
+
+    /// <summary>
+    /// Anomalous ~1 s health window from a deck's HealthTap. Runs on that
+    /// deck's output pump thread, so it must stay quick and must NOT take
+    /// <c>_gate</c> — SwapOutput_Locked (held under the gate) waits for the
+    /// pump to leave its callback, so taking the gate here can deadlock.
+    /// Lock-free snapshot reads are fine for diagnostics.
+    /// </summary>
+    private void OnHealthWindow(HealthTap tap, HealthWindow win)
+    {
+        var a = _deckA; var b = _deckB; var p = _prepared?.DeckB;
+        Deck? deck = (a?.Health == tap) ? a : (b?.Health == tap) ? b : (p?.Health == tap) ? p : null;
+
+        double pos = -1;
+        try { if (deck != null) pos = deck.Reader.CurrentTime.TotalSeconds; } catch { }
+
+        string ctx = _crossfading ? (_activePlan != null ? "mix plan" : "crossfade")
+                   : _prepared != null ? "armed" : "steady";
+
+        _log.LogWarning(
+            "Audio health {Name}: nonFinite={NonFinite} clicks={Clicks} maxDelta={MaxDelta:0.00} " +
+            "zeroRun={Zero:0}ms slowReads={Slow} maxRead={MaxRead:0.0}ms shortfalls={Short} peak={Peak:0.00} " +
+            "| {Track} @ {Pos:0.0}s vol={Vol:0.00} iso={Iso} [{Ctx}]",
+            tap.Name, win.NonFinite, win.Clicks, win.MaxDelta, win.MaxZeroRunMs, win.SlowReads,
+            win.MaxReadMs, win.Shortfalls, win.Peak,
+            deck != null ? TrackLabel(deck.Title, deck.Artist) : "?", pos,
+            deck?.Vol.Volume ?? -1f, deck?.Iso.Mode.ToString() ?? "?", ctx);
+
+        // Auto-dump the black box when verbose diagnosis is on (Settings.
+        // DebugLogging flips the level switch, which this reflects). Cooldown
+        // lives in AudioBlackBox; the file IO runs off the pump thread.
+        if (_log.IsEnabled(LogLevel.Debug))
+        {
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    var files = AudioBlackBox.TryAutoDump(DataPaths.EnsureDiagnosticsDir(_cfg));
+                    if (files is { Count: > 0 })
+                        _log.LogWarning("Black box auto-dumped {Count} file(s) after anomaly on {Name}: {First} …",
+                            files.Count, tap.Name, Path.GetFileName(files[0]));
+                }
+                catch (Exception ex) { _log.LogDebug(ex, "Black box auto-dump failed"); }
+            });
+        }
     }
 
     /// <summary>
@@ -1235,6 +1286,7 @@ public sealed class AudioEngine
         if (_deckA != null)
         {
             _deckA.Label = "A";
+            _deckA.Health.Name = "deckA";   // logs + black-box dumps follow the promotion
             // Promote to the incoming track's real target — NOT _deckBTargetVol,
             // which SmartBeat sets to 0 while holding B silent.
             _deckA.Vol.Volume = _deckA.BaseVolume;
@@ -1447,7 +1499,8 @@ public sealed class AudioEngine
         var meter = new MeteringSampleProvider(fft, 1024);  // content (pre-fader): VU
         var iso = new IsoFilter(meter);                     // EQ isolator (Bass/Vocal); bypass by default
         var vol = new VolumeSampleProvider(iso) { Volume = volume }; // output level + crossfade ramp
-        var tap = new DeckTap(vol);                         // post-fader capture for the live stream
+        var health = new HealthTap(vol, "deck" + label, BlackBoxSeconds, OnHealthWindow); // diagnostics: sees exactly what output + stream get
+        var tap = new DeckTap(health);                      // post-fader capture for the live stream
 
         var wp = new SampleToWaveProvider(tap);
         IWavePlayer outDev = CreateDeckOutput(label);
@@ -1473,6 +1526,7 @@ public sealed class AudioEngine
             Iso = iso,
             Fft = fft,
             Tap = tap,
+            Health = health,
             Label = label,
             BaseVolume = volume,
             TrackId = track.Id,
@@ -1485,6 +1539,11 @@ public sealed class AudioEngine
             DurationSec = reader.TotalTime.TotalSeconds,
             LeadOutSec = track.LeadOutSec
         };
+
+        // Black-box capture: the ring dumps under the deck's CURRENT role
+        // (label follows the B→A promotion), so a dump taken during a mix
+        // names the files correctly. Unregistered by Deck.Dispose.
+        deck.BlackBoxReg = AudioBlackBox.Register(() => "deck" + deck.Label, health.Ring);
 
         if (seekToSec > 0.1)
         {
@@ -1679,6 +1738,11 @@ public sealed class AudioEngine
         public required IsoFilter Iso { get; init; }
         public required FftAnalyser Fft { get; init; }
         public required DeckTap Tap { get; init; }
+        public required HealthTap Health { get; init; }
+
+        /// <summary>Black-box registration token; disposing removes this
+        /// deck's capture ring from the dump set.</summary>
+        public IDisposable? BlackBoxReg { get; set; }
 
         public string Label { get; set; } = "A";
         public float BaseVolume { get; set; } = 1f;
@@ -1708,6 +1772,7 @@ public sealed class AudioEngine
         public void Dispose()
         {
             StopRequested = true;
+            try { BlackBoxReg?.Dispose(); } catch { }
             try { if (MeterHandler != null) Meter.StreamVolume -= MeterHandler; } catch { }
             try { if (StoppedHandler != null) Out.PlaybackStopped -= StoppedHandler; } catch { }
             try { Out.Stop(); } catch { }

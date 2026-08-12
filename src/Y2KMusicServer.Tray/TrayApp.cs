@@ -64,6 +64,7 @@ public sealed class TrayApp : IDisposable
     private WinForms.ToolStripMenuItem? _updateItem;
     private WinForms.ToolStripMenuItem? _localAudioItem;
     private WinForms.ToolStripMenuItem? _localAudioInfoItem;
+    private WinForms.ToolStripMenuItem? _blackBoxItem;
 
     private ServiceStatusDto? _lastStatus;
     private LocalAudioStatusDto? _lastAudio;
@@ -163,6 +164,10 @@ public sealed class TrayApp : IDisposable
         _localAudioInfoItem = new WinForms.ToolStripMenuItem("Audio: (unknown)") { Enabled = false };
         menu.Items.Add(_localAudioInfoItem);
 
+        _blackBoxItem = new WinForms.ToolStripMenuItem("Dump audio black box (last 10 s)") { Enabled = false };
+        _blackBoxItem.Click += async (_, _) => await DumpBlackBoxAsync();
+        menu.Items.Add(_blackBoxItem);
+
         menu.Items.Add(new WinForms.ToolStripSeparator());
 
         _updateItem = new WinForms.ToolStripMenuItem("Check for updates");
@@ -258,6 +263,9 @@ public sealed class TrayApp : IDisposable
             _localAudioItem.Checked = _lastAudio?.Enabled == true;
         }
 
+        if (_blackBoxItem is not null)
+            _blackBoxItem.Enabled = _running;
+
         if (_localAudioInfoItem is not null)
         {
             if (_lastAudio is null)
@@ -300,6 +308,38 @@ public sealed class TrayApp : IDisposable
                 MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         UpdateUi();
+    }
+
+    /// <summary>
+    /// Asks the service to dump its audio black box — the last ~10 s of each
+    /// live deck tap and the post-mix signal — as WAV files into the data
+    /// folder's diagnostics directory. Fire it right after hearing a glitch.
+    /// </summary>
+    private async Task DumpBlackBoxAsync()
+    {
+        try
+        {
+            var resp = await _http.PostAsync(BaseUrl + "/api/admin/audio/blackbox/dump", null, _cts.Token);
+            resp.EnsureSuccessStatusCode();
+            var dump = await resp.Content.ReadFromJsonAsync<BlackBoxDumpDto>(cancellationToken: _cts.Token);
+
+            if (dump is null || dump.Files.Count == 0)
+            {
+                MessageBox.Show("Black box is empty — no audio has flowed yet.", "Y2K",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var names = string.Join("\n", dump.Files.Select(Path.GetFileName));
+            var dir = Path.GetDirectoryName(dump.Files[0]);
+            MessageBox.Show($"Wrote {dump.Files.Count} capture(s) to\n{dir}\n\n{names}", "Y2K",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("Black-box dump failed: " + ex.Message, "Y2K",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private static string Truncate(string s, int max) =>

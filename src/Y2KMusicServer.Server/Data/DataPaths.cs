@@ -83,6 +83,22 @@ public static class DataPaths
         => Path.Combine(DataDir(cfg), "web-config.json");
 
     /// <summary>
+    /// Audio black-box dumps, under <c>&lt;DataPath&gt;\diagnostics</c> — WAV
+    /// captures of the deck taps / post-mix ring written on demand or on a
+    /// detected audio anomaly. Pure diagnostics output, safe to delete.
+    /// </summary>
+    public static string DiagnosticsDir(IConfiguration cfg)
+        => Path.Combine(DataDir(cfg), "diagnostics");
+
+    /// <summary>Ensures the diagnostics directory exists and returns it.</summary>
+    public static string EnsureDiagnosticsDir(IConfiguration cfg)
+    {
+        var dir = DiagnosticsDir(cfg);
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    /// <summary>
     /// Audio-output settings file, at <c>&lt;DataPath&gt;\audio-config.json</c> —
     /// a sibling of <c>web-config.json</c>. Holds the local-audio (server
     /// speakers) on/off switch. JSON, not the database (no-migrations rule).
