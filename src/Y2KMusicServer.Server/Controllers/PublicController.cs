@@ -168,6 +168,21 @@ public sealed class PublicController : ControllerBase
             .OrderBy(t => t.Artist).ThenBy(t => t.Title)
             .ToListAsync(ct);
 
+        // ── Fallback: nothing matched the literal phrase ─────────────────
+        // "metallica the black" finds nothing (the album is titled just
+        // "Metallica"), so loosen: first every meaningful word anywhere on the
+        // row, then the single word with the broadest hit (usually the artist
+        // or album) — and tell the page what was actually searched so it can
+        // say so. Only for plain text searches (no legacy facets).
+        string? fallbackQuery = null;
+        if (hasText && rows.Count == 0 && genres.Count == 0 && decades.Count == 0)
+        {
+            var all = await db.Tracks.AsNoTracking()
+                .OrderBy(t => t.Artist).ThenBy(t => t.Title)
+                .ToListAsync(ct);
+            (rows, fallbackQuery) = FallbackSearch(all, q!.Trim());
+        }
+
         var map = GenreMapStore.Load(_cfg);
         var deduped = PreferFlac(rows
             .Where(t => genres.Count == 0 || genres.Contains(GenreMapStore.EffectiveGenre(map, t)))
@@ -195,7 +210,44 @@ public sealed class PublicController : ControllerBase
             .Take(12)
             .ToList();
 
-        return new { items = ToItems(deduped.Take(take)), albums };
+        return new { items = ToItems(deduped.Take(take)), albums, fallbackQuery };
+    }
+
+    private static readonly HashSet<string> StopTokens = new(StringComparer.OrdinalIgnoreCase)
+        { "the", "a", "an", "of", "and", "in", "on", "to", "og", "med", "feat", "ft" };
+
+    /// <summary>
+    /// Loose matching for a phrase that found nothing. Stage 1: every
+    /// meaningful (non-stopword) token appears somewhere on the row — any
+    /// field. Stage 2: the single token with the most hits, longer tokens
+    /// winning ties, which surfaces the artist or album the listener probably
+    /// meant. Returns the matched rows plus the query actually used, or an
+    /// empty set when even single tokens hit nothing.
+    /// </summary>
+    private static (List<Track> rows, string? usedQuery) FallbackSearch(List<Track> all, string term)
+    {
+        static bool Hit(Track t, string tok) =>
+            (t.Title ?? "").Contains(tok, StringComparison.OrdinalIgnoreCase) ||
+            (t.Artist ?? "").Contains(tok, StringComparison.OrdinalIgnoreCase) ||
+            (t.Album ?? "").Contains(tok, StringComparison.OrdinalIgnoreCase);
+
+        var tokens = term.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var core = tokens.Where(t => !StopTokens.Contains(t)).ToList();
+        if (core.Count == 0) core = tokens;
+
+        if (core.Count > 1)
+        {
+            var hit = all.Where(t => core.All(tok => Hit(t, tok))).ToList();
+            if (hit.Count > 0) return (hit, string.Join(' ', core));
+        }
+
+        var best = core
+            .Select(tok => (tok, rows: all.Where(t => Hit(t, tok)).ToList()))
+            .Where(x => x.rows.Count > 0)
+            .OrderByDescending(x => x.rows.Count).ThenByDescending(x => x.tok.Length)
+            .FirstOrDefault();
+        return best.rows is { Count: > 0 } ? (best.rows, best.tok) : (new List<Track>(), null);
     }
 
     /// <summary>

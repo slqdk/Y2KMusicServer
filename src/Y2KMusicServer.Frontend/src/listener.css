@@ -44,16 +44,26 @@
 .lz ::-webkit-scrollbar { width: 12px; height: 12px; }
 .lz ::-webkit-scrollbar-thumb { background: var(--lz-scroll, rgba(128,128,128,.45)); border-radius: 6px; }
 
-/* ── Top bar (Listen Live · now playing · theme · Next) ──────────────── */
-.lz-top {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 10px 16px;
+/* ── Fixed bottom bar: now playing + the next two queued songs ───────── */
+.lz-nowbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  display: flex; align-items: center; gap: 24px;
+  padding: 10px 18px;
   background: var(--lz-bar-bg, var(--lz-panel));
-  border-bottom: 1px solid var(--lz-line);
+  border-top: 1px solid var(--lz-line);
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, .18);
 }
-.lz-top-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.lz-nowbar .lz-np { flex: 1 1 55%; }
+.lz-nextup { flex: 1 1 45%; min-width: 0; }
+.lz-nextup .lz-field-label { margin: 0 0 4px; }
+.lz-nextup-row {
+  display: flex; align-items: baseline; gap: 8px; min-width: 0;
+  font-size: .84rem; padding: 1px 0;
+}
+.lz-nextup-title { color: var(--lz-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lz-nextup-artist { color: var(--lz-muted); font-size: .78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lz-nextup-dur { margin-left: auto; color: var(--lz-faint); font-size: .76rem; font-variant-numeric: tabular-nums; }
+.lz-nextup-empty { color: var(--lz-faint); font-size: .82rem; }
 
 .lz-np { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
 .lz-np-art {
@@ -107,10 +117,11 @@
   padding: 4px 6px;
 }
 
-/* ── Category band ───────────────────────────────────────────────────── */
-.lz-catband { padding: 10px 16px 12px; border-bottom: 1px solid var(--lz-line); }
-.lz-label { font-size: .66rem; letter-spacing: .14em; font-weight: 700; color: var(--lz-faint); margin-bottom: 8px; text-transform: uppercase; }
+/* ── Playlist chips (sidebar) ────────────────────────────────────────── */
 .lz-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.lz-chips-side { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 6px; }
+.lz-chips-side .lz-chip { width: 100%; }
+.lz-chip-name { flex: 1; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lz-chip {
   display: inline-flex; align-items: center; gap: 7px;
   background: var(--lz-chip-bg); color: var(--lz-chip-fg);
@@ -121,7 +132,6 @@
 }
 .lz-chip:hover { background: var(--lz-chip-bg-hover, var(--lz-chip-bg)); }
 .lz-chip::before { content: "◇"; font-size: .7em; opacity: .6; }
-.lz-chipgap { width: 10px; border-left: 1px solid var(--lz-line); margin: 2px 2px; align-self: stretch; }
 .lz-chip.is-on { background: var(--lz-green); color: var(--lz-green-fg); border-color: var(--lz-green-bd, var(--lz-green)); font-weight: 600; }
 .lz-chip.is-on::before { content: "◆"; opacity: 1; }
 .lz-chip-count {
@@ -129,15 +139,32 @@
   background: var(--lz-count-bg); color: var(--lz-count-fg);
   border-radius: 999px; padding: 1px 7px; min-width: 20px; text-align: center;
 }
-.lz-cathint { font-size: .76rem; color: var(--lz-faint); margin-top: 8px; }
 
-/* ── Work area: side · results · playlist ────────────────────────────── */
-.lz-work {
+/* ── Main area: sidebar + centered results, clearing the fixed bar ───── */
+.lz-main {
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr) minmax(0, 1.15fr);
-  gap: 14px;
-  padding: 14px 16px 20px;
+  grid-template-columns: 248px minmax(0, 960px);
+  justify-content: center;
+  gap: 16px;
+  padding: 16px 16px 120px;
   align-items: start;
+}
+.lz-side { position: sticky; top: 12px; }
+.lz-kbps { font-size: .66rem; color: var(--lz-faint); }
+.lz-skip { margin-top: 6px; }
+
+/* Request button on the song itself */
+.lz-req-btn { padding: 3px 10px; font-size: .74rem; }
+.lz-tile-foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 4px; }
+.lz-result .lz-req-btn { margin-left: 10px; }
+
+/* Fallback-suggestion notice */
+.lz-fallback {
+  font-size: .82rem; color: var(--lz-muted);
+  padding: 8px 10px; margin: 2px 0 6px;
+  background: var(--lz-rowhover);
+  border: 1px solid var(--lz-line-soft, var(--lz-line));
+  border-radius: var(--lz-radius-sm, 6px);
 }
 
 .lz-side { display: flex; flex-direction: column; gap: 6px; }
@@ -463,51 +490,34 @@
    is a separate follow-up.
    ===================================================================== */
 @media (max-width: 980px) {
-  .lz-work { grid-template-columns: 200px minmax(0, 1fr); }
-  .lz-playlist { grid-column: 1 / -1; }
+  .lz-main { grid-template-columns: 210px minmax(0, 1fr); justify-content: stretch; }
 }
 @media (max-width: 700px) {
-  .lz-work { grid-template-columns: 1fr; }
-  .lz-side, .lz-results, .lz-playlist { grid-column: auto; }
+  .lz-main { grid-template-columns: 1fr; }
+  .lz-side { position: static; }
   .lz-panel { max-height: none; }
+  .lz-nowbar { flex-wrap: wrap; gap: 8px 24px; }
+  .lz-nowbar .lz-np, .lz-nextup { flex: 1 1 100%; }
+  .lz-main { padding-bottom: 190px; }
 }
 
 /* ── Phones ──────────────────────────────────────────────────────────────
-   The tablet top bar packs Listen Live · now-playing · theme · Next onto one
-   row; on a phone that collapses the title to nothing and the controls crowd
-   over it. Here the now-playing block takes its own full row and the controls
-   drop to the row beneath it. Panels also switch from nested scroll panes to
-   growing with their content, so the page scrolls once.
+   Single column, touch-sized controls, one page scroll; the fixed now-bar
+   wraps to two rows (handled at 700px above).
    ===================================================================== */
 @media (max-width: 640px) {
-  .lz-top { flex-wrap: wrap; gap: 10px 12px; padding: 12px 14px; }
-  .lz-np { flex: 1 1 100%; align-items: flex-start; gap: 12px; }
-  .lz-np-body { flex: 1; min-width: 0; }
-  .lz-np-art { width: 56px; height: 56px; }
-  .lz-np-state { white-space: nowrap; }
-  .lz-np-title { font-size: 1.1rem; white-space: normal; }
-  .lz-np-artist { white-space: normal; }
-  .lz-live-wrap { order: 2; }
-  .lz-top-right { order: 3; margin-left: auto; }
-
-  /* Touch-sized controls. */
   .lz-btn { min-height: 40px; }
   .lz-theme { min-height: 40px; font-size: 16px; padding: 6px 8px; }
   .lz-chip { min-height: 38px; padding: 8px 12px; }
 
-  /* One page scroll instead of two nested scroll panes on a small screen. */
-  .lz-work { padding: 12px 12px 24px; gap: 12px; }
+  .lz-main { padding: 12px 12px 200px; gap: 12px; }
   .lz-panel { min-height: auto; max-height: none; }
   .lz-panel-body { overflow: visible; }
   .lz-empty { min-height: 120px; }
 
-  /* 16px inputs so mobile browsers don't zoom in on focus. */
   .lz-input { font-size: 16px; }
   .lz-result { padding: 10px 12px; }
 
-  /* Theme + recent live in the foot on phones only. */
-  .lz-theme-top { display: none; }
-  .lz-recent-desktop { display: none; }
-  .lz-foot { display: block; padding: 8px 12px 24px; border-top: 1px solid var(--lz-line); }
-  .lz-foot .lz-theme { width: 100%; margin-top: 8px; }
+  .lz-np-art { width: 48px; height: 48px; }
+  .lz-np-title { font-size: 1rem; }
 }

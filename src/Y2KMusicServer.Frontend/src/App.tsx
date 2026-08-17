@@ -21,7 +21,7 @@ interface SearchItem { id: number; title: string | null; artist: string | null; 
 interface PublicPlaylist { id: number; name: string; count: number }
 interface PlaylistsInfo { showSelector: boolean; playlists: PublicPlaylist[] }
 interface AlbumHit { album: string; artist: string | null; trackId: number; count: number }
-interface SearchResp { items: SearchItem[]; albums?: AlbumHit[] }
+interface SearchResp { items: SearchItem[]; albums?: AlbumHit[]; fallbackQuery?: string | null }
 interface PlaylistRow { position: number; trackId: number; title: string | null; artist: string | null; durationSec: number; source: string | null }
 
 const THEMES: [string, string][] = [
@@ -89,7 +89,7 @@ export default function App() {
   const [playlist, setPlaylist] = useState<PlaylistRow[]>([])
   const [q, setQ] = useState('')
   const [results, setResults] = useState<SearchItem[]>([])
-  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [fallbackQ, setFallbackQ] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [recent, setRecent] = useState<string[]>(readRecent)
   const [toast, setToast] = useState<string | null>(null)
@@ -123,7 +123,7 @@ export default function App() {
   useEffect(() => {
     window.clearTimeout(debounce.current)
     const term = q.trim()
-    if (!albumView && !term && selPl == null) { setResults([]); setAlbums([]); setSelectedId(null); return }
+    if (!albumView && !term && selPl == null) { setResults([]); setAlbums([]); setFallbackQ(null); return }
     debounce.current = window.setTimeout(() => {
       const qs = new URLSearchParams()
       if (albumView) qs.set('albumName', albumView.album)
@@ -136,10 +136,11 @@ export default function App() {
         .then(d => {
           setResults(d.items)
           setAlbums(albumView ? [] : (d.albums ?? []))
+          setFallbackQ(albumView ? null : (d.fallbackQuery ?? null))
           setArtFail(new Set())
           if (term && !albumView) pushRecent(term)
         })
-        .catch(() => { setResults([]); setAlbums([]) })
+        .catch(() => { setResults([]); setAlbums([]); setFallbackQ(null) })
     }, 250)
     return () => window.clearTimeout(debounce.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -175,13 +176,12 @@ export default function App() {
     catch { flash('Skip is disabled right now.') }
   }
 
-  const selected = useMemo(() => results.find(r => r.id === selectedId) ?? null, [results, selectedId])
-  const requestSelected = async () => {
-    if (!selected) return
+  // Per-song request — fired from the Request button on the tile / row itself.
+  const requestTrack = async (t: SearchItem) => {
     try {
       const r = await fetch('/api/request', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trackId: selected.id, requesterName: name.trim() || null, deviceId: DEVICE_ID })
+        body: JSON.stringify({ trackId: t.id, requesterName: name.trim() || null, deviceId: DEVICE_ID })
       })
       if (r.status === 429) {
         const d = await r.json().catch(() => null)
@@ -192,9 +192,8 @@ export default function App() {
       if (!r.ok) { flash('Request failed. Try again.'); return }
       const d = await r.json().catch(() => null)
       flash(d?.accepted
-        ? `Added “${selected.title ?? 'track'}” to the queue!`
-        : `Requested “${selected.title ?? 'track'}” — the DJ will see it.`)
-      setSelectedId(null)
+        ? `Added “${t.title ?? 'track'}” to the queue!`
+        : `Requested “${t.title ?? 'track'}” — the DJ will see it.`)
     } catch { flash('Request failed. Try again.') }
   }
 
@@ -202,8 +201,8 @@ export default function App() {
   // album replaces the results; Back returns to whatever search/browse was
   // active. Typing again also leaves the album.
   const togglePlaylist = (id: number) => { setAlbumView(null); setSelPl(prev => prev === id ? null : id) }
-  const openAlbum = (a: AlbumHit) => { setAlbumView(a); setSelectedId(null) }
-  const backToSearch = () => { setAlbumView(null); setSelectedId(null) }
+  const openAlbum = (a: AlbumHit) => setAlbumView(a)
+  const backToSearch = () => setAlbumView(null)
   const onQueryChange = (v: string) => { setAlbumView(null); setQ(v) }
 
   const stateLabel = np?.playing ? 'NOW PLAYING' : np?.trackId ? 'PAUSED' : 'OFF AIR'
@@ -219,6 +218,12 @@ export default function App() {
     }
     return playlist
   }, [playlist, npId, np])
+
+  // The fixed bottom bar shows what's on air plus the next two queued songs.
+  const nextTwo = useMemo(() => {
+    const idx = npId != null ? plRows.findIndex(p => p.trackId === npId) : -1
+    return (idx >= 0 ? plRows.slice(idx + 1) : plRows).slice(0, 2)
+  }, [plRows, npId])
 
   // The theme picker and the recent-searches list each render in two spots; CSS
   // shows one per breakpoint (top bar / side on desktop, the foot on phones).
@@ -238,89 +243,56 @@ export default function App() {
 
   return (
     <div className={`lz lz-${theme}`}>
-      {/* ── Top bar ──────────────────────────────────────────────────── */}
-      <div className="lz-top">
-        {stream?.showListenLive && (
-          <div className="lz-live-wrap" style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
-            <button
-              className={`lz-btn${live ? ' is-live' : ''}`}
-              onClick={toggleLive}
-              disabled={!stream?.enabled}
-              title={stream?.enabled ? 'Listen to the live stream' : 'The stream is off air'}
-            >
-              {!stream?.enabled ? 'Off air' : live ? '● LIVE' : '▶ Listen Live'}
-            </button>
-            {stream?.enabled && (
-              <span style={{ fontSize: '.66rem', color: 'var(--lz-faint)' }}>
-                {stream.bitrate} kbps{live ? ` · ${stream.listeners} listening` : ''}
-              </span>
-            )}
-          </div>
-        )}
+      {/* ── Main area: left sidebar + centered results ─────────────────── */}
+      <div className="lz-main">
 
-        <div className="lz-np">
-          {np?.trackId && artOk
-            ? <img className="lz-np-art" src={`/api/albumart?trackId=${np.trackId}`} alt="" onError={() => setArtOk(false)} />
-            : <div className="lz-np-art lz-np-art-empty">♪</div>}
-          <div className="lz-np-body">
-            <div className="lz-np-state">● {stateLabel}</div>
-            <div className="lz-np-title">{np?.title ?? '—'}</div>
-            {np?.artist && <div className="lz-np-artist">{np.artist}</div>}
-            <div className="lz-tags">
-              {np?.bpm != null && <span className="lz-tag lz-tag-bpm">♩ {Math.round(np.bpm)} BPM</span>}
-              {np?.genre && <span className="lz-tag lz-tag-genre">{np.genre}</span>}
-              {np?.year != null && <span className="lz-tag lz-tag-year">{np.year}</span>}
-              {np?.trackId != null && np.durationSec > 0 && <span className="lz-tag">⏱ {fmt(np.durationSec)}</span>}
-              {np?.album && <span className="lz-tag">{np.album}</span>}
+        {/* Left: play controls + name + search + playlists + recent */}
+        <aside className="lz-side">
+          {stream?.showListenLive && (
+            <div className="lz-live-wrap">
+              <button
+                className={`lz-btn${live ? ' is-live' : ''}`}
+                onClick={toggleLive}
+                disabled={!stream?.enabled}
+                title={stream?.enabled ? 'Listen to the live stream' : 'The stream is off air'}
+              >
+                {!stream?.enabled ? 'Off air' : live ? '● LIVE' : '▶ Listen Live'}
+              </button>
+              {stream?.enabled && (
+                <span className="lz-kbps">
+                  {stream.bitrate} kbps{live ? ` · ${stream.listeners} listening` : ''}
+                </span>
+              )}
             </div>
-          </div>
-        </div>
-
-        <div className="lz-top-right">
-          {themeSelect('lz-theme-top')}
-          <button className="lz-btn" onClick={skip} disabled={!np?.allowNext || np?.trackId == null} title={np?.allowNext ? 'Skip to the next track' : 'Skip is disabled'}>
+          )}
+          <button className="lz-btn lz-btn-block lz-skip" onClick={skip} disabled={!np?.allowNext || np?.trackId == null} title={np?.allowNext ? 'Skip to the next track' : 'Skip is disabled'}>
             Next ⏭
           </button>
-        </div>
-      </div>
 
-      {/* ── Browse band: saved-playlist chips ────────────────────────── */}
-      {pls?.showSelector && pls.playlists.length > 0 && (
-        <div className="lz-catband">
-          <div className="lz-label">♫ Browse the music</div>
-          <div className="lz-chips">
-            {pls.playlists.map(p => (
-              <button key={p.id} className={`lz-chip${selPl === p.id ? ' is-on' : ''}`} onClick={() => togglePlaylist(p.id)}>
-                {p.name}<span className="lz-chip-count">{p.count}</span>
-              </button>
-            ))}
-          </div>
-          <div className="lz-cathint">
-            {selPl == null
-              ? 'Pick a playlist to browse, or just search.'
-              : 'Showing that playlist’s songs — tap one to request it.'}
-          </div>
-        </div>
-      )}
-
-      {/* ── Work area ────────────────────────────────────────────────── */}
-      <div className="lz-work">
-        {/* Left: name + search + request + recent */}
-        <aside className="lz-side">
           <div className="lz-field-label">Your name <span className="lz-req">*</span></div>
           <input className="lz-input" type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Enter your name…" maxLength={40} />
 
           <div className="lz-field-label">Search songs</div>
           <input className="lz-input lz-input-search" type="search" value={q} onChange={e => onQueryChange(e.target.value)} placeholder="Songs or artists…" />
 
-          <button className="lz-btn lz-primary lz-btn-block" onClick={requestSelected} disabled={!selected}>
-            Request Selected Song
-          </button>
+          {pls?.showSelector && pls.playlists.length > 0 && (
+            <>
+              <div className="lz-field-label">♫ Playlists</div>
+              <div className="lz-chips lz-chips-side">
+                {pls.playlists.map(p => (
+                  <button key={p.id} className={`lz-chip${selPl === p.id ? ' is-on' : ''}`} onClick={() => togglePlaylist(p.id)}>
+                    <span className="lz-chip-name">{p.name}</span><span className="lz-chip-count">{p.count}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
 
-          {recentBlock('lz-recent-desktop')}
+          {recentBlock('lz-recent-side')}
+          {themeSelect('lz-theme-side')}
         </aside>
 
-        {/* Center: search results — albums row, song tiles, no-art list */}
+        {/* Center/right: search results — albums row, song tiles, no-art list */}
         <section className="lz-panel lz-results">
           <div className="lz-panel-head">
             {albumView
@@ -333,7 +305,7 @@ export default function App() {
           </div>
           <div className="lz-panel-body">
             {!albumView && !q.trim() && selPl == null
-              ? <div className="lz-empty">Start typing to search, or pick a playlist above…</div>
+              ? <div className="lz-empty">Start typing to search, or pick a playlist on the left…</div>
               : results.length === 0 && albums.length === 0
                 ? <div className="lz-empty">No matches.</div>
                 : (() => {
@@ -341,9 +313,12 @@ export default function App() {
                     const plain = results.filter(t => artFail.has(t.id))
                     const failArt = (id: number) =>
                       setArtFail(prev => { const n = new Set(prev); n.add(id); return n })
-                    const pick = (id: number) => setSelectedId(id)
-                    const pickAndRequest = (id: number) => { setSelectedId(id); requestSelected() }
                     return <>
+                      {fallbackQ && (
+                        <div className="lz-fallback">
+                          No matches for “{q.trim()}” — showing “{fallbackQ}” instead.
+                        </div>
+                      )}
                       {albums.length > 0 && (
                         <div className="lz-sect">
                           <div className="lz-sect-label">Albums</div>
@@ -363,17 +338,15 @@ export default function App() {
                           {albums.length > 0 && <div className="lz-sect-label">Songs</div>}
                           <div className="lz-grid">
                             {tiles.map(t => (
-                              <div
-                                key={t.id}
-                                className={`lz-tile${selectedId === t.id ? ' is-selected' : ''}`}
-                                onClick={() => pick(t.id)}
-                                onDoubleClick={() => pickAndRequest(t.id)}
-                              >
+                              <div key={t.id} className="lz-tile">
                                 <img className="lz-tile-art" src={`/api/albumart?trackId=${t.id}`} alt=""
                                   loading="lazy" onError={() => failArt(t.id)} />
                                 <div className="lz-tile-title">{t.title ?? '(untitled)'}</div>
                                 {t.artist && <div className="lz-tile-artist">{t.artist}</div>}
-                                <div className="lz-tile-dur">{fmt(t.durationSec)}</div>
+                                <div className="lz-tile-foot">
+                                  <span className="lz-tile-dur">{fmt(t.durationSec)}</span>
+                                  <button className="lz-btn lz-req-btn" onClick={() => requestTrack(t)} title="Request this song">Request</button>
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -384,18 +357,14 @@ export default function App() {
                           <div className="lz-sect-label">More songs</div>
                           <ul className="lz-results-list">
                             {plain.map(t => (
-                              <li
-                                key={t.id}
-                                className={`lz-result lz-result-icon${selectedId === t.id ? ' is-selected' : ''}`}
-                                onClick={() => pick(t.id)}
-                                onDoubleClick={() => pickAndRequest(t.id)}
-                              >
+                              <li key={t.id} className="lz-result lz-result-icon">
                                 <span className="lz-mini-icon" aria-hidden="true">♪</span>
                                 <div className="lz-result-main">
                                   <div className="lz-result-title">{t.title ?? '(untitled)'}</div>
                                   {t.artist && <div className="lz-result-artist">{t.artist}</div>}
                                 </div>
-                                <div className="lz-result-dur">{fmt(t.durationSec)}</div>
+                                <span className="lz-result-dur">{fmt(t.durationSec)}</span>
+                                <button className="lz-btn lz-req-btn" onClick={() => requestTrack(t)} title="Request this song">Request</button>
                               </li>
                             ))}
                           </ul>
@@ -405,51 +374,36 @@ export default function App() {
                   })()}
           </div>
         </section>
-
-        {/* Right: playlist */}
-        <section className="lz-panel lz-playlist">
-          <div className="lz-panel-head">Playlist</div>
-          <div className="lz-panel-body">
-            <table className="lz-table">
-              <thead>
-                <tr>
-                  <th className="lz-col-num">#</th>
-                  <th>Title</th>
-                  <th className="lz-col-dur">Duration</th>
-                  <th className="lz-col-by">Added by</th>
-                </tr>
-              </thead>
-              <tbody>
-                {plRows.length === 0
-                  ? <tr className="lz-pl-empty"><td colSpan={4}>Playlist is empty.</td></tr>
-                  : plRows.map((p, i) => {
-                      const isNow = p.trackId === npId
-                      return (
-                        <tr key={`${p.trackId}-${p.position}-${i}`} className={isNow ? 'lz-row-now' : ''}>
-                          <td className="lz-col-num">{isNow ? <span className="lz-now-mark">▶</span> : (p.position >= 0 ? p.position : '')}</td>
-                          <td>
-                            <div className="lz-pl-title">{p.title ?? '(untitled)'}</div>
-                            {p.artist && <div className="lz-pl-artist">{p.artist}</div>}
-                          </td>
-                          <td className="lz-col-dur">{fmt(p.durationSec)}</td>
-                          <td className="lz-col-by">{p.source ?? (isNow ? 'On air' : '—')}</td>
-                        </tr>
-                      )
-                    })}
-              </tbody>
-            </table>
-          </div>
-        </section>
       </div>
 
-      {/* ── Foot (phones only): recent searches, then the theme picker ──── */}
-      <div className="lz-foot">
-        {recentBlock('lz-recent-mobile')}
-        {themeSelect('lz-theme-foot')}
+      {/* ── Fixed bottom bar: now playing + the next two songs ─────────── */}
+      <div className="lz-nowbar">
+        <div className="lz-np">
+          {np?.trackId && artOk
+            ? <img className="lz-np-art" src={`/api/albumart?trackId=${np.trackId}`} alt="" onError={() => setArtOk(false)} />
+            : <div className="lz-np-art lz-np-art-empty">♪</div>}
+          <div className="lz-np-body">
+            <div className="lz-np-state">● {stateLabel}</div>
+            <div className="lz-np-title">{np?.title ?? '—'}</div>
+            {np?.artist && <div className="lz-np-artist">{np.artist}</div>}
+          </div>
+        </div>
+        <div className="lz-nextup">
+          <div className="lz-field-label">Next up</div>
+          {nextTwo.length === 0
+            ? <div className="lz-nextup-empty">Nothing queued.</div>
+            : nextTwo.map(r => (
+                <div key={`${r.position}-${r.trackId}`} className="lz-nextup-row">
+                  <span className="lz-nextup-title">{r.title ?? '(untitled)'}</span>
+                  {r.artist && <span className="lz-nextup-artist">{r.artist}</span>}
+                  <span className="lz-nextup-dur">{fmt(r.durationSec)}</span>
+                </div>
+              ))}
+        </div>
       </div>
 
       {toast && <div className="lz-toast">{toast}</div>}
-      <audio ref={audioRef} preload="none" onPlay={() => setLive(true)} onPause={() => setLive(false)} style={{ display: 'none' }} />
+      <audio ref={audioRef} preload="none" onPlaying={() => setLive(true)} onPause={() => setLive(false)} onError={() => setLive(false)} />
     </div>
   )
 }
