@@ -53,7 +53,7 @@
   border-top: 1px solid var(--lz-line);
   box-shadow: 0 -4px 16px rgba(0, 0, 0, .18);
 }
-.lz-nowbar .lz-np { flex: 1 1 55%; }
+.lz-nowbar .lz-np { flex: 1 1 50%; min-width: 0; }
 .lz-nextup { flex: 1 1 45%; min-width: 0; }
 .lz-nextup .lz-field-label { margin: 0 0 4px; }
 .lz-nextup-row {
@@ -160,7 +160,20 @@
 }
 .lz-search-top { padding: 10px 12px 10px 34px; font-size: 1rem; background-position: 11px center; }
 .lz-rescol .lz-results { flex: 1; min-height: 0; max-height: none; }
-.lz-side { position: sticky; top: 12px; }
+.lz-side {
+  position: sticky; top: 16px;
+  display: flex; flex-direction: column;
+  height: calc(100vh - var(--lz-nowbar-h) - 36px);
+  overflow-y: auto;
+}
+.lz-side-bottom { margin-top: auto; padding-top: 14px; }
+
+/* Theme picker alone in the top-right corner */
+.lz-topright { position: fixed; top: 10px; right: 16px; z-index: 45; }
+.lz-theme-corner { min-width: 130px; }
+
+/* Play controls inside the bottom bar */
+.lz-nowbar-controls { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
 .lz-kbps { font-size: .66rem; color: var(--lz-faint); }
 .lz-skip { margin-top: 6px; }
 
@@ -194,14 +207,6 @@
 .lz-input-search { background-image: var(--lz-search-icon); background-repeat: no-repeat; background-position: 9px center; background-size: 14px; padding-left: 30px; }
 .lz-btn-block { width: 100%; justify-content: center; margin-top: 10px; }
 
-.lz-recent { list-style: none; padding: 0; margin: 2px 0 0; }
-.lz-recent li {
-  padding: 5px 4px; font-size: .84rem; color: var(--lz-muted);
-  border-bottom: 1px solid var(--lz-line-soft, var(--lz-line));
-  cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.lz-recent li:hover { color: var(--lz-text); }
-.lz-recent-empty { color: var(--lz-faint); font-size: .82rem; padding: 4px; }
 
 /* Bottom foot — only used on phones (theme picker + recent move here); the
    media query below reveals it. */
@@ -504,12 +509,14 @@
   .lz-main { grid-template-columns: 210px minmax(0, 1fr); justify-content: stretch; }
 }
 @media (max-width: 700px) {
-  .lz-main { --lz-nowbar-h: 176px; grid-template-columns: 1fr; }
-  .lz-side { position: static; }
+  .lz-main { --lz-nowbar-h: 232px; grid-template-columns: 1fr; }
+  .lz-side { position: static; height: auto; overflow: visible; }
+  .lz-side-bottom { margin-top: 12px; }
   .lz-rescol { position: static; height: auto; }
   .lz-rescol .lz-results { min-height: 300px; }
   .lz-panel { max-height: none; }
   .lz-nowbar { flex-wrap: wrap; gap: 8px 24px; }
+  .lz-nowbar-controls { flex: 1 1 100%; }
   .lz-nowbar .lz-np, .lz-nextup { flex: 1 1 100%; }
 }
 

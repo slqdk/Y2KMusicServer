@@ -48,10 +48,6 @@ const fmt = (s: number) => {
 const readTheme = (): string => {
   try { return localStorage.getItem('y2k-listener-theme') || 'dark' } catch { return 'dark' }
 }
-const readRecent = (): string[] => {
-  try { const v = JSON.parse(localStorage.getItem('y2k-recent-searches') || '[]'); return Array.isArray(v) ? v.slice(0, 6) : [] }
-  catch { return [] }
-}
 // A stable per-device id for request throttling, kept in localStorage. Not
 // crypto.randomUUID — the listener page is served over plain http, where the
 // Web Crypto API is unavailable; this token only needs to be stable per device.
@@ -105,7 +101,6 @@ export default function App() {
   // The results panel is hidden entirely until a search/browse has actually
   // been issued (same 500 ms settle as the fetch).
   const [showResults, setShowResults] = useState(false)
-  const [recent, setRecent] = useState<string[]>(readRecent)
   const [toast, setToast] = useState<string | null>(null)
   const [artOk, setArtOk] = useState(true)
   const [live, setLive] = useState(false)
@@ -134,8 +129,7 @@ export default function App() {
   // songs), a selected playlist (playlist order, optionally narrowed by the
   // text), or free text (songs + the album row). Everything waits on the
   // name gate; the fetch and the panel's appearance settle together after
-  // 500 ms. A settled text term is recorded in recent searches. The server
-  // prefers FLAC over MP3 twins.
+  // 500 ms. The server prefers FLAC over MP3 twins.
   useEffect(() => {
     window.clearTimeout(debounce.current)
     const term = q.trim()
@@ -158,7 +152,6 @@ export default function App() {
           setAlbums(albumView ? [] : (d.albums ?? []))
           setFallbackQ(albumView ? null : (d.fallbackQuery ?? null))
           setArtFail(new Set())
-          if (term && !albumView) pushRecent(term)
         })
         .catch(() => { setResults([]); setAlbums([]); setFallbackQ(null) })
     }, 500)
@@ -172,13 +165,7 @@ export default function App() {
 
   const flash = (m: string) => { setToast(m); window.setTimeout(() => setToast(null), 2500) }
 
-  const pushRecent = (term: string) => {
-    setRecent(prev => {
-      const next = [term, ...prev.filter(t => t.toLowerCase() !== term.toLowerCase())].slice(0, 6)
-      try { localStorage.setItem('y2k-recent-searches', JSON.stringify(next)) } catch { /* ignore */ }
-      return next
-    })
-  }
+
 
   const stopStream = () => {
     const a = audioRef.current; if (!a) return
@@ -245,58 +232,27 @@ export default function App() {
     return (idx >= 0 ? plRows.slice(idx + 1) : plRows).slice(0, 2)
   }, [plRows, npId])
 
-  // The theme picker and the recent-searches list each render in two spots; CSS
-  // shows one per breakpoint (top bar / side on desktop, the foot on phones).
   const themeSelect = (cls: string) => (
     <select className={`lz-theme ${cls}`} value={theme} onChange={e => setTheme(e.target.value)} title="Theme" aria-label="Theme">
       {THEMES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
     </select>
   )
-  const recentBlock = (cls: string) => (
-    <div className={cls}>
-      <div className="lz-field-label">Recent searches</div>
-      {recent.length === 0
-        ? <div className="lz-recent-empty">Nothing yet.</div>
-        : <ul className="lz-recent">{recent.map(t => <li key={t} onClick={() => setQ(t)} title={`Search “${t}”`}>{t}</li>)}</ul>}
-    </div>
-  )
 
   return (
     <div className={`lz lz-${theme}`}>
+      {/* Theme picker, alone in the top-right corner */}
+      <div className="lz-topright">{themeSelect('lz-theme-corner')}</div>
+
       {/* ── Main area: left sidebar + centered results ─────────────────── */}
       <div className="lz-main">
 
         {/* Left: play controls + name + search + playlists + recent */}
         <aside className="lz-side">
-          {stream?.showListenLive && (
-            <div className="lz-live-wrap">
-              <button
-                className={`lz-btn${live ? ' is-live' : ''}`}
-                onClick={toggleLive}
-                disabled={!stream?.enabled}
-                title={stream?.enabled ? 'Listen to the live stream' : 'The stream is off air'}
-              >
-                {!stream?.enabled ? 'Off air' : live ? '● LIVE' : '▶ Listen Live'}
-              </button>
-              {stream?.enabled && (
-                <span className="lz-kbps">
-                  {stream.bitrate} kbps{live ? ` · ${stream.listeners} listening` : ''}
-                </span>
-              )}
-            </div>
-          )}
-          <button className="lz-btn lz-btn-block lz-skip" onClick={skip} disabled={!np?.allowNext || np?.trackId == null} title={np?.allowNext ? 'Skip to the next track' : 'Skip is disabled'}>
-            Next ⏭
-          </button>
-
           <div className="lz-field-label">Your name <span className="lz-req">*</span></div>
           <input className="lz-input" type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Enter your name…" maxLength={40} />
 
-          {recentBlock('lz-recent-side')}
-          {themeSelect('lz-theme-side')}
-
           {pls?.showSelector && pls.playlists.length > 0 && (
-            <>
+            <div className="lz-side-bottom">
               <div className="lz-field-label">♫ Playlists</div>
               <div className="lz-chips lz-chips-side">
                 {pls.playlists.map(p => (
@@ -305,7 +261,7 @@ export default function App() {
                   </button>
                 ))}
               </div>
-            </>
+            </div>
           )}
         </aside>
 
@@ -407,6 +363,24 @@ export default function App() {
 
       {/* ── Fixed bottom bar: now playing + the next two songs ─────────── */}
       <div className="lz-nowbar">
+        <div className="lz-nowbar-controls">
+          {stream?.showListenLive && (
+            <button
+              className={`lz-btn${live ? ' is-live' : ''}`}
+              onClick={toggleLive}
+              disabled={!stream?.enabled}
+              title={stream?.enabled ? 'Listen to the live stream' : 'The stream is off air'}
+            >
+              {!stream?.enabled ? 'Off air' : live ? '● LIVE' : '▶ Listen Live'}
+            </button>
+          )}
+          {stream?.showListenLive && stream?.enabled && (
+            <span className="lz-kbps">{stream.bitrate} kbps{live ? ` · ${stream.listeners} listening` : ''}</span>
+          )}
+          <button className="lz-btn" onClick={skip} disabled={!np?.allowNext || np?.trackId == null} title={np?.allowNext ? 'Skip to the next track' : 'Skip is disabled'}>
+            Next ⏭
+          </button>
+        </div>
         <div className="lz-np">
           {np?.trackId && artOk
             ? <img className="lz-np-art" src={`/api/albumart?trackId=${np.trackId}`} alt="" onError={() => setArtOk(false)} />
