@@ -101,6 +101,30 @@ export default function App() {
   // The results panel is hidden entirely until a search/browse has actually
   // been issued (same 500 ms settle as the fetch).
   const [showResults, setShowResults] = useState(false)
+
+  // Per-device request cooldown. While active, every Request button is gone
+  // and the countdown line at the very top fills as the wait elapses. Seeded
+  // from the server on load (so F5 can't dodge it), then from each request's
+  // response. cdNow just drives re-renders while the line is filling.
+  const [cd, setCd] = useState<{ until: number; total: number } | null>(null)
+  const [, setCdNow] = useState(0)
+  useEffect(() => {
+    fetch(`/api/request/cooldown?deviceId=${encodeURIComponent(DEVICE_ID)}`)
+      .then(r => r.json())
+      .then(d => { if (d?.remainingSec > 0) setCd({ until: Date.now() + d.remainingSec * 1000, total: d.totalSec || d.remainingSec }) })
+      .catch(() => {})
+  }, [])
+  useEffect(() => {
+    if (!cd) return
+    const id = window.setInterval(() => {
+      if (Date.now() >= cd.until) setCd(null)
+      else setCdNow(n => n + 1)
+    }, 250)
+    return () => window.clearInterval(id)
+  }, [cd])
+  const startCooldown = (sec: number, total?: number) => {
+    if (sec > 0) setCd({ until: Date.now() + sec * 1000, total: total && total > 0 ? total : sec })
+  }
   const [toast, setToast] = useState<string | null>(null)
   const [artOk, setArtOk] = useState(true)
   const [live, setLive] = useState(false)
@@ -185,6 +209,7 @@ export default function App() {
 
   // Per-song request — fired from the Request button on the tile / row itself.
   const requestTrack = async (t: SearchItem) => {
+    if (cd) return   // buttons are hidden during cooldown; belt and braces
     try {
       const r = await fetch('/api/request', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -192,12 +217,14 @@ export default function App() {
       })
       if (r.status === 429) {
         const d = await r.json().catch(() => null)
+        startCooldown(d?.retryAfterSec ?? 0, d?.totalSec)
         const mins = Math.ceil((d?.retryAfterSec ?? 0) / 60)
         flash(mins > 1 ? `Please wait about ${mins} min before requesting again.` : 'Please wait a moment before requesting again.')
         return
       }
       if (!r.ok) { flash('Request failed. Try again.'); return }
       const d = await r.json().catch(() => null)
+      startCooldown(d?.cooldownSec ?? 0)
       flash(d?.accepted
         ? `Added “${t.title ?? 'track'}” to the queue!`
         : `Requested “${t.title ?? 'track'}” — the DJ will see it.`)
@@ -239,7 +266,19 @@ export default function App() {
   )
 
   return (
-    <div className={`lz lz-${theme}`}>
+    <div className={`lz lz-${theme}${cd ? ' lz-has-cd' : ''}`}>
+      {/* Countdown line: fills left→right while the request cooldown runs */}
+      {cd && (() => {
+        const remaining = Math.max(0, cd.until - Date.now())
+        const pct = Math.min(100, 100 * (1 - remaining / (cd.total * 1000)))
+        return (
+          <div className="lz-cdline" role="status">
+            <div className="lz-cdline-fill" style={{ width: `${pct}%` }} />
+            <div className="lz-cdline-text">Song requested — you can request again in {fmt(Math.ceil(remaining / 1000))}</div>
+          </div>
+        )
+      })()}
+
       {/* Theme picker, alone in the top-right corner */}
       <div className="lz-topright">{themeSelect('lz-theme-corner')}</div>
 
@@ -328,7 +367,7 @@ export default function App() {
                                 {t.artist && <div className="lz-tile-artist">{t.artist}</div>}
                                 <div className="lz-tile-foot">
                                   <span className="lz-tile-dur">{fmt(t.durationSec)}</span>
-                                  <button className="lz-btn lz-req-btn" onClick={() => requestTrack(t)} title="Request this song">Request</button>
+                                  {!cd && <button className="lz-btn lz-req-btn" onClick={() => requestTrack(t)} title="Request this song">Request</button>}
                                 </div>
                               </div>
                             ))}
@@ -347,7 +386,7 @@ export default function App() {
                                   {t.artist && <div className="lz-result-artist">{t.artist}</div>}
                                 </div>
                                 <span className="lz-result-dur">{fmt(t.durationSec)}</span>
-                                <button className="lz-btn lz-req-btn" onClick={() => requestTrack(t)} title="Request this song">Request</button>
+                                {!cd && <button className="lz-btn lz-req-btn" onClick={() => requestTrack(t)} title="Request this song">Request</button>}
                               </li>
                             ))}
                           </ul>

@@ -34,4 +34,16 @@ public static class RequestThrottle
             });
         return wait;
     }
+
+    /// <summary>
+    /// Peeks at a device's remaining cooldown WITHOUT stamping a request —
+    /// for the listener page's countdown line (page load / refresh). Null when
+    /// the device may request now.
+    /// </summary>
+    public static TimeSpan? Remaining(string deviceKey, TimeSpan window)
+    {
+        if (!LastRequestUtc.TryGetValue(deviceKey, out var last)) return null;
+        var elapsed = DateTime.UtcNow - last;
+        return elapsed < window ? window - elapsed : null;
+    }
 }

@@ -342,6 +342,7 @@ public sealed class PublicController : ControllerBase
                 {
                     error = "rate_limited",
                     retryAfterSec = (int)Math.Ceiling(w.TotalSeconds),
+                    totalSec = web.RequestIntervalMinutes * 60,
                     intervalMinutes = web.RequestIntervalMinutes
                 });
         }
@@ -369,7 +370,34 @@ public sealed class PublicController : ControllerBase
             await _playlist.AddAsync(body.TrackId, PlaylistSource.Request, name ?? "Request", current, ct);
         }
 
-        return Ok(new { ok = true, accepted = autoAccept });
+        return Ok(new
+        {
+            ok = true,
+            accepted = autoAccept,
+            cooldownSec = web.RequestLimitEnabled ? web.RequestIntervalMinutes * 60 : 0
+        });
+    }
+
+    /// <summary>
+    /// The device's remaining request cooldown, for the listener page's
+    /// countdown line on load/refresh. Read-only — never stamps a request.
+    /// Zeros when the limit is off or the window has elapsed.
+    /// </summary>
+    [HttpGet("request/cooldown")]
+    public object RequestCooldown([FromQuery] string? deviceId)
+    {
+        var web = WebConfigStore.Load(_cfg);
+        if (!web.RequestLimitEnabled) return new { remainingSec = 0, totalSec = 0 };
+
+        var key = string.IsNullOrWhiteSpace(deviceId)
+            ? (HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown")
+            : deviceId.Trim();
+        var wait = RequestThrottle.Remaining(key, TimeSpan.FromMinutes(web.RequestIntervalMinutes));
+        return new
+        {
+            remainingSec = wait is TimeSpan w ? (int)Math.Ceiling(w.TotalSeconds) : 0,
+            totalSec = web.RequestIntervalMinutes * 60
+        };
     }
 
     /// <summary>
