@@ -122,6 +122,7 @@ public sealed class PublicController : ControllerBase
                 .Where(t => t.Album != null && t.Album.ToLower() == name.ToLower())
                 .OrderBy(t => t.Artist).ThenBy(t => t.Title)
                 .ToListAsync(ct);
+            albumRows = ApplyFolderVisibility(albumRows);
             return new { items = ToItems(PreferFlac(albumRows).Take(take)) };
         }
 
@@ -167,6 +168,7 @@ public sealed class PublicController : ControllerBase
         var rows = await query
             .OrderBy(t => t.Artist).ThenBy(t => t.Title)
             .ToListAsync(ct);
+        rows = ApplyFolderVisibility(rows);
 
         // ── Fallback: nothing matched the literal phrase ─────────────────
         // "metallica the black" finds nothing (the album is titled just
@@ -177,9 +179,9 @@ public sealed class PublicController : ControllerBase
         string? fallbackQuery = null;
         if (hasText && rows.Count == 0 && genres.Count == 0 && decades.Count == 0)
         {
-            var all = await db.Tracks.AsNoTracking()
+            var all = ApplyFolderVisibility(await db.Tracks.AsNoTracking()
                 .OrderBy(t => t.Artist).ThenBy(t => t.Title)
-                .ToListAsync(ct);
+                .ToListAsync(ct));
             (rows, fallbackQuery) = FallbackSearch(all, q!.Trim());
         }
 
@@ -264,6 +266,18 @@ public sealed class PublicController : ControllerBase
                 .OrderByDescending(t => string.Equals(t.Type, "FLAC", StringComparison.OrdinalIgnoreCase))
                 .ThenBy(t => t.Id)
                 .First());
+
+    /// <summary>
+    /// Drops tracks whose owning scan folder is deactivated (Folders dialog).
+    /// A search/browse filter only — playlist browsing and playback never
+    /// pass through here. No-op (and no per-track cost) while every folder
+    /// is active.
+    /// </summary>
+    private List<Track> ApplyFolderVisibility(List<Track> rows)
+    {
+        var hidden = ScanFolderStore.HiddenPathPredicate(_cfg);
+        return hidden == null ? rows : rows.Where(t => !hidden(t.FilePath)).ToList();
+    }
 
     private static List<object> ToItems(IEnumerable<Track> rows) =>
         rows.Select(t => (object)new { t.Id, t.Title, t.Artist, t.Album, t.DurationSec }).ToList();

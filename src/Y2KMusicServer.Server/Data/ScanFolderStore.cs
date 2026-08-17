@@ -18,6 +18,13 @@ public static class ScanFolderStore
     {
         public int Id { get; set; }
         public string Path { get; set; } = "";
+
+        /// <summary>Whether the folder's tracks show up in search/browse
+        /// (listener search and the admin library list). Inactive folders keep
+        /// their tracks in the library — playlists, the queue, and playback
+        /// are untouched; the tracks are merely hidden from searching.
+        /// Missing in pre-existing JSON ⇒ defaults to true.</summary>
+        public bool Active { get; set; } = true;
     }
 
     public sealed class ScanFolders
@@ -90,6 +97,47 @@ public static class ScanFolderStore
             SaveUnlocked(cfg, c);
             return entry;
         }
+    }
+
+    /// <summary>Flips a folder's search visibility. Returns the entry, or null.</summary>
+    public static ScanFolder? SetActive(IConfiguration cfg, int id, bool active)
+    {
+        lock (Gate)
+        {
+            var c = LoadUnlocked(cfg);
+            var entry = c.Folders.FirstOrDefault(f => f.Id == id);
+            if (entry == null) return null;
+            entry.Active = active;
+            SaveUnlocked(cfg, c);
+            return entry;
+        }
+    }
+
+    /// <summary>
+    /// A predicate telling whether a track's file path is HIDDEN from
+    /// search/browse, or null when every folder is active (the common case —
+    /// callers skip filtering entirely). Ownership follows the usual
+    /// innermost-folder-wins rule via longest-prefix match, so deactivating a
+    /// parent does not hide an active nested folder, and vice versa.
+    /// </summary>
+    public static Func<string, bool>? HiddenPathPredicate(IConfiguration cfg)
+    {
+        var folders = Load(cfg).Folders;
+        if (folders.All(f => f.Active)) return null;
+
+        // Longest prefix first ⇒ the first match is the owning (innermost) folder.
+        var byDepth = folders
+            .Select(f => (Prefix: FolderScope.Prefix(f.Path), f.Active))
+            .OrderByDescending(x => x.Prefix.Length)
+            .ToList();
+
+        return filePath =>
+        {
+            foreach (var (prefix, active) in byDepth)
+                if (filePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    return !active;
+            return false;   // outside every assigned folder — never hide
+        };
     }
 
     // ── Internals (callers hold Gate) ─────────────────────────────────────────

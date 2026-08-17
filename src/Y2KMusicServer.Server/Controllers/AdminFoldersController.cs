@@ -53,11 +53,26 @@ public sealed class AdminFoldersController : ControllerBase
             {
                 f.Id,
                 f.Path,
+                f.Active,
                 Exists = SafeDirectoryExists(f.Path),
                 TrackCount = owned
             });
         }
         return new { folders = items };
+    }
+
+    /// <summary>
+    /// Shows or hides a folder's tracks in search/browse (listener search and
+    /// the admin library list). Playlists, the queue, and playback are never
+    /// affected — this is a search filter, not a removal.
+    /// </summary>
+    [HttpPost("{id:int}/active")]
+    public IActionResult SetActive(int id, [FromQuery] bool value)
+    {
+        var entry = ScanFolderStore.SetActive(_cfg, id, value);
+        if (entry == null) return NotFound();
+        _log.LogInformation("Folder {Path} search visibility set to {State}.", entry.Path, value ? "active" : "inactive");
+        return Ok(new { entry.Id, entry.Active });
     }
 
     /// <summary>Adds a folder and kicks a scan of it. Idempotent on path;

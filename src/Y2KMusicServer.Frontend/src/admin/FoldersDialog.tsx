@@ -23,10 +23,14 @@ export default function FoldersDialog({ onClose, onChanged }:
   useEffect(() => { refresh() }, [])
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (confirm) setConfirm(null)
+      else onClose()
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, confirm])
 
   const act = async (fn: () => Promise<unknown>, done?: string) => {
     setBusy(true); setErr(null)
@@ -54,7 +58,7 @@ export default function FoldersDialog({ onClose, onChanged }:
   return (
     <div className="w-overlay" onMouseDown={onClose}>
       <div className="w-dialog w-raised" onMouseDown={e => e.stopPropagation()}
-        style={{ width: 560, maxWidth: '94vw' }}>
+        style={{ width: 620, maxWidth: '94vw' }}>
         <div className="w-titlebar">
           <span className="w-app">Music folders</span>
           <span style={{ flex: 1 }} />
@@ -79,16 +83,25 @@ export default function FoldersDialog({ onClose, onChanged }:
           <div className="w-listwrap w-sunken" style={{ maxHeight: 260, marginTop: 6 }}>
             <table className="w-table">
               <thead>
-                <tr><th>Path</th><th className="w-num">Tracks</th><th style={{ width: 190 }} /></tr>
+                <tr><th>Path</th><th className="w-num">Tracks</th><th style={{ width: 236 }} /></tr>
               </thead>
               <tbody>
                 {folders.map(f => (
-                  <tr key={f.id}>
+                  <tr key={f.id} style={f.active ? undefined : { opacity: .55 }}>
                     <td title={f.path} style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {f.path}{!f.exists && <span className="w-err"> (not reachable)</span>}
+                      {!f.active && <span className="w-muted"> (hidden from search)</span>}
                     </td>
                     <td className="w-num">{f.trackCount}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>
+                      <button className="w-btn" disabled={busy}
+                        title={f.active
+                          ? 'Hide this folder’s tracks from search (playlists and playback are not affected)'
+                          : 'Show this folder’s tracks in search again'}
+                        onClick={() => act(() => api.setScanFolderActive(f.id, !f.active),
+                          f.active ? `Hid ${f.path} from search.` : `${f.path} is searchable again.`)}>
+                        {f.active ? 'On' : 'Off'}
+                      </button>{' '}
                       <button className="w-btn" disabled={busy} title="Scan this folder for new files"
                         onClick={() => act(() => api.rescanScanFolder(f.id), 'Rescan queued.')}>↻</button>{' '}
                       <button className="w-btn" disabled={busy} title="Remove this folder's tracks from the library (keeps the folder assigned)"
@@ -107,19 +120,37 @@ export default function FoldersDialog({ onClose, onChanged }:
 
           {msg && <div className="w-muted" style={{ marginTop: 4 }}>{msg}</div>}
           {err && <div className="w-err" style={{ marginTop: 4 }}>{err}</div>}
-
-          {confirm && (
-            <div className="w-group" style={{ marginTop: 8, padding: 8 }}>
-              <div style={{ marginBottom: 6 }}>
-                {confirm.kind === 'clear'
-                  ? <>Remove every track under <b>{confirm.folder.path}</b> from the library? The files stay on disk; the folder stays assigned.</>
-                  : <>Remove <b>{confirm.folder.path}</b> and its {confirm.folder.trackCount} track(s) from the library? The files stay on disk.</>}
-              </div>
-              <button className="w-btn" onClick={runConfirm}>Yes</button>{' '}
-              <button className="w-btn" onClick={() => setConfirm(null)}>No</button>
-            </div>
-          )}
         </div>
+
+        {/* Blocking confirmation for the destructive actions. Clicking the
+            backdrop or Escape cancels; only the explicit button proceeds. */}
+        {confirm && (
+          <div className="w-overlay" onMouseDown={() => setConfirm(null)}>
+            <div className="w-dialog w-raised" onMouseDown={e => e.stopPropagation()} style={{ width: 420, maxWidth: '90vw' }}>
+              <div className="w-titlebar">
+                <span className="w-app">{confirm.kind === 'clear' ? 'Clear folder tracks?' : 'Remove folder?'}</span>
+                <span style={{ flex: 1 }} />
+                <button className="w-btn" onClick={() => setConfirm(null)} style={{ minHeight: 16, padding: '0 7px' }}>✕</button>
+              </div>
+              <div className="w-dialog-body">
+                <div style={{ marginBottom: 10 }}>
+                  {confirm.kind === 'clear'
+                    ? <>This removes <b>every track</b> under<br /><b>{confirm.folder.path}</b><br />({confirm.folder.trackCount} track{confirm.folder.trackCount === 1 ? '' : 's'}) from the library. The files stay on disk; the folder stays assigned and can be rescanned.</>
+                    : <>This removes the folder<br /><b>{confirm.folder.path}</b><br />AND its {confirm.folder.trackCount} track{confirm.folder.trackCount === 1 ? '' : 's'} from the library. The files stay on disk.</>}
+                </div>
+                <div className="w-muted" style={{ marginBottom: 10 }}>
+                  Tip: if you only want the folder out of search results, use its On/Off button instead — that hides without deleting.
+                </div>
+                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                  <button className="w-btn" onClick={() => setConfirm(null)}>Cancel</button>
+                  <button className="w-btn" onClick={runConfirm}>
+                    {confirm.kind === 'clear' ? 'Yes, clear the tracks' : 'Yes, remove the folder'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {browsing && (
           <FolderBrowser

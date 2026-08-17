@@ -337,7 +337,7 @@ export const setStreamBitrate = (kbps: number) =>
   req<StreamStatus>(`/api/admin/stream/bitrate?kbps=${kbps}`, { method: 'POST' })
 
 // ── Global scan folders / scan ──────────────────────────────────────────
-export interface ScanFolderDto { id: number; path: string; exists: boolean; trackCount: number }
+export interface ScanFolderDto { id: number; path: string; active: boolean; exists: boolean; trackCount: number }
 export interface ScanStatus {
   state: number // 0 Idle, 1 Enumerating, 2 Scanning, 3 Completed, 4 Failed
   filesFound: number
@@ -357,6 +357,9 @@ export const addScanFolder = (path: string) =>
 export const removeScanFolder = (id: number, clearData: boolean) =>
   req<{ removed: string; removedTracks: number }>(
     `/api/admin/folders/${id}?clearData=${clearData}`, { method: 'DELETE' })
+export const setScanFolderActive = (id: number, value: boolean) =>
+  req<{ id: number; active: boolean }>(
+    `/api/admin/folders/${id}/active?value=${value}`, { method: 'POST' })
 export const rescanScanFolder = (id: number) =>
   req<ScanStatus>(`/api/admin/folders/${id}/rescan`, { method: 'POST' })
 export const clearScanFolder = (id: number) =>

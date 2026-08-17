@@ -90,6 +90,12 @@ public sealed class AdminLibraryController : ControllerBase
             .OrderBy(t => t.Artist).ThenBy(t => t.Title)
             .ToListAsync(ct);
 
+        // Folder search visibility (Folders dialog): tracks under a
+        // deactivated folder are hidden from this list. Library stats stay
+        // whole-library on purpose — deactivation hides, it doesn't remove.
+        var hidden = ScanFolderStore.HiddenPathPredicate(_cfg);
+        if (hidden != null) rows = rows.Where(t => !hidden(t.FilePath)).ToList();
+
         var map = GenreMapStore.Load(_cfg);
         var faceted = rows
             .Select(t => new
