@@ -264,6 +264,12 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
               <fieldset className="w-group">
                 <legend>Web requests</legend>
                 <label className="w-check"><input type="checkbox" checked={s.allowWebNext} onChange={e => patch({ allowWebNext: e.target.checked })} /> Allow website visitors to skip to next song</label>
+                <div className="w-formrow">
+                  <label>Skip unlocks after:</label>
+                  <input type="number" min={0} max={120} value={s.webNextAfterMinutes} disabled={!s.allowWebNext}
+                    onChange={e => patch({ webNextAfterMinutes: Number(e.target.value) })} style={{ width: 64 }} />
+                  <span className="w-muted">min of the current song (0 = right away); the Next button appears when unlocked</span>
+                </div>
                 <label className="w-check"><input type="checkbox" checked={s.autoAcceptRequests} onChange={e => patch({ autoAcceptRequests: e.target.checked })} /> Auto-accept requests (skip the approve step)</label>
                 <label className="w-check"><input type="checkbox" checked={s.showWebCategories} onChange={e => patch({ showWebCategories: e.target.checked })} /> Show music filters on website (genre / decade)</label>
                 <label className="w-check"><input type="checkbox" checked={s.showListenLive} onChange={e => patch({ showListenLive: e.target.checked })} /> Show &ldquo;Listen Live&rdquo; button on website</label>
@@ -273,6 +279,22 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
                   <input type="number" min={1} max={1440} value={s.requestIntervalMinutes} disabled={!s.requestLimitEnabled}
                     onChange={e => patch({ requestIntervalMinutes: Number(e.target.value) })} style={{ width: 64 }} />
                   <span className="w-muted">per device</span>
+                </div>
+              </fieldset>
+
+              <fieldset className="w-group">
+                <legend>Website banner</legend>
+                <div className="w-formrow">
+                  <label>Banner text:</label>
+                  <input type="text" value={s.bannerText} maxLength={120} style={{ flex: 1, minWidth: 220 }}
+                    placeholder="e.g. Morten og Mias 40 års fødselsdag"
+                    onChange={e => patch({ bannerText: e.target.value })} />
+                </div>
+                <div className="w-formrow">
+                  <label>Banner color:</label>
+                  <input type="color" value={s.bannerColor} style={{ width: 48, height: 24, padding: 0 }}
+                    onChange={e => patch({ bannerColor: e.target.value })} />
+                  <span className="w-muted">shown across the top of the listener page; empty text = no banner</span>
                 </div>
               </fieldset>
 

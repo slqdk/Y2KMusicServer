@@ -45,9 +45,16 @@ public sealed class PublicController : ControllerBase
         string? genre = null;
         int? year = null;
         string? type = null;
+        var web = WebConfigStore.Load(_cfg);
         await using (var db = await _dbf.CreateDbContextAsync(ct))
         {
             allowNext = (await db.Settings.AsNoTracking().FirstOrDefaultAsync(ct))?.AllowWebNext ?? false;
+
+            // Timed skip: with a minutes gate set, the visitor Next only
+            // unlocks once the current song has played that long. The client
+            // hides the button until allowNext turns true.
+            if (allowNext && web.WebNextAfterMinutes > 0)
+                allowNext = s.TrackId != null && s.PositionSec >= web.WebNextAfterMinutes * 60;
 
             // Enrich with the current track's tags for the now-playing chips.
             if (s.TrackId is int tid)
@@ -79,7 +86,9 @@ public sealed class PublicController : ControllerBase
             bpm,
             genre,
             year,
-            type
+            type,
+            bannerText = string.IsNullOrWhiteSpace(web.BannerText) ? null : web.BannerText,
+            bannerColor = web.BannerColor
         };
     }
 
@@ -450,6 +459,16 @@ public sealed class PublicController : ControllerBase
         await using (var db = await _dbf.CreateDbContextAsync(ct))
             if (!((await db.Settings.AsNoTracking().FirstOrDefaultAsync(ct))?.AllowWebNext ?? false))
                 return StatusCode(403, new { error = "web skip is disabled" });
+
+        // The timed gate is enforced here too — hiding the button client-side
+        // is UX, this is the rule.
+        var webCfg = WebConfigStore.Load(_cfg);
+        if (webCfg.WebNextAfterMinutes > 0)
+        {
+            var st = _engine.GetStatus();
+            if (st.TrackId == null || st.PositionSec < webCfg.WebNextAfterMinutes * 60)
+                return StatusCode(403, new { error = "web skip not unlocked yet" });
+        }
 
         var r = await _engine.NextAsync(null, ct);
         return r == QueueResult.Ok ? Ok(new { ok = true }) : Conflict(new { error = r.ToString() });

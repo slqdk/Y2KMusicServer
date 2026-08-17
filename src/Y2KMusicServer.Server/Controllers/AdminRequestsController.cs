@@ -41,6 +41,9 @@ public sealed class AdminRequestsController : ControllerBase
                 r.TrackId,
                 title = r.Track!.Title,
                 artist = r.Track!.Artist,
+                durationSec = r.Track!.DurationSec,
+                bpm = r.Track!.Bpm,
+                lufs = r.Track!.LufsIntegrated,
                 r.RequesterName,
                 status = r.Status.ToString(),
                 r.CreatedAt

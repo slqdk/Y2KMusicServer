@@ -173,6 +173,27 @@
 .lz-theme-corner { min-width: 130px; }
 .lz-has-cd .lz-topright { top: 34px; }
 
+/* Party banner — pinned above everything, incl. the countdown line */
+.lz-banner {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 70;
+  height: 44px;
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  font-weight: 800; font-size: 1.2rem; letter-spacing: .05em;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+  border-bottom: 1px solid rgba(0, 0, 0, .25);
+  padding: 0 12px;
+}
+.lz-banner-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lz-banner-orn { font-size: .9rem; opacity: .8; }
+
+/* Stacking: banner (44) then countdown line (24) then content */
+.lz-has-banner .lz-cdline { top: 44px; }
+.lz-has-banner .lz-topright { top: 54px; }
+.lz-has-banner .lz-main { padding-top: 60px; }
+.lz-has-banner .lz-side, .lz-has-banner .lz-rescol { top: 60px; }
+.lz-has-banner.lz-has-cd .lz-topright { top: 78px; }
+.lz-has-banner.lz-has-cd .lz-main { padding-top: 84px; }
+
 /* Countdown line — request cooldown, pinned to the very top. The fill grows
    left→right as the wait elapses; full = requesting is open again. */
 .lz-cdline {

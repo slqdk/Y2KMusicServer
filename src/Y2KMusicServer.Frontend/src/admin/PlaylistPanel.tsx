@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import * as api from './api'
 import { fmtTime } from './api'
-import RequestsPanel from './RequestsPanel'
 import SlotsDialog from './SlotsDialog'
 import { useColumnWidths, ColResizer } from './useColumns'
 
@@ -45,7 +44,9 @@ export default function PlaylistPanel(
   // The saved-playlist view has no Mix-in / Added-by: #, Title, Artist, Type, Dur, BPM, LUFS, ✕.
   const view = useColumnWidths('y2k.cols.savedlist', [5, 30, 25, 7, 8, 8, 9, 5])
 
+  const [reqs, setReqs] = useState<api.RequestDto[]>([])
   const refreshList = () => api.getPlaylist().then(setList).catch(() => {})
+  const refreshReqs = () => api.getRequests().then(setReqs).catch(() => {})
   const refreshTiles = () =>
     api.getSavedPlaylists().then(r => { setTiles(r.playlists); setMaxTiles(r.max) }).catch(() => {})
   const refreshView = (pl: api.SavedPlaylistDto) =>
@@ -53,8 +54,8 @@ export default function PlaylistPanel(
 
   const refreshAutoDj = () => api.getAutoDj().then(s => setAutoDj(s.autoDj)).catch(() => {})
   useEffect(() => {
-    refreshList(); refreshTiles(); refreshAutoDj()
-    const id = setInterval(() => { refreshList(); refreshTiles() }, 2000) // surfaces Auto DJ top-ups + adds
+    refreshList(); refreshTiles(); refreshAutoDj(); refreshReqs()
+    const id = setInterval(() => { refreshList(); refreshTiles(); refreshReqs() }, 2000) // surfaces Auto DJ top-ups + adds + requests
     return () => clearInterval(id)
   }, [])
 
@@ -111,6 +112,11 @@ export default function PlaylistPanel(
     setBusy(true)
     try { await fn() } catch { /* ignore */ } finally { setBusy(false) }
   }
+
+  const acceptReq = (id: number) =>
+    guard(async () => { await api.acceptRequest(id); await refreshReqs(); await refreshList() })
+  const dismissReq = (id: number) =>
+    guard(async () => { await api.dismissRequest(id); await refreshReqs() })
 
   const remove = (id: number) =>
     guard(async () => { await api.removeEntry(id); await refreshList() })
@@ -323,8 +329,9 @@ export default function PlaylistPanel(
         </>
       ) : (
         <>
-          {/* Live queue (now playing + upcoming). */}
-          <RequestsPanel onAccepted={refreshList} />
+          {/* Live queue (now playing + upcoming); pending requests render as
+              rows at the bottom of this same table, with their Accept/Dismiss
+              buttons on the line. */}
           {/* Click a row to select; double-click plays it now (crossfade);
               right-click for the action menu. */}
           <div className="w-listwrap w-sunken" style={{ flex: 1, minHeight: 0, overflowX: 'hidden' }}>
@@ -377,7 +384,26 @@ export default function PlaylistPanel(
                   </tr>
                   ))
                 })()}
-                {list.length === 0 && (
+                {reqs.filter(r => r.status === 'Pending').map(r => (
+                  <tr key={`req-${r.id}`} className="w-rowreq" style={{ opacity: .75, fontStyle: 'italic' }}
+                    title={`Requested by ${r.requesterName ?? 'unknown'} — accept to add to the queue`}>
+                    <td className="w-num">?</td>
+                    <td title={r.title ?? ''}>{r.title ?? '(untitled)'}</td>
+                    <td title={r.artist ?? ''}>{r.artist ?? '---'}</td>
+                    <td className="w-num">{fmtTime(r.durationSec)}</td>
+                    <td className="w-num">—</td>
+                    <td className="w-num">{r.bpm != null ? Math.round(r.bpm) : '---'}</td>
+                    <td className="w-num">{r.lufs != null ? r.lufs.toFixed(1) : '---'}</td>
+                    <td><span className="w-srcbadge">{r.requesterName ?? '—'} · Pending</span></td>
+                    <td className="w-rowbtns" style={{ whiteSpace: 'nowrap' }}>
+                      <button className="w-btn" disabled={busy} title="Accept → add to the queue"
+                        onClick={ev => { ev.stopPropagation(); acceptReq(r.id) }}>✓</button>
+                      <button className="w-btn" disabled={busy} title="Dismiss this request"
+                        onClick={ev => { ev.stopPropagation(); dismissReq(r.id) }}>✕</button>
+                    </td>
+                  </tr>
+                ))}
+                {list.length === 0 && reqs.filter(r => r.status === 'Pending').length === 0 && (
                   <tr><td colSpan={9} className="w-muted" style={{ padding: 8 }}>Queue empty. Add tracks, activate a playlist, or enable Auto DJ.</td></tr>
                 )}
               </tbody>

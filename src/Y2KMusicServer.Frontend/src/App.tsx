@@ -15,6 +15,8 @@ interface NowPlaying {
   genre: string | null
   year: number | null
   type: string | null
+  bannerText?: string | null
+  bannerColor?: string | null
 }
 interface StreamInfo { enabled: boolean; bitrate: number; listeners: number; showListenLive: boolean }
 interface SearchItem { id: number; title: string | null; artist: string | null; album: string | null; durationSec: number }
@@ -47,6 +49,17 @@ const fmt = (s: number) => {
 }
 const readTheme = (): string => {
   try { return localStorage.getItem('y2k-listener-theme') || 'dark' } catch { return 'dark' }
+}
+const readName = (): string => {
+  try { return localStorage.getItem('y2k-listener-name') || '' } catch { return '' }
+}
+/** Black or white banner text, whichever reads against the chosen color. */
+const bannerFg = (hex: string): string => {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex)
+  if (!m) return '#fff'
+  const v = parseInt(m[1], 16)
+  const luma = 0.299 * (v >> 16) + 0.587 * ((v >> 8) & 255) + 0.114 * (v & 255)
+  return luma > 150 ? '#1a1a1a' : '#fff'
 }
 // A stable per-device id for request throttling, kept in localStorage. Not
 // crypto.randomUUID — the listener page is served over plain http, where the
@@ -86,7 +99,10 @@ export default function App() {
   const [q, setQ] = useState('')
   const [results, setResults] = useState<SearchItem[]>([])
   const [fallbackQ, setFallbackQ] = useState<string | null>(null)
-  const [name, setName] = useState('')
+  const [name, setName] = useState<string>(readName)
+  useEffect(() => {
+    try { localStorage.setItem('y2k-listener-name', name) } catch { /* ignore */ }
+  }, [name])
 
   // The search bar stays locked until the guest has typed at least 3 letters
   // of their name; the unlock settles 500 ms after they stop typing. Dropping
@@ -266,7 +282,19 @@ export default function App() {
   )
 
   return (
-    <div className={`lz lz-${theme}${cd ? ' lz-has-cd' : ''}`}>
+    <div className={`lz lz-${theme}${cd ? ' lz-has-cd' : ''}${np?.bannerText ? ' lz-has-banner' : ''}`}>
+      {/* Party banner — text + color come from the admin settings */}
+      {np?.bannerText && (
+        <div className="lz-banner" style={{
+          background: `linear-gradient(90deg, color-mix(in srgb, ${np.bannerColor ?? '#0A246A'} 65%, black), ${np.bannerColor ?? '#0A246A'} 30%, ${np.bannerColor ?? '#0A246A'} 70%, color-mix(in srgb, ${np.bannerColor ?? '#0A246A'} 65%, black))`,
+          color: bannerFg(np.bannerColor ?? '#0A246A')
+        }}>
+          <span className="lz-banner-orn" aria-hidden="true">✦</span>
+          <span className="lz-banner-text">{np.bannerText}</span>
+          <span className="lz-banner-orn" aria-hidden="true">✦</span>
+        </div>
+      )}
+
       {/* Countdown line: fills left→right while the request cooldown runs */}
       {cd && (() => {
         const remaining = Math.max(0, cd.until - Date.now())
@@ -416,9 +444,11 @@ export default function App() {
           {stream?.showListenLive && stream?.enabled && (
             <span className="lz-kbps">{stream.bitrate} kbps{live ? ` · ${stream.listeners} listening` : ''}</span>
           )}
-          <button className="lz-btn" onClick={skip} disabled={!np?.allowNext || np?.trackId == null} title={np?.allowNext ? 'Skip to the next track' : 'Skip is disabled'}>
-            Next ⏭
-          </button>
+          {np?.allowNext && np?.trackId != null && (
+            <button className="lz-btn" onClick={skip} title="Skip to the next track">
+              Next ⏭
+            </button>
+          )}
         </div>
         <div className="lz-np">
           {np?.trackId && artOk

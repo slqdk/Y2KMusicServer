@@ -413,6 +413,9 @@ export interface SettingsDto {
   requestLimitEnabled: boolean
   requestIntervalMinutes: number
   autoAcceptRequests: boolean
+  webNextAfterMinutes: number
+  bannerText: string
+  bannerColor: string
 }
 export interface SettingsUpdate {
   nextTriggerPct?: number
@@ -429,6 +432,9 @@ export interface SettingsUpdate {
   requestLimitEnabled?: boolean
   requestIntervalMinutes?: number
   autoAcceptRequests?: boolean
+  webNextAfterMinutes?: number
+  bannerText?: string
+  bannerColor?: string
 }
 export const getSettings = () => req<SettingsDto>('/api/admin/settings')
 export const putSettings = (u: SettingsUpdate) =>
@@ -461,6 +467,9 @@ export interface RequestDto {
   trackId: number
   title: string | null
   artist: string | null
+  durationSec: number
+  bpm: number | null
+  lufs: number | null
   requesterName: string | null
   status: string
   createdAt: string
