@@ -91,6 +91,20 @@ export default function App() {
   const [results, setResults] = useState<SearchItem[]>([])
   const [fallbackQ, setFallbackQ] = useState<string | null>(null)
   const [name, setName] = useState('')
+
+  // The search bar stays locked until the guest has typed at least 3 letters
+  // of their name; the unlock settles 500 ms after they stop typing. Dropping
+  // below 3 letters locks again immediately.
+  const [nameOk, setNameOk] = useState(false)
+  useEffect(() => {
+    if (name.trim().length < 3) { setNameOk(false); return }
+    const t = window.setTimeout(() => setNameOk(true), 500)
+    return () => window.clearTimeout(t)
+  }, [name])
+
+  // The results panel is hidden entirely until a search/browse has actually
+  // been issued (same 500 ms settle as the fetch).
+  const [showResults, setShowResults] = useState(false)
   const [recent, setRecent] = useState<string[]>(readRecent)
   const [toast, setToast] = useState<string | null>(null)
   const [artOk, setArtOk] = useState(true)
@@ -118,13 +132,19 @@ export default function App() {
 
   // Debounced search / browse. Modes, first match wins: an opened album (its
   // songs), a selected playlist (playlist order, optionally narrowed by the
-  // text), or free text (songs + the album row). A settled text term is
-  // recorded in recent searches. The server prefers FLAC over MP3 twins.
+  // text), or free text (songs + the album row). Everything waits on the
+  // name gate; the fetch and the panel's appearance settle together after
+  // 500 ms. A settled text term is recorded in recent searches. The server
+  // prefers FLAC over MP3 twins.
   useEffect(() => {
     window.clearTimeout(debounce.current)
     const term = q.trim()
-    if (!albumView && !term && selPl == null) { setResults([]); setAlbums([]); setFallbackQ(null); return }
+    if (!nameOk || (!albumView && !term && selPl == null)) {
+      setResults([]); setAlbums([]); setFallbackQ(null); setShowResults(false)
+      return
+    }
     debounce.current = window.setTimeout(() => {
+      setShowResults(true)
       const qs = new URLSearchParams()
       if (albumView) qs.set('albumName', albumView.album)
       else {
@@ -141,10 +161,10 @@ export default function App() {
           if (term && !albumView) pushRecent(term)
         })
         .catch(() => { setResults([]); setAlbums([]); setFallbackQ(null) })
-    }, 250)
+    }, 500)
     return () => window.clearTimeout(debounce.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, selPl, albumView])
+  }, [q, selPl, albumView, nameOk])
 
   // If the broadcast drops while we're listening, stop the player.
   useEffect(() => { if (stream && !stream.enabled && live) stopStream() // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -272,8 +292,8 @@ export default function App() {
           <div className="lz-field-label">Your name <span className="lz-req">*</span></div>
           <input className="lz-input" type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Enter your name…" maxLength={40} />
 
-          <div className="lz-field-label">Search songs</div>
-          <input className="lz-input lz-input-search" type="search" value={q} onChange={e => onQueryChange(e.target.value)} placeholder="Songs or artists…" />
+          {recentBlock('lz-recent-side')}
+          {themeSelect('lz-theme-side')}
 
           {pls?.showSelector && pls.playlists.length > 0 && (
             <>
@@ -287,13 +307,22 @@ export default function App() {
               </div>
             </>
           )}
-
-          {recentBlock('lz-recent-side')}
-          {themeSelect('lz-theme-side')}
         </aside>
 
-        {/* Center/right: search results — albums row, song tiles, no-art list */}
-        <section className="lz-panel lz-results">
+        {/* Center/right: top search box + results (hidden until a search) */}
+        <div className="lz-rescol">
+          <input
+            className="lz-input lz-input-search lz-search-top"
+            type="search"
+            value={q}
+            onChange={e => onQueryChange(e.target.value)}
+            disabled={!nameOk}
+            placeholder={nameOk ? 'Search songs or artists…' : 'Enter your name first (min. 3 letters)…'}
+            title={nameOk ? 'Search songs' : 'Type at least 3 letters of your name to unlock the search'}
+          />
+
+          {showResults && (
+          <section className="lz-panel lz-results">
           <div className="lz-panel-head">
             {albumView
               ? <span className="lz-albhead">
@@ -304,11 +333,9 @@ export default function App() {
               : <>Search results{results.length > 0 && <span style={{ fontWeight: 400, opacity: .8 }}>{results.length}</span>}</>}
           </div>
           <div className="lz-panel-body">
-            {!albumView && !q.trim() && selPl == null
-              ? <div className="lz-empty">Start typing to search, or pick a playlist on the left…</div>
-              : results.length === 0 && albums.length === 0
-                ? <div className="lz-empty">No matches.</div>
-                : (() => {
+            {results.length === 0 && albums.length === 0
+              ? <div className="lz-empty">No matches.</div>
+              : (() => {
                     const tiles = results.filter(t => !artFail.has(t.id))
                     const plain = results.filter(t => artFail.has(t.id))
                     const failArt = (id: number) =>
@@ -374,6 +401,8 @@ export default function App() {
                   })()}
           </div>
         </section>
+          )}
+        </div>
       </div>
 
       {/* ── Fixed bottom bar: now playing + the next two songs ─────────── */}
