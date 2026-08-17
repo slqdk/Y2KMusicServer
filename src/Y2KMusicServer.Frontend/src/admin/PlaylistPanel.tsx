@@ -113,6 +113,34 @@ export default function PlaylistPanel(
     try { await fn() } catch { /* ignore */ } finally { setBusy(false) }
   }
 
+  // Export downloads via a transient anchor (Content-Disposition names the
+  // file); import reads a chosen JSON file and posts it. Results land in the
+  // same note line the other tile actions use.
+  const importFileRef = useRef<HTMLInputElement | null>(null)
+  const exportPlaylist = (pl: api.SavedPlaylistDto) => {
+    const a = document.createElement('a')
+    a.href = api.exportSavedPlaylistUrl(pl.id)
+    a.download = ''
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  }
+  const importPlaylistFile = async (file: File) => {
+    try {
+      const text = await file.text()
+      let payload: unknown
+      try { payload = JSON.parse(text) } catch { setNote('That file is not a playlist export (invalid JSON).'); return }
+      const r = await api.importSavedPlaylist(payload)
+      setNote(r.missing > 0
+        ? `Imported “${r.name}”: ${r.matched} track(s) matched, ${r.missing} not in the library` +
+          (r.missingSamples.length > 0 ? ` (e.g. ${r.missingSamples[0]})` : '') + '.'
+        : `Imported “${r.name}”: all ${r.matched} track(s) matched.`)
+      await refreshTiles()
+    } catch (e) {
+      setNote(e instanceof api.ApiError ? e.message : 'Import failed.')
+    }
+  }
+
   const acceptReq = (id: number) =>
     guard(async () => { await api.acceptRequest(id); await refreshReqs(); await refreshList() })
   const dismissReq = (id: number) =>
@@ -219,6 +247,14 @@ export default function PlaylistPanel(
       <div className="w-panelhead" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span>Playlist</span>
         <span style={{ flex: 1 }} />
+        <button className="w-btn" disabled={busy} title="Import a playlist from an exported .y2kpl.json file"
+          onClick={() => importFileRef.current?.click()}>Import…</button>
+        <input ref={importFileRef} type="file" accept=".json,application/json" style={{ display: 'none' }}
+          onChange={e => {
+            const f = e.target.files?.[0]
+            e.target.value = ''
+            if (f) void importPlaylistFile(f)
+          }} />
         <button className={`w-btn ${autoDj ? 'w-autodj-on' : ''}`} disabled={busy || autoDj == null}
           title="Auto DJ fills the queue from the saved playlists whose timeslot is active (weighted by priority)"
           onClick={toggleAutoDj}>
@@ -281,6 +317,7 @@ export default function PlaylistPanel(
             <button className="w-btn" title="When Auto DJ may feed from this playlist (day/time slots)"
               onClick={() => setSchedFor(viewing)}>Schedule…</button>
             <button className="w-btn" onClick={() => { setRenaming(viewing); setRenameVal(viewing.name) }}>Rename…</button>
+            <button className="w-btn" title="Download this playlist as a portable file" onClick={() => exportPlaylist(viewing)}>Export…</button>
             <button className="w-btn" onClick={() => setConfirmDel(viewing)}>Delete…</button>
             <button className="w-btn" disabled={busy}
               title="Replace the live queue with this playlist (requests stay first) and crossfade into it"
@@ -435,6 +472,8 @@ export default function PlaylistPanel(
             onClick={() => { setSchedFor(tileMenu.pl); setTileMenu(null) }}>Schedule…</li>
           <li className="w-ctxitem" role="menuitem"
             onClick={() => { setRenaming(tileMenu.pl); setRenameVal(tileMenu.pl.name); setTileMenu(null) }}>Rename…</li>
+          <li className="w-ctxitem" role="menuitem"
+            onClick={() => { exportPlaylist(tileMenu.pl); setTileMenu(null) }}>Export…</li>
           <li className="w-ctxitem" role="menuitem"
             onClick={() => { setConfirmDel(tileMenu.pl); setTileMenu(null) }}>Delete…</li>
           <li className="w-ctxsep" role="separator" />

@@ -234,6 +234,15 @@ export const getSavedPlaylistTracks = (id: number) =>
   req<{ items: SavedPlaylistTrackDto[] }>(`/api/admin/saved-playlists/${id}/tracks`)
 export const removeSavedPlaylistTrack = (id: number, entryId: number) =>
   req<{ removed: boolean }>(`/api/admin/saved-playlists/${id}/tracks/${entryId}`, { method: 'DELETE' })
+export interface PlaylistImportResult {
+  id: number; name: string; matched: number; missing: number; missingSamples: string[]
+}
+export const exportSavedPlaylistUrl = (id: number) =>
+  `/api/admin/saved-playlists/${id}/export`
+export const importSavedPlaylist = (payload: unknown) =>
+  req<PlaylistImportResult>('/api/admin/saved-playlists/import',
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+
 // Replace the live queue with a saved playlist (requests survive and play
 // first) and crossfade into it. `action` reports what the engine did.
 export const activateSavedPlaylist = (id: number) =>

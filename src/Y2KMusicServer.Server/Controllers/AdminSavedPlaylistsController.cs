@@ -125,6 +125,148 @@ public sealed class AdminSavedPlaylistsController : ControllerBase
         return Ok(new { deleted = pl.Name });
     }
 
+    // ── Export / import ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Exports a playlist as a portable JSON file. Tracks travel as tags +
+    /// file path, not database ids, so the file survives a rescan or another
+    /// machine: import matches by path first, then artist+title.
+    /// </summary>
+    [HttpGet("{id:int}/export")]
+    public async Task<IActionResult> Export(int id, CancellationToken ct)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        var pl = await db.SavedPlaylists.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
+        if (pl == null) return NotFound();
+
+        var tracks = await db.SavedPlaylistTracks.AsNoTracking()
+            .Where(t => t.SavedPlaylistId == id)
+            .OrderBy(t => t.Position)
+            .Select(t => new
+            {
+                title = t.Track!.Title,
+                artist = t.Track!.Artist,
+                album = t.Track!.Album,
+                durationSec = t.Track!.DurationSec,
+                filePath = t.Track!.FilePath
+            })
+            .ToListAsync(ct);
+
+        var payload = new
+        {
+            format = "y2k-playlist",
+            version = 1,
+            name = pl.Name,
+            exportedAt = DateTime.UtcNow,
+            tracks
+        };
+        var bytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
+            payload, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+
+        var safe = string.Join("_", pl.Name.Split(Path.GetInvalidFileNameChars(),
+            StringSplitOptions.RemoveEmptyEntries)).Trim();
+        if (safe.Length == 0) safe = "playlist";
+        return File(bytes, "application/json", $"{safe}.y2kpl.json");
+    }
+
+    public sealed class ImportTrack
+    {
+        public string? Title { get; set; }
+        public string? Artist { get; set; }
+        public string? FilePath { get; set; }
+    }
+
+    public sealed class ImportBody
+    {
+        public string? Name { get; set; }
+        public List<ImportTrack>? Tracks { get; set; }
+    }
+
+    /// <summary>
+    /// Imports a playlist file produced by export (extra JSON fields are
+    /// ignored). Creates a new playlist — an existing name gets " (2)" etc. —
+    /// and matches each track against the library: exact file path first,
+    /// then artist+title (FLAC preferred on ties, mirroring listener dedupe).
+    /// Unmatched tracks are skipped and reported, never invented.
+    /// </summary>
+    [HttpPost("import")]
+    public async Task<IActionResult> Import([FromBody] ImportBody? body, CancellationToken ct)
+    {
+        var baseName = body?.Name?.Trim();
+        if (string.IsNullOrWhiteSpace(baseName) || body?.Tracks == null || body.Tracks.Count == 0)
+            return UnprocessableEntity(new { error = "not a playlist export (name and tracks required)" });
+
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        if (await db.SavedPlaylists.CountAsync(ct) >= SavedPlaylist.MaxPlaylists)
+            return UnprocessableEntity(new { error = $"maximum {SavedPlaylist.MaxPlaylists} playlists" });
+
+        // Unique name: "Party", "Party (2)", "Party (3)" …
+        var existingNames = (await db.SavedPlaylists.Select(p => p.Name).ToListAsync(ct))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var name = baseName;
+        for (int n = 2; existingNames.Contains(name); n++) name = $"{baseName} ({n})";
+
+        // Library lookups: path → track, and artist|title → best track.
+        var all = await db.Tracks.AsNoTracking()
+            .Select(t => new { t.Id, t.Title, t.Artist, t.FilePath, t.Type })
+            .ToListAsync(ct);
+        var byPath = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in all) byPath.TryAdd(t.FilePath, t.Id);
+        var byTag = all
+            .Where(t => !string.IsNullOrWhiteSpace(t.Title))
+            .GroupBy(t => $"{(t.Artist ?? "").Trim().ToLowerInvariant()}|{t.Title!.Trim().ToLowerInvariant()}")
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(t => string.Equals(t.Type, "FLAC", StringComparison.OrdinalIgnoreCase))
+                      .ThenBy(t => t.Id).First().Id);
+
+        int order = await db.SavedPlaylists.Select(p => (int?)p.TileOrder).MaxAsync(ct) is int m ? m + 1 : 0;
+        var pl = new SavedPlaylist { Name = name, Priority = 3, TileOrder = order, CreatedAt = DateTime.UtcNow };
+        // Same always-on seed slot a fresh playlist gets from Create.
+        pl.Slots.Add(new SavedPlaylistSlot
+        {
+            SlotIndex = 0,
+            Enabled = true,
+            TimeFromHHmm = "00:00",
+            TimeToHHmm = "23:59",
+            DaysMask = 0
+        });
+
+        int pos = 0;
+        var missing = new List<string>();
+        var seen = new HashSet<int>();
+        foreach (var t in body.Tracks)
+        {
+            int? trackId = null;
+            if (!string.IsNullOrWhiteSpace(t.FilePath) && byPath.TryGetValue(t.FilePath.Trim(), out var byP))
+                trackId = byP;
+            else if (!string.IsNullOrWhiteSpace(t.Title)
+                     && byTag.TryGetValue($"{(t.Artist ?? "").Trim().ToLowerInvariant()}|{t.Title.Trim().ToLowerInvariant()}", out var byT))
+                trackId = byT;
+
+            if (trackId is int tid)
+            {
+                if (!seen.Add(tid)) continue;   // dup in the file → keep the first
+                pl.Tracks.Add(new SavedPlaylistTrack { TrackId = tid, Position = pos++ });
+            }
+            else
+            {
+                missing.Add(string.IsNullOrWhiteSpace(t.Artist) ? t.Title ?? "(untitled)" : $"{t.Artist} – {t.Title}");
+            }
+        }
+
+        db.SavedPlaylists.Add(pl);
+        await db.SaveChangesAsync(ct);
+        return Ok(new
+        {
+            pl.Id,
+            pl.Name,
+            matched = pos,
+            missing = missing.Count,
+            missingSamples = missing.Take(10).ToList()
+        });
+    }
+
     // ── Membership ────────────────────────────────────────────────────────────
 
     /// <summary>The playlist's tracks in order, with the display columns the

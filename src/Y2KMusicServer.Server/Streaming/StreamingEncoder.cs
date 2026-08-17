@@ -175,7 +175,7 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
     public Task StopAsync(CancellationToken cancellationToken)
     {
         _engine.TapsChanged -= OnTapsChanged;
-        _cts?.Cancel();
+        try { _cts?.Cancel(); } catch (ObjectDisposedException) { /* already torn down */ }
         try { _distThread?.Join(2000); } catch { }
         DisposeAllListeners();
         return Task.CompletedTask;
@@ -638,12 +638,21 @@ public sealed class StreamingEncoder : IHostedService, IDisposable
             _ => 320
         };
 
+    // Dispose runs TWICE at host teardown: the container tracks this instance
+    // under BOTH its AddSingleton and its AddHostedService registration. The
+    // second pass used to Cancel() a disposed CTS → unhandled
+    // ObjectDisposedException inside Host.DisposeAsync → "Host terminated
+    // unexpectedly" at every service stop (and a dirty exit the installer's
+    // stop-wait tripped over). Hence: idempotent, and every step guarded.
+    private int _disposed;
+
     public void Dispose()
     {
-        _cts?.Cancel();
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
         try { _distThread?.Join(2000); } catch { }
-        _cts?.Dispose();
+        try { _cts?.Dispose(); } catch { }
         DisposeAllListeners();
-        _listenerLock.Dispose();
+        try { _listenerLock.Dispose(); } catch { }
     }
 }
