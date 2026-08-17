@@ -18,9 +18,10 @@ interface NowPlaying {
 }
 interface StreamInfo { enabled: boolean; bitrate: number; listeners: number; showListenLive: boolean }
 interface SearchItem { id: number; title: string | null; artist: string | null; album: string | null; durationSec: number }
-interface FilterCount { name: string; count: number }
-interface DecadeCount { decade: number; count: number } // 0 = unknown decade
-interface BrowseFilters { showSelector: boolean; genres: FilterCount[]; decades: DecadeCount[] }
+interface PublicPlaylist { id: number; name: string; count: number }
+interface PlaylistsInfo { showSelector: boolean; playlists: PublicPlaylist[] }
+interface AlbumHit { album: string; artist: string | null; trackId: number; count: number }
+interface SearchResp { items: SearchItem[]; albums?: AlbumHit[] }
 interface PlaylistRow { position: number; trackId: number; title: string | null; artist: string | null; durationSec: number; source: string | null }
 
 const THEMES: [string, string][] = [
@@ -66,13 +67,25 @@ const DEVICE_ID = ((): string => {
 })()
 
 /* ── Component ───────────────────────────────────────────────────────── */
+/** Album cover with a ♪ placeholder when the representative track has no
+ *  embedded art (albums stay in the row either way — only songs demote). */
+function AlbumArtTile({ trackId }: { trackId: number }) {
+  const [ok, setOk] = useState(true)
+  useEffect(() => { setOk(true) }, [trackId])
+  return ok
+    ? <img className="lz-album-art" src={`/api/albumart?trackId=${trackId}`} alt="" loading="lazy" onError={() => setOk(false)} />
+    : <div className="lz-album-art lz-album-art-empty">♪</div>
+}
+
 export default function App() {
   const [theme, setTheme] = useState<string>(readTheme)
   const [np, setNp] = useState<NowPlaying | null>(null)
   const [stream, setStream] = useState<StreamInfo | null>(null)
-  const [filters, setFilters] = useState<BrowseFilters | null>(null)
-  const [selGenres, setSelGenres] = useState<string[]>([])
-  const [selDecades, setSelDecades] = useState<number[]>([])
+  const [pls, setPls] = useState<PlaylistsInfo | null>(null)
+  const [selPl, setSelPl] = useState<number | null>(null)
+  const [albums, setAlbums] = useState<AlbumHit[]>([])
+  const [albumView, setAlbumView] = useState<AlbumHit | null>(null)
+  const [artFail, setArtFail] = useState<Set<number>>(new Set())
   const [playlist, setPlaylist] = useState<PlaylistRow[]>([])
   const [q, setQ] = useState('')
   const [results, setResults] = useState<SearchItem[]>([])
@@ -96,34 +109,41 @@ export default function App() {
 
   useEffect(() => {
     refresh()
-    j<BrowseFilters>('/api/browse-filters').then(setFilters).catch(() => {})
+    j<PlaylistsInfo>('/api/playlists').then(setPls).catch(() => {})
     const id = setInterval(refresh, 3000)
     return () => clearInterval(id)
   }, [refresh])
 
   useEffect(() => { setArtOk(true) }, [np?.trackId])
 
-  // Debounced search / browse: a text term, the genre/decade chips, or both.
-  // With chips set and no term, the filtered library is browsed. A settled
-  // text term is recorded in recent searches.
+  // Debounced search / browse. Modes, first match wins: an opened album (its
+  // songs), a selected playlist (playlist order, optionally narrowed by the
+  // text), or free text (songs + the album row). A settled text term is
+  // recorded in recent searches. The server prefers FLAC over MP3 twins.
   useEffect(() => {
     window.clearTimeout(debounce.current)
     const term = q.trim()
-    const filtered = selGenres.length > 0 || selDecades.length > 0
-    if (!term && !filtered) { setResults([]); setSelectedId(null); return }
+    if (!albumView && !term && selPl == null) { setResults([]); setAlbums([]); setSelectedId(null); return }
     debounce.current = window.setTimeout(() => {
       const qs = new URLSearchParams()
-      if (term) qs.set('q', term)
-      if (selGenres.length > 0) qs.set('genre', selGenres.join(','))
-      if (selDecades.length > 0) qs.set('decade', selDecades.join(','))
-      qs.set('take', term ? '10' : '24')
-      j<{ items: SearchItem[] }>(`/api/search?${qs.toString()}`)
-        .then(d => { setResults(d.items); if (term) pushRecent(term) })
-        .catch(() => setResults([]))
+      if (albumView) qs.set('albumName', albumView.album)
+      else {
+        if (term) qs.set('q', term)
+        if (selPl != null) qs.set('playlist', String(selPl))
+      }
+      qs.set('take', '30')
+      j<SearchResp>(`/api/search?${qs.toString()}`)
+        .then(d => {
+          setResults(d.items)
+          setAlbums(albumView ? [] : (d.albums ?? []))
+          setArtFail(new Set())
+          if (term && !albumView) pushRecent(term)
+        })
+        .catch(() => { setResults([]); setAlbums([]) })
     }, 250)
     return () => window.clearTimeout(debounce.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, selGenres, selDecades])
+  }, [q, selPl, albumView])
 
   // If the broadcast drops while we're listening, stop the player.
   useEffect(() => { if (stream && !stream.enabled && live) stopStream() // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -178,12 +198,13 @@ export default function App() {
     } catch { flash('Request failed. Try again.') }
   }
 
-  // Toggle a browse chip (multi-select; both axes combine as AND).
-  const toggleGenre = (name: string) =>
-    setSelGenres(prev => prev.includes(name) ? prev.filter(g => g !== name) : [...prev, name])
-  const toggleDecade = (d: number) =>
-    setSelDecades(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d])
-  const decadeLabel = (d: number) => (d === 0 ? '?' : `${d}s`)
+  // Playlist chip (single-select toggle) and album navigation. Opening an
+  // album replaces the results; Back returns to whatever search/browse was
+  // active. Typing again also leaves the album.
+  const togglePlaylist = (id: number) => { setAlbumView(null); setSelPl(prev => prev === id ? null : id) }
+  const openAlbum = (a: AlbumHit) => { setAlbumView(a); setSelectedId(null) }
+  const backToSearch = () => { setAlbumView(null); setSelectedId(null) }
+  const onQueryChange = (v: string) => { setAlbumView(null); setQ(v) }
 
   const stateLabel = np?.playing ? 'NOW PLAYING' : np?.trackId ? 'PAUSED' : 'OFF AIR'
 
@@ -263,27 +284,21 @@ export default function App() {
         </div>
       </div>
 
-      {/* ── Browse band: genre + decade filters (mirrors the admin) ──── */}
-      {filters?.showSelector && (filters.genres.length > 0 || filters.decades.length > 0) && (
+      {/* ── Browse band: saved-playlist chips ────────────────────────── */}
+      {pls?.showSelector && pls.playlists.length > 0 && (
         <div className="lz-catband">
           <div className="lz-label">♫ Browse the music</div>
           <div className="lz-chips">
-            {filters.genres.map(g => (
-              <button key={g.name} className={`lz-chip${selGenres.includes(g.name) ? ' is-on' : ''}`} onClick={() => toggleGenre(g.name)}>
-                {g.name}<span className="lz-chip-count">{g.count}</span>
-              </button>
-            ))}
-            {filters.decades.length > 0 && <span className="lz-chipgap" aria-hidden="true" />}
-            {filters.decades.map(d => (
-              <button key={d.decade} className={`lz-chip${selDecades.includes(d.decade) ? ' is-on' : ''}`} onClick={() => toggleDecade(d.decade)}>
-                {decadeLabel(d.decade)}<span className="lz-chip-count">{d.count}</span>
+            {pls.playlists.map(p => (
+              <button key={p.id} className={`lz-chip${selPl === p.id ? ' is-on' : ''}`} onClick={() => togglePlaylist(p.id)}>
+                {p.name}<span className="lz-chip-count">{p.count}</span>
               </button>
             ))}
           </div>
           <div className="lz-cathint">
-            {selGenres.length === 0 && selDecades.length === 0
-              ? 'Pick a genre or decade to browse, or just search.'
-              : 'Showing songs matching your picks — tap one to request it.'}
+            {selPl == null
+              ? 'Pick a playlist to browse, or just search.'
+              : 'Showing that playlist’s songs — tap one to request it.'}
           </div>
         </div>
       )}
@@ -296,7 +311,7 @@ export default function App() {
           <input className="lz-input" type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Enter your name…" maxLength={40} />
 
           <div className="lz-field-label">Search songs</div>
-          <input className="lz-input lz-input-search" type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Songs or artists…" />
+          <input className="lz-input lz-input-search" type="search" value={q} onChange={e => onQueryChange(e.target.value)} placeholder="Songs or artists…" />
 
           <button className="lz-btn lz-primary lz-btn-block" onClick={requestSelected} disabled={!selected}>
             Request Selected Song
@@ -305,30 +320,89 @@ export default function App() {
           {recentBlock('lz-recent-desktop')}
         </aside>
 
-        {/* Center: search results */}
+        {/* Center: search results — albums row, song tiles, no-art list */}
         <section className="lz-panel lz-results">
-          <div className="lz-panel-head">Search results{results.length > 0 && <span style={{ fontWeight: 400, opacity: .8 }}>{results.length}</span>}</div>
+          <div className="lz-panel-head">
+            {albumView
+              ? <span className="lz-albhead">
+                  <button className="lz-btn lz-back" onClick={backToSearch}>← Back</button>
+                  <span className="lz-albhead-name">{albumView.album}</span>
+                  {albumView.artist && <span className="lz-albhead-artist">{albumView.artist}</span>}
+                </span>
+              : <>Search results{results.length > 0 && <span style={{ fontWeight: 400, opacity: .8 }}>{results.length}</span>}</>}
+          </div>
           <div className="lz-panel-body">
-            {!q.trim() && selGenres.length === 0 && selDecades.length === 0
-              ? <div className="lz-empty">Start typing to search, or pick a genre / decade above…</div>
-              : results.length === 0
+            {!albumView && !q.trim() && selPl == null
+              ? <div className="lz-empty">Start typing to search, or pick a playlist above…</div>
+              : results.length === 0 && albums.length === 0
                 ? <div className="lz-empty">No matches.</div>
-                : <ul className="lz-results-list">
-                    {results.map(t => (
-                      <li
-                        key={t.id}
-                        className={`lz-result${selectedId === t.id ? ' is-selected' : ''}`}
-                        onClick={() => setSelectedId(t.id)}
-                        onDoubleClick={() => { setSelectedId(t.id); requestSelected() }}
-                      >
-                        <div className="lz-result-main">
-                          <div className="lz-result-title">{t.title ?? '(untitled)'}</div>
-                          {t.artist && <div className="lz-result-artist">{t.artist}</div>}
+                : (() => {
+                    const tiles = results.filter(t => !artFail.has(t.id))
+                    const plain = results.filter(t => artFail.has(t.id))
+                    const failArt = (id: number) =>
+                      setArtFail(prev => { const n = new Set(prev); n.add(id); return n })
+                    const pick = (id: number) => setSelectedId(id)
+                    const pickAndRequest = (id: number) => { setSelectedId(id); requestSelected() }
+                    return <>
+                      {albums.length > 0 && (
+                        <div className="lz-sect">
+                          <div className="lz-sect-label">Albums</div>
+                          <div className="lz-albums">
+                            {albums.map(a => (
+                              <div key={a.album} className="lz-album" onClick={() => openAlbum(a)} title={`Open “${a.album}”`}>
+                                <AlbumArtTile trackId={a.trackId} />
+                                <div className="lz-album-name">{a.album}</div>
+                                <div className="lz-album-artist">{a.artist ?? ''} · {a.count}</div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                        <div className="lz-result-dur">{fmt(t.durationSec)}</div>
-                      </li>
-                    ))}
-                  </ul>}
+                      )}
+                      {tiles.length > 0 && (
+                        <div className="lz-sect">
+                          {albums.length > 0 && <div className="lz-sect-label">Songs</div>}
+                          <div className="lz-grid">
+                            {tiles.map(t => (
+                              <div
+                                key={t.id}
+                                className={`lz-tile${selectedId === t.id ? ' is-selected' : ''}`}
+                                onClick={() => pick(t.id)}
+                                onDoubleClick={() => pickAndRequest(t.id)}
+                              >
+                                <img className="lz-tile-art" src={`/api/albumart?trackId=${t.id}`} alt=""
+                                  loading="lazy" onError={() => failArt(t.id)} />
+                                <div className="lz-tile-title">{t.title ?? '(untitled)'}</div>
+                                {t.artist && <div className="lz-tile-artist">{t.artist}</div>}
+                                <div className="lz-tile-dur">{fmt(t.durationSec)}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {plain.length > 0 && (
+                        <div className="lz-sect">
+                          <div className="lz-sect-label">More songs</div>
+                          <ul className="lz-results-list">
+                            {plain.map(t => (
+                              <li
+                                key={t.id}
+                                className={`lz-result lz-result-icon${selectedId === t.id ? ' is-selected' : ''}`}
+                                onClick={() => pick(t.id)}
+                                onDoubleClick={() => pickAndRequest(t.id)}
+                              >
+                                <span className="lz-mini-icon" aria-hidden="true">♪</span>
+                                <div className="lz-result-main">
+                                  <div className="lz-result-title">{t.title ?? '(untitled)'}</div>
+                                  {t.artist && <div className="lz-result-artist">{t.artist}</div>}
+                                </div>
+                                <div className="lz-result-dur">{fmt(t.durationSec)}</div>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  })()}
           </div>
         </section>
 

@@ -91,7 +91,7 @@ export default function SlotsDialog({ playlist, onClose, onChanged }:
         <div className="w-dialog-body">
           <div className="w-muted" style={{ marginBottom: 6 }}>
             Auto DJ feeds from this playlist while any enabled slot covers the current day and time.
-            No days ticked = every day; a window may wrap past midnight. Priority is set on the tile (right-click).
+            No days ticked = every day; a window may wrap past midnight (the after-midnight part counts as the ticked day's night). Priority is set from the tile's ▾ menu or the viewing header.
           </div>
 
           {slots.map((s, i) => {

@@ -652,16 +652,27 @@ public sealed class PlaylistService
 
     private static bool SlotCoversNow(SavedPlaylistSlot slot, int todayDow, TimeSpan nowTime)
     {
-        // DaysMask: bit 0 = Monday … bit 6 = Sunday. 0 = every day (legacy: no
-        // days ticked ⇒ applies daily).
-        if (slot.DaysMask != 0 && (slot.DaysMask & (1 << todayDow)) == 0) return false;
-
         if (!TimeSpan.TryParse(slot.TimeFromHHmm, out var from)) return false;
         if (!TimeSpan.TryParse(slot.TimeToHHmm, out var to)) return false;
 
-        return from <= to
-            ? nowTime >= from && nowTime <= to    // same-day range
-            : nowTime >= from || nowTime <= to;   // overnight wrap (e.g. 22:00–02:00)
+        // "To" is minute-INCLUSIVE: 23:59 covers through 23:59:59. Without
+        // this the seeded always-on slot (00:00–23:59) had a dead 59 s before
+        // midnight — a top-up landing there found no active playlist.
+        var toEnd = to.Add(TimeSpan.FromMinutes(1));
+
+        // DaysMask: bit 0 = Monday … bit 6 = Sunday. 0 = every day.
+        bool DayOk(int dow) => slot.DaysMask == 0 || (slot.DaysMask & (1 << dow)) != 0;
+
+        if (from < toEnd)                                   // same-day range
+            return DayOk(todayDow) && nowTime >= from && nowTime < toEnd;
+
+        // Overnight wrap (e.g. Fri 22:00–02:00): the evening leg belongs to
+        // the ticked day; the after-midnight tail belongs to the PREVIOUS
+        // day's tick — a Friday party slot must still cover Saturday 01:00
+        // without Saturday being ticked.
+        int yesterdayDow = (todayDow + 6) % 7;
+        return (DayOk(todayDow) && nowTime >= from)
+            || (DayOk(yesterdayDow) && nowTime < toEnd);
     }
 
     // ── Position helpers ──────────────────────────────────────────────────────

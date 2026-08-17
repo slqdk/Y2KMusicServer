@@ -205,6 +205,71 @@
 .lz-result-artist { font-size: .82rem; color: var(--lz-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lz-result-dur { font-size: .8rem; color: var(--lz-faint); font-variant-numeric: tabular-nums; }
 
+/* Result rows with a leading mini icon (songs without artwork) */
+.lz-result.lz-result-icon { grid-template-columns: auto 1fr auto; }
+.lz-mini-icon {
+  width: 28px; height: 28px; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--lz-radius-sm, 6px);
+  background: var(--lz-art-bg, var(--lz-panel)); color: var(--lz-faint);
+  border: 1px solid var(--lz-line-soft, var(--lz-line));
+  font-size: .85rem;
+}
+
+/* Sections inside the results panel (Albums / Songs / More songs) */
+.lz-sect { padding: 8px 12px 4px; }
+.lz-sect + .lz-sect { border-top: 1px solid var(--lz-line-soft, var(--lz-line)); }
+.lz-sect .lz-results-list { margin: 0 -12px; }
+.lz-sect-label {
+  font-size: .64rem; letter-spacing: .1em; font-weight: 700; text-transform: uppercase;
+  color: var(--lz-faint); margin: 2px 0 8px;
+}
+
+/* Albums row — horizontally scrollable cover tiles */
+.lz-albums {
+  display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px;
+  scrollbar-width: thin;
+}
+.lz-album { flex: 0 0 116px; width: 116px; cursor: pointer; }
+.lz-album-art {
+  width: 116px; height: 116px; object-fit: cover; display: block;
+  border-radius: var(--lz-radius-sm, 6px);
+  background: var(--lz-art-bg, var(--lz-panel));
+  border: 1px solid var(--lz-line-soft, var(--lz-line));
+}
+.lz-album-art-empty { display: flex; align-items: center; justify-content: center; font-size: 1.6rem; color: var(--lz-faint); }
+.lz-album:hover .lz-album-art { border-color: var(--lz-accent, var(--lz-line)); }
+.lz-album-name { margin-top: 5px; font-size: .8rem; color: var(--lz-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lz-album-artist { font-size: .72rem; color: var(--lz-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Songs grid — artwork tiles */
+.lz-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(122px, 1fr));
+  gap: 12px;
+}
+.lz-tile {
+  cursor: pointer; padding: 6px; border-radius: var(--lz-radius-sm, 6px);
+  border: 1px solid transparent; min-width: 0;
+}
+.lz-tile:hover { background: var(--lz-rowhover); }
+.lz-tile.is-selected { background: var(--lz-sel-row); border-color: var(--lz-accent, var(--lz-line)); }
+.lz-tile.is-selected .lz-tile-title { color: var(--lz-sel-fg); }
+.lz-tile-art {
+  width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block;
+  border-radius: var(--lz-radius-sm, 6px);
+  background: var(--lz-art-bg, var(--lz-panel));
+  border: 1px solid var(--lz-line-soft, var(--lz-line));
+}
+.lz-tile-title { margin-top: 5px; font-size: .8rem; color: var(--lz-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lz-tile-artist { font-size: .72rem; color: var(--lz-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lz-tile-dur { font-size: .7rem; color: var(--lz-faint); font-variant-numeric: tabular-nums; margin-top: 2px; }
+
+/* Album drill-down header */
+.lz-albhead { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.lz-back { padding: 2px 10px; font-size: .78rem; }
+.lz-albhead-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lz-albhead-artist { font-weight: 400; font-size: .8rem; color: var(--lz-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* Playlist table */
 .lz-table { width: 100%; border-collapse: collapse; font-size: .85rem; table-layout: fixed; }
 .lz-table thead th {

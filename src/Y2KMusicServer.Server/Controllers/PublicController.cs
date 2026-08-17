@@ -94,32 +94,66 @@ public sealed class PublicController : ControllerBase
     }
 
     /// <summary>
-    /// Listener search + browse. Free-text <paramref name="q"/> plus optional
-    /// comma-separated <paramref name="genre"/> (genre-map buckets, incl.
-    /// "Unknown") and <paramref name="decade"/> (decade start years; 0 =
-    /// unknown decade) filters, mirroring the admin facets. With filters set,
-    /// an empty <paramref name="q"/> browses the filtered library instead of
-    /// returning nothing. Take is clamped 1..30 (browse asks for more than the
-    /// old 6-row search).
+    /// Listener search + browse. Modes, first match wins:
+    /// <c>albumName</c> — that album's songs (the album-tile drill-down);
+    /// <c>playlist</c> — a saved playlist's songs in playlist order, optionally
+    /// narrowed by <paramref name="q"/>; free text — matching songs plus an
+    /// <c>albums</c> group for the album row. Legacy <paramref name="genre"/> /
+    /// <paramref name="decade"/> facets still apply to text mode.
+    /// Every mode dedupes same-song format twins: FLAC is preferred, the MP3
+    /// shows only when no FLAC matches. Take is clamped 1..30.
     /// </summary>
     [HttpGet("search")]
     public async Task<object> Search(
         [FromQuery] string? q, [FromQuery] string? genre, [FromQuery] string? decade,
+        [FromQuery] int? playlist, [FromQuery] string? albumName,
         [FromQuery] int take = 6, CancellationToken ct = default)
     {
         take = Math.Clamp(take, 1, 30);
+        bool hasText = !string.IsNullOrWhiteSpace(q);
 
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+
+        // ── Album drill-down ──────────────────────────────────────────────
+        if (!string.IsNullOrWhiteSpace(albumName))
+        {
+            var name = albumName.Trim();
+            var albumRows = await db.Tracks.AsNoTracking()
+                .Where(t => t.Album != null && t.Album.ToLower() == name.ToLower())
+                .OrderBy(t => t.Artist).ThenBy(t => t.Title)
+                .ToListAsync(ct);
+            return new { items = ToItems(PreferFlac(albumRows).Take(take)) };
+        }
+
+        // ── Saved-playlist browse (playlist order; optional text narrow) ──
+        if (playlist is int plId)
+        {
+            var plRows = await db.SavedPlaylistTracks.AsNoTracking()
+                .Where(pt => pt.SavedPlaylistId == plId && pt.Track != null)
+                .OrderBy(pt => pt.Position)
+                .Select(pt => pt.Track!)
+                .ToListAsync(ct);
+            if (hasText)
+            {
+                var t2 = q!.Trim();
+                plRows = plRows.Where(t =>
+                    (t.Title ?? "").Contains(t2, StringComparison.OrdinalIgnoreCase) ||
+                    (t.Artist ?? "").Contains(t2, StringComparison.OrdinalIgnoreCase) ||
+                    (t.Album ?? "").Contains(t2, StringComparison.OrdinalIgnoreCase)).ToList();
+            }
+            return new { items = ToItems(PreferFlac(plRows).Take(take)) };
+        }
+
+        // ── Free text (+ legacy facets) ───────────────────────────────────
         var genres = (genre ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var decades = (decade ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(s => int.TryParse(s, out var d) ? (int?)d : null)
             .Where(d => d != null).Select(d => d!.Value).ToHashSet();
 
-        bool hasText = !string.IsNullOrWhiteSpace(q);
         if (!hasText && genres.Count == 0 && decades.Count == 0)
-            return new { items = Array.Empty<object>() };
+            return new { items = Array.Empty<object>(), albums = Array.Empty<object>() };
 
-        await using var db = await _dbf.CreateDbContextAsync(ct);
         var query = db.Tracks.AsNoTracking().AsQueryable();
         if (hasText)
         {
@@ -135,13 +169,69 @@ public sealed class PublicController : ControllerBase
             .ToListAsync(ct);
 
         var map = GenreMapStore.Load(_cfg);
-        var items = rows
+        var deduped = PreferFlac(rows
             .Where(t => genres.Count == 0 || genres.Contains(GenreMapStore.EffectiveGenre(map, t)))
-            .Where(t => decades.Count == 0 || decades.Contains(GenreMapStore.Decade(t.Year) ?? 0))
-            .Take(take)
-            .Select(t => new { t.Id, t.Title, t.Artist, t.Album, t.DurationSec })
+            .Where(t => decades.Count == 0 || decades.Contains(GenreMapStore.Decade(t.Year) ?? 0)))
             .ToList();
-        return new { items };
+
+        // Album row: grouped over the FULL (deduped) match set, not the taken
+        // page, so an album whose songs sit past the take still surfaces.
+        var albums = deduped
+            .Where(t => !string.IsNullOrWhiteSpace(t.Album))
+            .GroupBy(t => t.Album!.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                var artists = g.Select(t => t.Artist).Where(a => !string.IsNullOrWhiteSpace(a))
+                    .Distinct(StringComparer.OrdinalIgnoreCase).Take(2).ToList();
+                return new
+                {
+                    album = g.Key,
+                    artist = artists.Count == 1 ? artists[0] : "Various artists",
+                    trackId = g.First().Id,     // representative, for the cover art
+                    count = g.Count()
+                };
+            })
+            .OrderByDescending(a => a.count).ThenBy(a => a.album, StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
+
+        return new { items = ToItems(deduped.Take(take)), albums };
+    }
+
+    /// <summary>
+    /// Same-song format twins collapse to one row: FLAC wins over MP3 (and any
+    /// other type); the MP3 only shows when no FLAC matched. Twin = same
+    /// artist + title, case-insensitive. Untitled rows never collapse. Keeps
+    /// the incoming order (first occurrence of each song).
+    /// </summary>
+    private static IEnumerable<Track> PreferFlac(IEnumerable<Track> rows) =>
+        rows.GroupBy(t => string.IsNullOrWhiteSpace(t.Title)
+                ? $"#{t.Id}"
+                : $"{(t.Artist ?? "").Trim().ToLowerInvariant()}|{t.Title!.Trim().ToLowerInvariant()}")
+            .Select(g => g
+                .OrderByDescending(t => string.Equals(t.Type, "FLAC", StringComparison.OrdinalIgnoreCase))
+                .ThenBy(t => t.Id)
+                .First());
+
+    private static List<object> ToItems(IEnumerable<Track> rows) =>
+        rows.Select(t => (object)new { t.Id, t.Title, t.Artist, t.Album, t.DurationSec }).ToList();
+
+    /// <summary>
+    /// The saved playlists for the listener browse band (replaces the retired
+    /// genre/decade chips): every playlist, admin-tile order, with its track
+    /// count. <c>showSelector</c> carries the operator's Settings toggle
+    /// (formerly the category-selector flag).
+    /// </summary>
+    [HttpGet("playlists")]
+    public async Task<object> Playlists(CancellationToken ct)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        var show = (await db.Settings.AsNoTracking().FirstOrDefaultAsync(ct))?.ShowWebCategories ?? false;
+        var playlists = await db.SavedPlaylists.AsNoTracking()
+            .OrderBy(p => p.TileOrder).ThenBy(p => p.Name)
+            .Select(p => new { id = p.Id, name = p.Name, count = p.Tracks.Count })
+            .ToListAsync(ct);
+        return new { showSelector = show, playlists };
     }
 
     /// <summary>
