@@ -1,0 +1,103 @@
+/* /DJAdmin — a dark, high-contrast phone console. Everything is thumb-sized
+   (56 px minimum) because it gets used one-handed, in the dark, while people
+   are talking to you. */
+
+.dj {
+  position: absolute; inset: 0; overflow-y: auto;
+  background: #0b0d12; color: #e8ecf2;
+  font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  padding: 10px 12px 28px;
+  -webkit-user-select: none; user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.dj-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 2px 10px; }
+.dj-title { font-size: .78rem; letter-spacing: .14em; text-transform: uppercase; color: #7f8ea3; }
+.dj-gain { font-variant-numeric: tabular-nums; font-weight: 700; color: #56d69a; }
+.dj-gain.is-down { color: #ffb454; }
+
+/* Now playing */
+.dj-now {
+  background: #141821; border: 1px solid #232a36; border-radius: 14px;
+  padding: 12px 14px; margin-bottom: 12px;
+}
+.dj-now-state { font-size: .72rem; letter-spacing: .12em; color: #56d69a; margin-bottom: 4px; }
+.dj-now-artist { font-size: 1.25rem; font-weight: 800; line-height: 1.15; }
+.dj-now-title { font-size: 1rem; color: #aab6c6; margin-top: 2px; }
+.dj-now-time { font-size: .8rem; color: #6d7b8d; margin-top: 6px; font-variant-numeric: tabular-nums; }
+
+/* Buttons: a fill sweeps left→right over the hold time, so the 500 ms wait is
+   visible rather than mysterious. */
+.dj-btn {
+  position: relative; overflow: hidden;
+  width: 100%; min-height: 56px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  border: 1px solid #2b3442; border-radius: 14px;
+  background: #171c26; color: #e8ecf2;
+  font: inherit; font-weight: 700;
+  padding: 10px 12px; margin-bottom: 10px;
+  touch-action: manipulation;
+}
+.dj-btn:disabled { opacity: .4; }
+.dj-btn-label { position: relative; z-index: 1; font-size: 1rem; }
+.dj-btn-sub { position: relative; z-index: 1; font-size: .72rem; font-weight: 400; color: #8c9aad; }
+.dj-btn-fill {
+  position: absolute; inset: 0 auto 0 0; width: 0; z-index: 0;
+  background: linear-gradient(90deg, #1f6f4d, #2fae74);
+}
+.dj-btn.is-holding .dj-btn-fill { animation: dj-fill linear forwards; }
+@keyframes dj-fill { from { width: 0 } to { width: 100% } }
+
+.dj-row { display: flex; gap: 10px; }
+.dj-row .dj-btn { flex: 1 1 0; }
+
+/* Talk-over: acts on press, so it gets no fill — it's coloured to stand apart. */
+.dj-talk { min-height: 88px; background: #1d2432; border-color: #3a4658; }
+.dj-talk.is-on { background: #7a4a12; border-color: #ffb454; }
+.dj-pause.is-on { background: #3a2a12; border-color: #ffb454; }
+.dj-next { background: #14242e; }
+
+/* Sections */
+.dj-sect { margin-top: 14px; }
+.dj-sect-head {
+  font-size: .72rem; letter-spacing: .14em; text-transform: uppercase;
+  color: #7f8ea3; margin: 0 0 8px 2px; font-weight: 700;
+}
+.dj-empty { color: #6d7b8d; font-size: .85rem; padding: 8px 2px; }
+
+/* Auto DJ playlist toggles */
+.dj-feeds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.dj-feeds .dj-btn { margin-bottom: 0; min-height: 62px; }
+.dj-feed.is-on { background: #16362a; border-color: #2fae74; }
+.dj-feed.is-sched { background: #2c2a16; border-color: #b9a24a; }
+.dj-feed .dj-btn-label { font-size: .88rem; text-align: center; }
+
+/* Queue */
+.dj-queue { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.dj-qrow {
+  display: flex; align-items: center; gap: 10px;
+  background: #141821; border: 1px solid #232a36; border-radius: 12px;
+  padding: 8px 10px;
+}
+.dj-qmain { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.dj-qartist { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dj-qtitle { font-size: .85rem; color: #aab6c6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dj-qdur { font-size: .8rem; color: #6d7b8d; font-variant-numeric: tabular-nums; }
+.dj-del {
+  width: 56px; min-height: 48px; flex: 0 0 auto; margin-bottom: 0;
+  background: #2a1418; border-color: #5a2630;
+}
+.dj-del .dj-btn-label { font-size: 1.1rem; }
+.dj-del .dj-btn-fill { background: linear-gradient(90deg, #7a1f2b, #c23b4b); }
+
+.dj-toast {
+  position: fixed; left: 12px; right: 12px; bottom: 14px; z-index: 20;
+  background: #232a36; border: 1px solid #3a4658; border-radius: 12px;
+  padding: 12px 14px; text-align: center; font-size: .9rem;
+}
+
+/* Tablet / desktop: keep it a phone-width column rather than stretching. */
+@media (min-width: 700px) {
+  .dj { padding: 18px calc(50% - 320px) 40px; }
+  .dj-feeds { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}

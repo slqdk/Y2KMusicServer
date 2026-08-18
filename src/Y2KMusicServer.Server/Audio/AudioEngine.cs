@@ -87,6 +87,18 @@ public sealed class AudioEngine
 
     // Crossfade ramp state (guarded by _gate).
     private bool _crossfading;
+
+    // ── Master gain (talk-over duck / fade-to-pause) ─────────────────────────
+    // _duckGain multiplies both decks post-fader. The tick loop walks it toward
+    // _duckTarget at _duckStep per tick, so every change is a smooth ramp rather
+    // than a click. _pauseAtSilence pauses the transport once the ramp lands on
+    // zero (the "fade then pause" button).
+    private volatile float _duckGain = 1f;
+    private float _duckTarget = 1f;
+    private float _duckStep = 1f;
+    private bool _pauseAtSilence;
+    private bool _duckActive;      // talk-over is holding the level down
+    private bool _fadePaused;      // paused via the fading pause button
     private float _fadeBEntry;   // Normal-crossfade B start level (0..1 of target), 0 otherwise
     private bool _bManualStarted;   // operator started the silent Deck B preview (pump running)
     private double _crossFadePos;
@@ -437,6 +449,70 @@ public sealed class AudioEngine
         EmitNowPlaying();
         EmitTaps();
         return LoadResult.Ok;
+    }
+
+    /// <summary>
+    /// Talk-over duck: hold the music down at <paramref name="level"/> (0–1 of
+    /// normal) while the DJ speaks, then back up when released. Both directions
+    /// ramp over <paramref name="fadeSec"/>.
+    /// </summary>
+    public void SetDuck(bool on, double level, double fadeSec)
+    {
+        lock (_gate)
+        {
+            _duckActive = on;
+            if (_fadePaused && on) return;          // already silent; nothing to duck
+            RampTo_Locked(on ? (float)Math.Clamp(level, 0, 1) : 1f, fadeSec, pauseAtSilence: false);
+        }
+    }
+
+    /// <summary>
+    /// Fading pause: ramp to silence over <paramref name="fadeSec"/> and pause
+    /// the transport at the bottom; releasing plays first, then ramps back up.
+    /// </summary>
+    public void SetFadePause(bool on, double fadeSec)
+    {
+        lock (_gate)
+        {
+            _fadePaused = on;
+            if (on)
+            {
+                RampTo_Locked(0f, fadeSec, pauseAtSilence: true);
+            }
+            else
+            {
+                _pauseAtSilence = false;
+                if (_state == PlaybackEngineState.Paused) Play();
+                // Back to whatever the duck says: still held down if the DJ is
+                // talking, otherwise full level.
+                RampTo_Locked(1f, fadeSec, pauseAtSilence: false);
+            }
+        }
+    }
+
+    /// <summary>Caller holds <see cref="_gate"/>.</summary>
+    private void RampTo_Locked(float target, double fadeSec, bool pauseAtSilence)
+    {
+        _duckTarget = Math.Clamp(target, 0f, 1f);
+        var secs = Math.Max(0.05, fadeSec);
+        _duckStep = (float)(TickMs / 1000.0 / secs);   // full 0→1 travel in fadeSec
+        _pauseAtSilence = pauseAtSilence;
+    }
+
+    /// <summary>Caller holds <see cref="_gate"/>. Pushes the gain to every deck.</summary>
+    private void ApplyDuckGain_Locked()
+    {
+        var g = _duckGain;
+        if (_deckA != null) _deckA.Duck.Volume = g;
+        if (_deckB != null) _deckB.Duck.Volume = g;
+        var prep = _prepared?.DeckB;
+        if (prep != null) prep.Duck.Volume = g;
+    }
+
+    /// <summary>Current master gain and what is holding it (for the DJ page).</summary>
+    public (float Gain, bool Ducked, bool FadePaused) DuckState()
+    {
+        lock (_gate) return (_duckGain, _duckActive, _fadePaused);
     }
 
     public bool Play()
@@ -849,6 +925,33 @@ public sealed class AudioEngine
             lock (_gate)
             {
                 if (_deckA == null) continue;
+
+                // ── Master gain ramp (talk-over duck / fade pause) ──────────
+                // Runs before the mix logic so both decks carry the same gain
+                // through a crossfade. Pausing at the bottom of a fade happens
+                // here, once, when the ramp actually lands on silence.
+                if (_duckGain != _duckTarget)
+                {
+                    var g = _duckGain < _duckTarget
+                        ? Math.Min(_duckTarget, _duckGain + _duckStep)
+                        : Math.Max(_duckTarget, _duckGain - _duckStep);
+                    _duckGain = Math.Clamp(g, 0f, 1f);
+                    ApplyDuckGain_Locked();
+                }
+
+                if (_pauseAtSilence && _duckGain <= 0.001f)
+                {
+                    _pauseAtSilence = false;
+                    if (_state == PlaybackEngineState.Playing)
+                    {
+                        _deckA.Out.Pause();
+                        if (_crossfading) _deckB?.Out.Pause();
+                        if (_prepared?.Manual == true && _bManualStarted) _prepared.DeckB.Out.Pause();
+                        if (_prepared?.PrerollStarted == true) _prepared.DeckB.Out.Pause();
+                        _state = PlaybackEngineState.Paused;
+                        np ??= BuildNowPlaying_Locked();
+                    }
+                }
 
                 onsetA = _deckA.Fft.BassOnset;
 
@@ -1505,7 +1608,12 @@ public sealed class AudioEngine
         var meter = new MeteringSampleProvider(fft, 1024);  // content (pre-fader): VU
         var iso = new IsoFilter(meter);                     // EQ isolator (Bass/Vocal); bypass by default
         var vol = new VolumeSampleProvider(iso) { Volume = volume }; // output level + crossfade ramp
-        var health = new HealthTap(vol, "deck" + label, BlackBoxSeconds, OnHealthWindow); // diagnostics: sees exactly what output + stream get
+        // Master gain for the DJ's talk-over duck and the fade-to-pause. It sits
+        // AFTER the crossfade fader deliberately: the mix logic keeps writing
+        // Vol.Volume as it likes, and this multiplies whatever comes out, so the
+        // two can never fight over one value.
+        var duck = new VolumeSampleProvider(vol) { Volume = _duckGain };
+        var health = new HealthTap(duck, "deck" + label, BlackBoxSeconds, OnHealthWindow); // diagnostics: sees exactly what output + stream get
         var tap = new DeckTap(health);                      // post-fader capture for the live stream
 
         var wp = new SampleToWaveProvider(tap);
@@ -1529,6 +1637,7 @@ public sealed class AudioEngine
             Wp = wp,
             Meter = meter,
             Vol = vol,
+            Duck = duck,
             Iso = iso,
             Fft = fft,
             Tap = tap,
@@ -1741,6 +1850,7 @@ public sealed class AudioEngine
         public required NAudio.Wave.IWaveProvider Wp { get; init; }
         public required MeteringSampleProvider Meter { get; init; }
         public required VolumeSampleProvider Vol { get; init; }
+        public required VolumeSampleProvider Duck { get; init; }
         public required IsoFilter Iso { get; init; }
         public required FftAnalyser Fft { get; init; }
         public required DeckTap Tap { get; init; }

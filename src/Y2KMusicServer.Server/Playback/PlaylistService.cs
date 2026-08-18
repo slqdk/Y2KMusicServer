@@ -141,6 +141,20 @@ public sealed class PlaylistService
     }
 
     /// <summary>
+    /// The saved playlists with their slots loaded — for callers that need to
+    /// ask <see cref="IsPlaylistActiveNow"/> about each one (the DJ page).
+    /// </summary>
+    public async Task<IReadOnlyList<SavedPlaylist>> SavedPlaylistsWithSlotsAsync(CancellationToken ct = default)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        return await db.SavedPlaylists.AsNoTracking()
+            .Include(pl => pl.Slots)
+            .Include(pl => pl.Tracks)
+            .OrderBy(pl => pl.TileOrder)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
     /// The entry id the queue has played up to (0 = none). Survives restarts,
     /// so the admin queue can still grey out what already played when nothing
     /// is on the deck.
