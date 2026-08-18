@@ -171,6 +171,34 @@
 /* Theme picker alone in the top-right corner */
 .lz-topright { position: fixed; top: 10px; right: 16px; z-index: 45; }
 
+/* Speakers popover (Google Cast) — opens upward from the bottom bar */
+.lz-spwrap { position: relative; }
+.lz-sp-backdrop { position: fixed; inset: 0; z-index: 78; }
+.lz-sppop {
+  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 79;
+  min-width: 220px; max-width: min(86vw, 320px);
+  background: var(--lz-panel); color: var(--lz-text);
+  border: 1px solid var(--lz-line); border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .4);
+  padding: 6px; display: flex; flex-direction: column; gap: 4px;
+}
+.lz-sppop-head {
+  font-size: .72rem; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; opacity: .6; padding: 4px 8px 2px;
+}
+.lz-sprow {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  min-height: 42px; padding: 8px 10px;
+  border: 1px solid var(--lz-line); border-radius: 9px;
+  background: transparent; color: inherit; font: inherit; cursor: pointer;
+  text-align: left;
+}
+.lz-sprow:hover { background: color-mix(in srgb, var(--lz-text) 8%, transparent); }
+.lz-sprow.is-on { border-color: var(--lz-green); }
+.lz-sprow-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lz-sprow-act { font-size: .8rem; opacity: .75; white-space: nowrap; }
+.lz-sprow:disabled { opacity: .5; cursor: default; }
+
 /* Burger + drawer: mobile only (media query below); desktop keeps the sidebar */
 .lz-burger {
   display: none;

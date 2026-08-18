@@ -32,9 +32,16 @@ public static class CastConfigStore
         public string Host { get; set; } = "";
         public int Port { get; set; } = 8009;
 
-        /// <summary>Whether this speaker may be used. Off by default: nothing
-        /// gets cast to a device the operator hasn't ticked.</summary>
+        /// <summary>Whether this speaker may be used at all. Off by default:
+        /// nothing gets cast to a device the operator hasn't ticked.</summary>
         public bool Allowed { get; set; } = false;
+
+        /// <summary>Whether WEBSITE VISITORS may start this speaker. Strictly
+        /// narrower than <see cref="Allowed"/>: a guest-startable speaker must
+        /// also be allowed, and the listener list additionally requires the
+        /// global ShowOnListener switch. Off by default — the operator picks
+        /// which speakers the party can touch.</summary>
+        public bool GuestAllowed { get; set; } = false;
     }
 
     public sealed class CastConfig
@@ -135,6 +142,7 @@ public static class CastConfigStore
             s.Model = (s.Model ?? "").Trim();
             s.Host = (s.Host ?? "").Trim();
             if (s.Port <= 0 || s.Port > 65535) s.Port = 8009;
+            if (!s.Allowed) s.GuestAllowed = false;   // guests can never exceed the operator gate
         }
         c.Speakers = c.Speakers.Where(s => s.Id.Length > 0).ToList();
         return c;

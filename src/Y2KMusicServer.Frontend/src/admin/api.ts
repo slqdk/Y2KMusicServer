@@ -236,7 +236,7 @@ export const removeSavedPlaylistTrack = (id: number, entryId: number) =>
   req<{ removed: boolean }>(`/api/admin/saved-playlists/${id}/tracks/${entryId}`, { method: 'DELETE' })
 export interface CastDeviceDto {
   id: string; name: string; model: string; host: string; port: number
-  allowed: boolean; online: boolean; casting: boolean
+  allowed: boolean; guestAllowed: boolean; online: boolean; casting: boolean
 }
 export interface CastStatusDto {
   enabled: boolean; showOnListener: boolean; volume: number
@@ -251,6 +251,8 @@ export const setCastConfig = (p: { enabled?: boolean; showOnListener?: boolean; 
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) })
 export const setCastAllowed = (id: string, value: boolean) =>
   req<unknown>(`/api/admin/cast/${encodeURIComponent(id)}/allowed?value=${value}`, { method: 'POST' })
+export const setCastGuestAllowed = (id: string, value: boolean) =>
+  req<unknown>(`/api/admin/cast/${encodeURIComponent(id)}/guest?value=${value}`, { method: 'POST' })
 export const playCast = (id: string) =>
   req<{ ok: boolean; message: string }>(`/api/admin/cast/${encodeURIComponent(id)}/play`, { method: 'POST' })
 export const stopCast = (id: string) =>

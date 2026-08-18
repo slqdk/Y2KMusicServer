@@ -118,6 +118,42 @@ export default function App() {
   // been issued (same 500 ms settle as the fetch).
   const [showResults, setShowResults] = useState(false)
 
+  // Speakers the party may start (Google Cast). Empty unless the DJ enabled
+  // guest control AND ticked individual speakers, so the button simply does
+  // not exist otherwise.
+  type Speaker = { id: string; name: string; casting: boolean }
+  const [speakers, setSpeakers] = useState<Speaker[]>([])
+  const [spOpen, setSpOpen] = useState(false)
+  const [spBusy, setSpBusy] = useState(false)
+  const loadSpeakers = () =>
+    fetch('/api/cast/speakers')
+      .then(r => r.json())
+      .then(d => setSpeakers(Array.isArray(d?.speakers) ? d.speakers : []))
+      .catch(() => {})
+  useEffect(() => {
+    void loadSpeakers()
+    const id = window.setInterval(() => { void loadSpeakers() }, 10000)
+    return () => window.clearInterval(id)
+  }, [])
+  const castTo = async (s: Speaker) => {
+    setSpBusy(true)
+    try {
+      const r = await fetch(s.casting ? '/api/cast/stop' : '/api/cast/play', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId: s.id })
+      })
+      const d = await r.json().catch(() => null)
+      flash(r.ok
+        ? (s.casting ? `Stopped ${s.name}.` : `Playing on ${s.name}!`)
+        : (d?.error ?? 'That speaker could not be started.'))
+      await loadSpeakers()
+    } catch {
+      flash('That speaker could not be reached.')
+    } finally {
+      setSpBusy(false)
+    }
+  }
+
   // Mobile burger drawer (name + theme + playlists). CSS hides the burger on
   // desktop, where the sidebar stays as-is.
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -467,6 +503,30 @@ export default function App() {
       {/* ── Fixed bottom bar: now playing + the next two songs ─────────── */}
       <div className="lz-nowbar">
         <div className="lz-nowbar-controls">
+          {speakers.length > 0 && (
+            <div className="lz-spwrap">
+              <button className={`lz-btn${speakers.some(s => s.casting) ? ' is-live' : ''}`}
+                onClick={() => setSpOpen(o => !o)}
+                title="Play the music on a speaker in the house">
+                🔊 Speakers
+              </button>
+              {spOpen && (
+                <>
+                  <div className="lz-sp-backdrop" onMouseDown={() => setSpOpen(false)} />
+                  <div className="lz-sppop">
+                    <div className="lz-sppop-head">Play on…</div>
+                    {speakers.map(s => (
+                      <button key={s.id} className={`lz-sprow${s.casting ? ' is-on' : ''}`}
+                        disabled={spBusy} onClick={() => castTo(s)}>
+                        <span className="lz-sprow-name">{s.name}</span>
+                        <span className="lz-sprow-act">{s.casting ? '■ Stop' : '▶ Play'}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           {stream?.showListenLive && (
             <button
               className={`lz-btn${live ? ' is-live' : ''}`}

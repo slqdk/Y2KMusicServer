@@ -47,7 +47,7 @@ export default function SpeakersDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="w-overlay" onMouseDown={onClose}>
-      <div className="w-dialog w-raised" onMouseDown={e => e.stopPropagation()} style={{ width: 680, maxWidth: '94vw' }}>
+      <div className="w-dialog w-raised" onMouseDown={e => e.stopPropagation()} style={{ width: 760, maxWidth: '94vw' }}>
         <div className="w-titlebar">
           <span className="w-app">Speakers (Google Cast)</span>
           <span style={{ flex: 1 }} />
@@ -73,6 +73,9 @@ export default function SpeakersDialog({ onClose }: { onClose: () => void }) {
               onChange={e => act(() => api.setCastConfig({ showOnListener: e.target.checked }))} />
             {' '}Let website visitors start speakers themselves
           </label>
+          <div className="w-muted" style={{ margin: '2px 0 6px 22px' }}>
+            Visitors only ever see the speakers marked <b>Guests</b> in the list below.
+          </div>
 
           <div className="w-formrow">
             <label>Start volume:</label>
@@ -112,6 +115,7 @@ export default function SpeakersDialog({ onClose }: { onClose: () => void }) {
                 <th>Speaker</th>
                 <th style={{ width: 130 }}>Model</th>
                 <th style={{ width: 90 }}>Status</th>
+                <th style={{ width: 96 }} title="May website visitors start this speaker?">Guests</th>
                 <th style={{ width: 190 }} />
               </tr>
             </thead>
@@ -124,6 +128,17 @@ export default function SpeakersDialog({ onClose }: { onClose: () => void }) {
                   </td>
                   <td className="w-muted">{d.model || '---'}</td>
                   <td className="w-muted">{d.online ? 'found' : 'not seen'}</td>
+                  <td>
+                    <button className="w-btn" disabled={busy || !d.allowed}
+                      title={d.allowed
+                        ? (d.guestAllowed
+                          ? 'Website visitors can start this speaker — click to restrict it to the DJ'
+                          : 'Only the DJ can start this speaker — click to let visitors start it')
+                        : 'Allow the speaker first'}
+                      onClick={() => act(() => api.setCastGuestAllowed(d.id, !d.guestAllowed))}>
+                      {d.allowed && d.guestAllowed ? 'Guests' : 'DJ only'}
+                    </button>
+                  </td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     <button className="w-btn" disabled={busy}
                       title={d.allowed ? 'Stop using this speaker' : 'Allow this speaker to be used'}
@@ -140,7 +155,7 @@ export default function SpeakersDialog({ onClose }: { onClose: () => void }) {
                 </tr>
               ))}
               {devices.length === 0 && (
-                <tr><td colSpan={4} className="w-muted" style={{ padding: 8 }}>
+                <tr><td colSpan={5} className="w-muted" style={{ padding: 8 }}>
                   No speakers yet. Switch casting on, then press “Search for speakers”.
                 </td></tr>
               )}

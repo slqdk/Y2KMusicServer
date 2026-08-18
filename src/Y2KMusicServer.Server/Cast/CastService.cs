@@ -62,7 +62,7 @@ public sealed class CastService : IDisposable
     /// <summary>A speaker as reported to the UI.</summary>
     public sealed record CastDeviceDto(
         string Id, string Name, string Model, string Host, int Port,
-        bool Allowed, bool Online, bool Casting);
+        bool Allowed, bool GuestAllowed, bool Online, bool Casting);
 
     // ── Discovery ────────────────────────────────────────────────────────────
 
@@ -140,13 +140,26 @@ public sealed class CastService : IDisposable
             lock (_found) online = _found.ContainsKey(s.Id);
             bool casting;
             lock (_sessions) casting = _sessions.ContainsKey(s.Id);
-            list.Add(new CastDeviceDto(s.Id, s.Name, s.Model, s.Host, s.Port, s.Allowed, online, casting));
+            list.Add(new CastDeviceDto(s.Id, s.Name, s.Model, s.Host, s.Port,
+                s.Allowed, s.GuestAllowed, online, casting));
         }
         return list;
     }
 
     /// <summary>The remembered speakers without touching the network.</summary>
     public IReadOnlyList<CastDeviceDto> Known() => Snapshot(CastConfigStore.Load(_cfg));
+
+    /// <summary>
+    /// The speakers a website visitor may see and start: feature on, listener
+    /// switch on, speaker allowed AND marked guest-startable. Empty list when
+    /// any gate is closed — the listener UI then shows nothing at all.
+    /// </summary>
+    public IReadOnlyList<CastDeviceDto> GuestVisible()
+    {
+        var cfg = CastConfigStore.Load(_cfg);
+        if (!cfg.Enabled || !cfg.ShowOnListener) return Array.Empty<CastDeviceDto>();
+        return Snapshot(cfg).Where(d => d.Allowed && d.GuestAllowed).ToList();
+    }
 
     // ── Casting ──────────────────────────────────────────────────────────────
 
@@ -156,7 +169,10 @@ public sealed class CastService : IDisposable
     /// Starts (or restarts) the live stream on one speaker. Refuses unless
     /// casting is enabled and the speaker is allow-listed.
     /// </summary>
-    public async Task<CastResult> PlayAsync(string deviceId, CancellationToken ct = default)
+    /// <param name="guest">True when the caller is a website visitor rather
+    /// than the operator: the speaker must then also be guest-startable and the
+    /// listener switch must be on.</param>
+    public async Task<CastResult> PlayAsync(string deviceId, bool guest = false, CancellationToken ct = default)
     {
         var cfg = CastConfigStore.Load(_cfg);
         if (!cfg.Enabled) return new CastResult(false, "Casting is switched off.");
@@ -165,6 +181,8 @@ public sealed class CastService : IDisposable
             string.Equals(s.Id, deviceId, StringComparison.OrdinalIgnoreCase));
         if (speaker == null) return new CastResult(false, "Unknown speaker — run a discovery first.");
         if (!speaker.Allowed) return new CastResult(false, $"{speaker.Name} is not allowed to be used.");
+        if (guest && (!cfg.ShowOnListener || !speaker.GuestAllowed))
+            return new CastResult(false, $"{speaker.Name} can only be started by the DJ.");
 
         var receiver = await ResolveAsync(speaker).ConfigureAwait(false);
         if (receiver == null)
@@ -219,8 +237,17 @@ public sealed class CastService : IDisposable
     }
 
     /// <summary>Stops the cast on one speaker (best effort; always succeeds).</summary>
-    public async Task<CastResult> StopAsync(string deviceId, CancellationToken ct = default)
+    public async Task<CastResult> StopAsync(string deviceId, bool guest = false, CancellationToken ct = default)
     {
+        if (guest)
+        {
+            var cfg = CastConfigStore.Load(_cfg);
+            var sp = cfg.Speakers.FirstOrDefault(s =>
+                string.Equals(s.Id, deviceId, StringComparison.OrdinalIgnoreCase));
+            if (!cfg.Enabled || !cfg.ShowOnListener || sp == null || !sp.Allowed || !sp.GuestAllowed)
+                return new CastResult(false, "That speaker can only be stopped by the DJ.");
+        }
+
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {

@@ -95,6 +95,23 @@ public sealed class AdminCastController : ControllerBase
         return Ok(new { id, allowed = value, devices = _cast.Known() });
     }
 
+    /// <summary>
+    /// Decides whether website visitors may start this speaker. Only meaningful
+    /// for a speaker that is already allowed; the store enforces that.
+    /// </summary>
+    [HttpPost("{id}/guest")]
+    public IActionResult SetGuestAllowed(string id, [FromQuery] bool value)
+    {
+        bool found = false;
+        CastConfigStore.Update(_cfg, c =>
+        {
+            var s = c.Speakers.FirstOrDefault(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase));
+            if (s != null) { s.GuestAllowed = value && s.Allowed; found = true; }
+        });
+        if (!found) return NotFound(new { error = "unknown speaker" });
+        return Ok(new { id, guestAllowed = value, devices = _cast.Known() });
+    }
+
     /// <summary>Starts the live stream on a speaker.</summary>
     [HttpPost("{id}/play")]
     public async Task<IActionResult> Play(string id, CancellationToken ct)

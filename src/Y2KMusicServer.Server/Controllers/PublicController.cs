@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Y2KMusicServer.Server.Audio;
+using Y2KMusicServer.Server.Cast;
 using Y2KMusicServer.Server.Data;
 using Y2KMusicServer.Server.Data.Entities;
 using Y2KMusicServer.Server.Playback;
@@ -23,15 +24,17 @@ public sealed class PublicController : ControllerBase
     private readonly PlaylistService _playlist;
     private readonly IDbContextFactory<Y2KDbContext> _dbf;
     private readonly IConfiguration _cfg;
+    private readonly CastService _cast;
 
     public PublicController(AudioEngine engine, StreamingEncoder stream, PlaylistService playlist,
-        IDbContextFactory<Y2KDbContext> dbf, IConfiguration cfg)
+        IDbContextFactory<Y2KDbContext> dbf, IConfiguration cfg, CastService cast)
     {
         _engine = engine;
         _stream = stream;
         _playlist = playlist;
         _dbf = dbf;
         _cfg = cfg;
+        _cast = cast;
     }
 
     public sealed record RequestBody(int TrackId, string? RequesterName, string? DeviceId);
@@ -385,6 +388,49 @@ public sealed class PublicController : ControllerBase
             accepted = autoAccept,
             cooldownSec = web.RequestLimitEnabled ? web.RequestIntervalMinutes * 60 : 0
         });
+    }
+
+    // ── Speakers (Google Cast) ───────────────────────────────────────────────
+    // Guests only ever see speakers the operator marked guest-startable, and
+    // only while the feature and its listener switch are both on. Everything
+    // else 403s — the button being absent is UX, this is the rule.
+
+    /// <summary>Speakers a visitor may start, or an empty list.</summary>
+    [HttpGet("cast/speakers")]
+    public object CastSpeakers()
+        => new
+        {
+            speakers = _cast.GuestVisible()
+                .Select(d => new { d.Id, d.Name, d.Casting })
+                .ToList()
+        };
+
+    public sealed record CastBody(string? DeviceId);
+
+    /// <summary>Starts the live stream on a guest-startable speaker.</summary>
+    [HttpPost("cast/play")]
+    public async Task<IActionResult> CastPlay([FromBody] CastBody? body, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(body?.DeviceId))
+            return BadRequest(new { error = "deviceId required" });
+
+        var r = await _cast.PlayAsync(body.DeviceId.Trim(), guest: true, ct);
+        return r.Ok
+            ? Ok(new { ok = true, message = r.Message })
+            : StatusCode(403, new { ok = false, error = r.Message });
+    }
+
+    /// <summary>Stops a guest-startable speaker.</summary>
+    [HttpPost("cast/stop")]
+    public async Task<IActionResult> CastStop([FromBody] CastBody? body, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(body?.DeviceId))
+            return BadRequest(new { error = "deviceId required" });
+
+        var r = await _cast.StopAsync(body.DeviceId.Trim(), guest: true, ct);
+        return r.Ok
+            ? Ok(new { ok = true, message = r.Message })
+            : StatusCode(403, new { ok = false, error = r.Message });
     }
 
     /// <summary>
