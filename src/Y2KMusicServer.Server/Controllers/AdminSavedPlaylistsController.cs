@@ -175,6 +175,92 @@ public sealed class AdminSavedPlaylistsController : ControllerBase
         return Ok(new { deleted = pl.Name });
     }
 
+    // ── Moving tracks between playlists ───────────────────────────────────────
+
+    public sealed class MoveBody
+    {
+        /// <summary>Entry ids (not track ids) from the SOURCE playlist.</summary>
+        public List<int>? EntryIds { get; set; }
+
+        /// <summary>Destination playlist.</summary>
+        public int TargetPlaylistId { get; set; }
+
+        /// <summary>True = leave the tracks in the source as well.</summary>
+        public bool Copy { get; set; }
+    }
+
+    /// <summary>
+    /// Moves (or copies) selected entries from one saved playlist to another.
+    /// Tracks land at the end of the target in the order they appear in the
+    /// source, duplicates already present in the target are skipped rather than
+    /// doubled, and the source is renumbered afterwards so positions stay dense.
+    /// </summary>
+    [HttpPost("{id:int}/move")]
+    public async Task<IActionResult> MoveTracks(int id, [FromBody] MoveBody? body, CancellationToken ct)
+    {
+        if (body?.EntryIds == null || body.EntryIds.Count == 0)
+            return UnprocessableEntity(new { error = "no tracks selected" });
+        if (body.TargetPlaylistId == id)
+            return UnprocessableEntity(new { error = "source and destination are the same playlist" });
+
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+
+        var source = await db.SavedPlaylists.FirstOrDefaultAsync(p => p.Id == id, ct);
+        var target = await db.SavedPlaylists.FirstOrDefaultAsync(p => p.Id == body.TargetPlaylistId, ct);
+        if (source == null || target == null) return NotFound();
+
+        var ids = body.EntryIds.ToHashSet();
+        var picked = await db.SavedPlaylistTracks
+            .Where(t => t.SavedPlaylistId == id && ids.Contains(t.Id))
+            .OrderBy(t => t.Position)
+            .ToListAsync(ct);
+        if (picked.Count == 0) return UnprocessableEntity(new { error = "those tracks are not in this playlist" });
+
+        var already = await db.SavedPlaylistTracks
+            .Where(t => t.SavedPlaylistId == target.Id)
+            .Select(t => t.TrackId)
+            .ToListAsync(ct);
+        var have = already.ToHashSet();
+        int nextPos = await db.SavedPlaylistTracks
+            .Where(t => t.SavedPlaylistId == target.Id)
+            .Select(t => (int?)t.Position).MaxAsync(ct) is int m ? m + 1 : 0;
+
+        int added = 0, skipped = 0;
+        foreach (var entry in picked)
+        {
+            if (!have.Add(entry.TrackId)) { skipped++; continue; }
+            db.SavedPlaylistTracks.Add(new SavedPlaylistTrack
+            {
+                SavedPlaylistId = target.Id,
+                TrackId = entry.TrackId,
+                Position = nextPos++
+            });
+            added++;
+        }
+
+        if (!body.Copy) db.SavedPlaylistTracks.RemoveRange(picked);
+        await db.SaveChangesAsync(ct);
+
+        // Close the gaps the move left behind.
+        if (!body.Copy)
+        {
+            var rest = await db.SavedPlaylistTracks
+                .Where(t => t.SavedPlaylistId == id)
+                .OrderBy(t => t.Position).ToListAsync(ct);
+            for (int i = 0; i < rest.Count; i++) rest[i].Position = i;
+            await db.SaveChangesAsync(ct);
+        }
+
+        return Ok(new
+        {
+            moved = body.Copy ? 0 : picked.Count,
+            copied = body.Copy ? added : 0,
+            added,
+            skipped,
+            target = target.Name
+        });
+    }
+
     // ── Export / import ───────────────────────────────────────────────────────
 
     /// <summary>

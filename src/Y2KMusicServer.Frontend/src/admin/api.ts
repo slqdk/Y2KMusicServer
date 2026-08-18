@@ -265,6 +265,14 @@ export const stopAllCasts = () =>
 export interface PlaylistImportResult {
   id: number; name: string; matched: number; missing: number; missingSamples: string[]
 }
+export interface MoveTracksResult {
+  moved: number; copied: number; added: number; skipped: number; target: string
+}
+export const moveSavedPlaylistTracks = (id: number, entryIds: number[], targetPlaylistId: number, copy: boolean) =>
+  req<MoveTracksResult>(`/api/admin/saved-playlists/${id}/move`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entryIds, targetPlaylistId, copy })
+  })
 export const setPlaylistFeed = (id: number, value: boolean) =>
   req<{ id: number; feed: boolean }>(`/api/admin/saved-playlists/${id}/feed?value=${value}`, { method: 'POST' })
 export const exportSavedPlaylistUrl = (id: number) =>

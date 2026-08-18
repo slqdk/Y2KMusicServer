@@ -153,6 +153,35 @@ export default function PlaylistPanel(
   const toggleFeed = (pl: api.SavedPlaylistDto) =>
     guard(async () => { await api.setPlaylistFeed(pl.id, !pl.feed); await refreshTiles() })
 
+  // Multi-select inside a saved playlist, for moving tracks between playlists.
+  // Keyed on entryId (a track can sit in several playlists, entries can't).
+  const [sel, setSel] = useState<Set<number>>(new Set())
+  const [moveTo, setMoveTo] = useState<number | ''>('')
+  const toggleSel = (entryId: number) =>
+    setSel(prev => {
+      const n = new Set(prev)
+      if (!n.delete(entryId)) n.add(entryId)
+      return n
+    })
+  const selectAllView = () =>
+    setSel(prev => prev.size === viewItems.length
+      ? new Set()
+      : new Set(viewItems.map(t => t.entryId)))
+  // Leaving the playlist (or reloading it) must not keep a stale selection.
+  useEffect(() => { setSel(new Set()); setMoveTo('') }, [viewing?.id])
+
+  const moveSelected = (copy: boolean) => {
+    if (!viewing || sel.size === 0 || moveTo === '') return
+    guard(async () => {
+      const r = await api.moveSavedPlaylistTracks(viewing.id, [...sel], Number(moveTo), copy)
+      setNote(`${copy ? 'Copied' : 'Moved'} ${r.added} track(s) to “${r.target}”`
+        + (r.skipped > 0 ? ` — ${r.skipped} already there` : '') + '.')
+      setSel(new Set())
+      await refreshView(viewing)
+      await refreshTiles()
+    })
+  }
+
   const acceptReq = (id: number) =>
     guard(async () => { await api.acceptRequest(id); await refreshReqs(); await refreshList() })
   const dismissReq = (id: number) =>
@@ -348,11 +377,36 @@ export default function PlaylistPanel(
               onClick={() => activate(viewing)}>▶ Activate</button>
             <button className="w-btn" onClick={() => setViewing(null)}>Back to live queue</button>
           </div>
+          <div className="w-toolbar" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button className="w-btn" disabled={busy || viewItems.length === 0} onClick={selectAllView}>
+              {sel.size === viewItems.length && viewItems.length > 0 ? 'Select none' : 'Select all'}
+            </button>
+            <span className="w-muted">{sel.size} selected</span>
+            <span style={{ flex: 1 }} />
+            <label>To:{' '}
+              <select value={moveTo} disabled={busy || sel.size === 0}
+                onChange={e => setMoveTo(e.target.value === '' ? '' : Number(e.target.value))}>
+                <option value="">— choose playlist —</option>
+                {tiles.filter(p => p.id !== viewing.id).map(p =>
+                  <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </label>
+            <button className="w-btn" disabled={busy || sel.size === 0 || moveTo === ''}
+              title="Move the selected tracks out of this playlist and into the chosen one"
+              onClick={() => moveSelected(false)}>Move →</button>
+            <button className="w-btn" disabled={busy || sel.size === 0 || moveTo === ''}
+              title="Add the selected tracks to the chosen playlist, keeping them here too"
+              onClick={() => moveSelected(true)}>Copy →</button>
+          </div>
           <div className="w-listwrap w-sunken" style={{ flex: 1, minHeight: 0, overflowX: 'hidden' }}>
             <table className="w-table w-grid">
               {view.colgroup}
               <thead>
                 <tr>
+                  <th style={{ width: 26 }} title="Select tracks to move or copy">
+                    <input type="checkbox" checked={sel.size > 0 && sel.size === viewItems.length}
+                      onChange={selectAllView} disabled={viewItems.length === 0} />
+                  </th>
                   <th className="w-num">#<ColResizer onMouseDown={view.startResize(0)} /></th>
                   <th>Title<ColResizer onMouseDown={view.startResize(1)} /></th>
                   <th>Artist<ColResizer onMouseDown={view.startResize(2)} /></th>
@@ -365,7 +419,12 @@ export default function PlaylistPanel(
               </thead>
               <tbody>
                 {viewItems.map(t => (
-                  <tr key={t.entryId}>
+                  <tr key={t.entryId} className={sel.has(t.entryId) ? 'w-rowsel' : ''}
+                    onClick={() => toggleSel(t.entryId)}>
+                    <td onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" checked={sel.has(t.entryId)}
+                        onChange={() => toggleSel(t.entryId)} />
+                    </td>
                     <td className="w-num">{t.position + 1}</td>
                     <td title={t.title ?? ''}>{t.title ?? '(untitled)'}</td>
                     <td title={t.artist ?? ''}>{t.artist ?? '---'}</td>
@@ -380,8 +439,8 @@ export default function PlaylistPanel(
                   </tr>
                 ))}
                 {viewItems.length === 0 && (
-                  <tr><td colSpan={8} className="w-muted" style={{ padding: 8 }}>
-                    Empty. Right-click tracks in the Library and choose “Add to playlist → {viewing.name}”.
+                  <tr><td colSpan={9} className="w-muted" style={{ padding: 8 }}>
+                    Empty. Add tracks from the Library, or select tracks in another playlist and use “Move →”.
                   </td></tr>
                 )}
               </tbody>
