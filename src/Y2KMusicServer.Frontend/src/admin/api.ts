@@ -623,7 +623,15 @@ export const checkYouTube = () =>
 // On/off gate (integrations.json server-side), plus search + fetch. Search is
 // metadata-only; fetch downloads the chosen track into the cache and returns a
 // normal library trackId to queue via addToPlaylist.
-export interface YouTubeSettings { enabled: boolean; cacheMaxMB: number; cacheMaxAgeDays: number }
+export interface YouTubeSettings {
+  enabled: boolean
+  cacheMaxMB: number
+  cacheMaxAgeDays: number
+  /** Where pasted-link downloads are filed (resolved: blank server-side = the default). */
+  downloadFolder: string
+  /** Non-null when the folder is unusable (e.g. it overlaps a Music folder). */
+  folderWarning: string | null
+}
 
 export interface YouTubeSearchItem {
   id: string
@@ -646,7 +654,7 @@ export const getYouTubeSettings = () =>
   req<YouTubeSettings>('/api/admin/integrations/youtube/settings')
 
 export const setYouTubeSettings = (
-  patch: { enabled?: boolean; cacheMaxMB?: number; cacheMaxAgeDays?: number }) =>
+  patch: { enabled?: boolean; cacheMaxMB?: number; cacheMaxAgeDays?: number; downloadFolder?: string }) =>
   req<YouTubeSettings>('/api/admin/integrations/youtube/settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -676,6 +684,61 @@ export async function fetchYouTube(videoId: string): Promise<YouTubeFetchResult>
     error: d.error ?? null,
   }
 }
+
+// ── YouTube downloads (paste a link → background download → library) ────
+// Queued server-side and drained by one background worker, so the calls here are
+// fire-and-poll: enqueue returns as soon as the jobs exist, and the job list is
+// polled while the dialog is open.
+export type YouTubeDownloadState =
+  'queued' | 'downloading' | 'indexing' | 'done' | 'failed' | 'cancelled'
+
+export interface YouTubeDownloadJob {
+  id: number
+  videoId: string
+  title: string
+  artist: string | null
+  state: YouTubeDownloadState
+  percent: number
+  message: string | null
+  trackId: number | null
+  filePath: string | null
+}
+export interface YouTubeDownloads {
+  folder: string
+  busy: boolean
+  jobs: YouTubeDownloadJob[]
+}
+
+export const getYouTubeDownloads = () =>
+  req<YouTubeDownloads>('/api/admin/integrations/youtube/downloads')
+
+// Enqueue reports refusals in the body (400 with { error }), so read the JSON
+// either way rather than letting req throw a status string at the UI.
+export async function queueYouTubeDownloads(urls: string): Promise<{
+  ok: boolean; queued: number; warning: string | null; error: string | null
+}> {
+  const r = await fetch('/api/admin/integrations/youtube/downloads', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ urls }),
+  })
+  const d = (await r.json().catch(() => ({}))) as
+    { queued?: number; warning?: string | null; error?: string | null }
+  return {
+    ok: r.ok,
+    queued: d.queued ?? 0,
+    warning: d.warning ?? null,
+    error: d.error ?? (r.ok ? null : 'Could not queue that.'),
+  }
+}
+
+export const cancelYouTubeDownload = (id: number) =>
+  req<{ cancelled: boolean }>(
+    `/api/admin/integrations/youtube/downloads/${id}/cancel`, { method: 'POST' })
+
+export const clearYouTubeDownloads = () =>
+  req<{ removed: number; jobs: YouTubeDownloadJob[] }>(
+    '/api/admin/integrations/youtube/downloads/clear', { method: 'POST' })
 
 // Web-cache housekeeping (ungated — usable even after turning the feature off).
 export interface WebCacheStats {

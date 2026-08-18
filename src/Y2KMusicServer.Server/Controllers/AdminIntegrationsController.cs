@@ -23,14 +23,17 @@ public sealed class AdminIntegrationsController : ControllerBase
     private readonly YouTubeProbe _probe;
     private readonly YouTubeFetchService _youtube;
     private readonly WebCacheHousekeeper _cache;
+    private readonly YouTubeDownloadService _downloads;
 
     public AdminIntegrationsController(IConfiguration cfg, YouTubeProbe probe,
-                                       YouTubeFetchService youtube, WebCacheHousekeeper cache)
+                                       YouTubeFetchService youtube, WebCacheHousekeeper cache,
+                                       YouTubeDownloadService downloads)
     {
         _cfg = cfg;
         _probe = probe;
         _youtube = youtube;
         _cache = cache;
+        _downloads = downloads;
     }
 
     // ── Preflight (always available — you test before enabling) ────────────
@@ -46,19 +49,23 @@ public sealed class AdminIntegrationsController : ControllerBase
 
     // ── On/off + cache caps (JSON store; no-migrations rule) ───────────────
 
-    public sealed record YouTubeSettings(bool Enabled, int CacheMaxMB, int CacheMaxAgeDays);
+    public sealed record YouTubeSettings(bool Enabled, int CacheMaxMB, int CacheMaxAgeDays,
+                                        string DownloadFolder, string? FolderWarning);
 
     // Partial update: only the fields provided are changed, so a caller that
     // sends just { enabled } leaves the caps untouched (and vice versa).
-    public sealed record YouTubeSettingsUpdate(bool? Enabled, int? CacheMaxMB, int? CacheMaxAgeDays);
+    public sealed record YouTubeSettingsUpdate(bool? Enabled, int? CacheMaxMB, int? CacheMaxAgeDays,
+                                              string? DownloadFolder);
 
     [HttpGet("youtube/settings")]
-    public IActionResult GetSettings()
-    {
-        var c = IntegrationsStore.Load(_cfg);
-        return Ok(new YouTubeSettings(c.YouTubeEnabled, c.WebCacheMaxMB, c.WebCacheMaxAgeDays));
-    }
+    public IActionResult GetSettings() => Ok(CurrentSettings());
 
+    /// <summary>
+    /// Saves the gate / caps / download folder. A download folder that overlaps a
+    /// Music folder is rejected outright rather than stored: the folder-scoped
+    /// library clear owns tracks by path prefix, so a nested YouTube folder would
+    /// be pruned along with the collection it sits in.
+    /// </summary>
     [HttpPut("youtube/settings")]
     public IActionResult PutSettings([FromBody] YouTubeSettingsUpdate body)
     {
@@ -66,9 +73,80 @@ public sealed class AdminIntegrationsController : ControllerBase
         if (body?.Enabled is bool en) c.YouTubeEnabled = en;
         if (body?.CacheMaxMB is int mb) c.WebCacheMaxMB = System.Math.Max(0, mb);
         if (body?.CacheMaxAgeDays is int age) c.WebCacheMaxAgeDays = System.Math.Max(0, age);
+
+        if (body?.DownloadFolder is string folder)
+        {
+            var trimmed = folder.Trim();
+            var clash = Overlap(trimmed);
+            if (clash != null)
+                return BadRequest(new { error = clash });
+            c.DownloadFolder = trimmed;
+        }
+
         IntegrationsStore.Save(_cfg, c);
-        return Ok(new YouTubeSettings(c.YouTubeEnabled, c.WebCacheMaxMB, c.WebCacheMaxAgeDays));
+        return Ok(CurrentSettings());
     }
+
+    private YouTubeSettings CurrentSettings()
+    {
+        var c = IntegrationsStore.Load(_cfg);
+        return new YouTubeSettings(c.YouTubeEnabled, c.WebCacheMaxMB, c.WebCacheMaxAgeDays,
+            _downloads.TargetFolder(), _downloads.ValidateFolder());
+    }
+
+    // A blank folder means "use the default under ProgramData", which is always
+    // outside the Music folders, so only a typed path is checked.
+    private string? Overlap(string folder)
+    {
+        if (folder.Length == 0) return null;
+        var self = Y2KMusicServer.Server.Data.FolderScope.Prefix(folder);
+        foreach (var scan in Y2KMusicServer.Server.Data.ScanFolderStore.AllPaths(_cfg))
+        {
+            var pre = Y2KMusicServer.Server.Data.FolderScope.Prefix(scan);
+            if (self.StartsWith(pre, System.StringComparison.OrdinalIgnoreCase)
+                || pre.StartsWith(self, System.StringComparison.OrdinalIgnoreCase))
+                return $"That folder overlaps the Music folder \"{scan}\". Pick a folder outside your music library.";
+        }
+        return null;
+    }
+
+    // ── Downloads (paste a link, get the song in the library) ──────────────
+
+    public sealed record DownloadRequest(string Urls);
+
+    /// <summary>
+    /// Queues one or more downloads. The body's text can hold links (one per line
+    /// or space-separated), bare video ids, playlist / album links, or plain
+    /// search words. Returns immediately — the queue is drained in the background;
+    /// poll <c>GET youtube/downloads</c> for progress.
+    /// </summary>
+    [HttpPost("youtube/downloads")]
+    public async Task<IActionResult> Enqueue([FromBody] DownloadRequest req, CancellationToken ct)
+    {
+        if (!Enabled()) return Disabled();
+        if (req is null || string.IsNullOrWhiteSpace(req.Urls))
+            return BadRequest(new { error = "Paste a YouTube link first." });
+
+        var (queued, error) = await _downloads.EnqueueAsync(req.Urls, ct);
+        if (queued == 0) return BadRequest(new { error = error ?? "Nothing could be queued." });
+        return Ok(new { queued, warning = error, jobs = _downloads.Jobs() });
+    }
+
+    /// <summary>Current + recent download jobs, newest first. Ungated so the
+    /// console can still show what happened after the feature is switched off.</summary>
+    [HttpGet("youtube/downloads")]
+    public IActionResult Downloads()
+        => Ok(new { folder = _downloads.TargetFolder(), busy = _downloads.Busy, jobs = _downloads.Jobs() });
+
+    /// <summary>Cancels a queued or running download.</summary>
+    [HttpPost("youtube/downloads/{id:int}/cancel")]
+    public IActionResult CancelDownload(int id)
+        => Ok(new { cancelled = _downloads.Cancel(id) });
+
+    /// <summary>Drops finished / failed jobs from the list (files are untouched).</summary>
+    [HttpPost("youtube/downloads/clear")]
+    public IActionResult ClearDownloads()
+        => Ok(new { removed = _downloads.ClearFinished(), jobs = _downloads.Jobs() });
 
     // ── Search + fetch (gated by the on/off flag) ──────────────────────────
 

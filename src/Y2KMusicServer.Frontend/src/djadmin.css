@@ -91,6 +91,26 @@
 .dj-del .dj-btn-label { font-size: 1.1rem; }
 .dj-del .dj-btn-fill { background: linear-gradient(90deg, #7a1f2b, #c23b4b); }
 
+/* Add from YouTube: paste box, hold-to-download, and the recent job list. */
+.dj-yt-input {
+  width: 100%; box-sizing: border-box; margin-bottom: 10px;
+  background: #0f131a; color: #e8eef7;
+  border: 1px solid #232a36; border-radius: 12px;
+  padding: 12px 12px; font: inherit; font-size: .95rem;
+}
+.dj-yt-input::placeholder { color: #55637a; }
+.dj-yt-go { min-height: 62px; }
+.dj-yt-list { list-style: none; margin: 10px 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 8px; }
+.dj-yt-row {
+  display: flex; align-items: center; gap: 10px;
+  background: #141821; border: 1px solid #232a36; border-radius: 12px;
+  padding: 8px 10px;
+}
+.dj-yt-row.is-done { border-color: #2fae74; }
+.dj-yt-row.is-failed { border-color: #5a2630; }
+.dj-yt-state { font-size: .8rem; color: #6d7b8d; font-variant-numeric: tabular-nums; }
+
 .dj-toast {
   position: fixed; left: 12px; right: 12px; bottom: 14px; z-index: 20;
   background: #232a36; border: 1px solid #3a4658; border-radius: 12px;

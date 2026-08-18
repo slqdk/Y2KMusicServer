@@ -20,6 +20,10 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [ytMaxMB, setYtMaxMB] = useState<number | null>(null)
   const [ytMaxAgeDays, setYtMaxAgeDays] = useState<number | null>(null)
   const [ytCache, setYtCache] = useState<api.WebCacheStats | null>(null)
+  // Where pasted-link downloads land. Server-resolved, so a blank stored value
+  // still shows the default path it will actually use.
+  const [ytFolder, setYtFolder] = useState<string>('')
+  const [ytFolderMsg, setYtFolderMsg] = useState<string | null>(null)
   const [ytClearing, setYtClearing] = useState(false)
   const [ytClearMsg, setYtClearMsg] = useState<string | null>(null)
 
@@ -30,6 +34,7 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
     api.getMixRules().then(setMix).catch(() => {})
     api.getYouTubeSettings().then(s => {
       setYtEnabled(s.enabled); setYtMaxMB(s.cacheMaxMB); setYtMaxAgeDays(s.cacheMaxAgeDays)
+      setYtFolder(s.downloadFolder); setYtFolderMsg(s.folderWarning)
     }).catch(() => setYtEnabled(false))
     api.getYouTubeCache().then(setYtCache).catch(() => {})
   }, [])
@@ -93,6 +98,20 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
       })
       setYtMaxMB(s.cacheMaxMB); setYtMaxAgeDays(s.cacheMaxAgeDays)
     } catch { /* keep the typed value */ }
+  }
+
+  // Save the download folder on blur. The server refuses a folder that overlaps
+  // a Music folder (a folder Clear there would prune the downloads), and says so.
+  const saveFolder = async () => {
+    setYtFolderMsg(null)
+    try {
+      const s = await api.setYouTubeSettings({ downloadFolder: ytFolder.trim() })
+      setYtFolder(s.downloadFolder); setYtFolderMsg(s.folderWarning)
+    } catch (e) {
+      setYtFolderMsg(e instanceof api.ApiError && e.status === 400
+        ? 'That folder overlaps a Music folder — pick one outside your music library.'
+        : 'Could not save that folder.')
+    }
   }
 
   const clearCache = async () => {
@@ -381,6 +400,20 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
                     </tbody>
                   </table>
                 )}
+
+                <div className="w-formrow" style={{ marginTop: 8 }}>
+                  <label>Download folder:</label>
+                  <input type="text" value={ytFolder} style={{ flex: 1 }} spellCheck={false}
+                    onChange={e => setYtFolder(e.target.value)}
+                    onBlur={saveFolder}
+                    onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
+                </div>
+                <div className="w-muted" style={{ margin: '0 0 6px' }}>
+                  Where pasted YouTube links are downloaded to, tags and cover art embedded,
+                  then added to the library. Keep it OUTSIDE your Music folders — nothing in
+                  the folder list owns it, so a folder Clear can never prune these tracks.
+                </div>
+                {ytFolderMsg && <div className="w-err" style={{ marginBottom: 6 }}>{ytFolderMsg}</div>}
 
                 <div className="w-formrow" style={{ marginTop: 8 }}>
                   <span className="w-muted">

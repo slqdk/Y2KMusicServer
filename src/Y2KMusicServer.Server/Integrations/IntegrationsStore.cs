@@ -25,6 +25,15 @@ public static class IntegrationsStore
         /// <summary>Web-cache age cap in days; 0 = no age limit. When set, idle
         /// cached tracks older than this are evicted after a fetch.</summary>
         public int WebCacheMaxAgeDays { get; set; } = 0;
+
+        /// <summary>
+        /// Where pasted-link downloads are filed. Blank = the default
+        /// <c>&lt;DataPath&gt;\youtube</c>. This folder is deliberately NOT one of
+        /// the Music folders — nothing in the folder list owns it, so a folder
+        /// Clear can never prune the tracks in it — and the server refuses a value
+        /// that overlaps a Music folder.
+        /// </summary>
+        public string DownloadFolder { get; set; } = "";
     }
 
     private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };

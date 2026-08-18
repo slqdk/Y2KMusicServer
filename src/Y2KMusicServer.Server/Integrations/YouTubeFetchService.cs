@@ -52,6 +52,13 @@ public sealed class YouTubeFetchService
     // stray value can't shape an odd cache filename or command argument.
     private static readonly Regex VideoId = new("^[A-Za-z0-9_-]{11}$", RegexOptions.Compiled);
 
+    // A video id embedded in any of the link shapes YouTube / YouTube Music hand
+    // out (watch?v=, youtu.be/, /shorts/, /embed/, /live/). Used so a pasted link
+    // resolves to that exact track instead of being run as a search string.
+    private static readonly Regex LinkVideoId = new(
+        @"(?:[?&]v=|youtu\.be/|/shorts/|/embed/|/live/)([A-Za-z0-9_-]{11})",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     public YouTubeFetchService(IDbContextFactory<Y2KDbContext> dbf, IConfiguration cfg,
                                ILogger<YouTubeFetchService> log)
     {
@@ -63,6 +70,20 @@ public sealed class YouTubeFetchService
 
     // ── Search ────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Resolves a query to candidate tracks. The query can be:
+    /// a pasted video link (watch / music.youtube / youtu.be / shorts), a bare
+    /// 11-char video id, a pasted playlist or album link (its entries are
+    /// listed), or plain search words.
+    ///
+    /// Search words are tried on YouTube Music first (<c>ytmsearch</c>) and fall
+    /// back to plain YouTube (<c>ytsearch</c>) when Music returns nothing —
+    /// the Music extractor is the more fragile of the two and answers a bare
+    /// <c>null</c> document when it can't build a result page.
+    ///
+    /// Never throws on a bad / empty / non-object yt-dlp document: a failure is
+    /// logged with yt-dlp's own first error line and returns an empty list.
+    /// </summary>
     public async Task<IReadOnlyList<YouTubeSearchItem>> SearchAsync(
         string query, int limit, CancellationToken ct)
     {
@@ -70,14 +91,47 @@ public sealed class YouTubeFetchService
         if (query.Length == 0) return Array.Empty<YouTubeSearchItem>();
         limit = Math.Clamp(limit, 1, 25);
 
-        // Flat search: fast, metadata only, no per-result media extraction.
-        var r = await RunAsync(_ytDlp,
-            new[] { "--flat-playlist", "-J", "--no-warnings", $"ytmsearch{limit}:{query}" },
-            TimeSpan.FromSeconds(30), ct);
+        // Strip a surrounding pair of quotes/angle brackets — pasted links often
+        // arrive wrapped by the source app.
+        query = query.Trim('"', '\'', '<', '>', ' ');
 
-        if (r.LaunchError != null || r.Stdout.Trim().Length == 0)
+        // 1. A pasted link or bare id → resolve that exact video. The canonical
+        //    watch URL is rebuilt from the id, which drops any &list= so a track
+        //    pasted from inside a playlist doesn't drag the playlist in.
+        var m = LinkVideoId.Match(query);
+        string? direct = m.Success ? m.Groups[1].Value
+                       : VideoId.IsMatch(query) ? query
+                       : null;
+        if (direct != null)
+            return await ResolveAsync($"https://www.youtube.com/watch?v={direct}", 1, true, ct);
+
+        // 2. Any other pasted URL (playlist / album / channel) → list its entries.
+        if (query.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || query.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            return await ResolveAsync(query, limit, false, ct);
+
+        // 3. Plain words → Music search, then plain YouTube search.
+        var items = await ResolveAsync($"ytmsearch{limit}:{query}", limit, false, ct);
+        if (items.Count > 0) return items;
+        return await ResolveAsync($"ytsearch{limit}:{query}", limit, false, ct);
+    }
+
+    /// <summary>Runs one flat yt-dlp extraction and collects up to
+    /// <paramref name="limit"/> video entries out of whatever shape it returns.</summary>
+    private async Task<IReadOnlyList<YouTubeSearchItem>> ResolveAsync(
+        string target, int limit, bool noPlaylist, CancellationToken ct)
+    {
+        // Flat: fast, metadata only, no per-result media extraction.
+        var args = new List<string> { "--flat-playlist", "-J", "--no-warnings" };
+        if (noPlaylist) args.Add("--no-playlist");   // a watch link inside a playlist
+        args.Add(target);
+
+        var r = await RunAsync(_ytDlp, args.ToArray(), TimeSpan.FromSeconds(45), ct);
+
+        if (r.LaunchError != null || r.TimedOut || r.Stdout.Trim().Length == 0)
         {
-            _log.LogWarning("YouTube search failed: {Err}", r.LaunchError ?? FirstLine(r.Stderr));
+            _log.LogWarning("YouTube search failed for {Target}: {Err}", target,
+                r.LaunchError ?? (r.TimedOut ? "timed out (45s)" : FirstMeaningful(r.Stderr)));
             return Array.Empty<YouTubeSearchItem>();
         }
 
@@ -85,26 +139,71 @@ public sealed class YouTubeFetchService
         try
         {
             using var doc = JsonDocument.Parse(r.Stdout);
-            if (doc.RootElement.TryGetProperty("entries", out var entries)
-                && entries.ValueKind == JsonValueKind.Array)
+
+            // yt-dlp prints a bare `null` document when an extractor returns no
+            // info dict (a Music search that couldn't build a result page does
+            // exactly this). Guard the kind before touching properties — reading
+            // one off a null/array root throws InvalidOperationException.
+            if (doc.RootElement.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
             {
-                foreach (var e in entries.EnumerateArray())
-                {
-                    string? id = Str(e, "id");
-                    if (id is null || !VideoId.IsMatch(id)) continue;
-                    string title = Str(e, "title") ?? id;
-                    string? artist = Str(e, "artist") ?? Str(e, "uploader") ?? Str(e, "channel");
-                    double dur = Num(e, "duration");
-                    string url = Str(e, "url") ?? $"https://www.youtube.com/watch?v={id}";
-                    items.Add(new YouTubeSearchItem(id, title, artist, dur, url));
-                }
+                _log.LogWarning("YouTube search for {Target} returned an empty result: {Err}",
+                    target, FirstMeaningful(r.Stderr));
+                return Array.Empty<YouTubeSearchItem>();
             }
+
+            Collect(doc.RootElement, items, limit, 0);
         }
         catch (JsonException ex)
         {
-            _log.LogWarning(ex, "YouTube search returned unparseable JSON");
+            _log.LogWarning(ex, "YouTube search for {Target} returned unparseable JSON", target);
         }
         return items;
+    }
+
+    /// <summary>Walks a yt-dlp info document and appends every video entry it
+    /// finds. Handles all three shapes: a single video object, a playlist with an
+    /// <c>entries</c> array, and a Music search page whose entries are themselves
+    /// sectioned playlists (Songs / Videos / Albums).</summary>
+    private static void Collect(JsonElement el, List<YouTubeSearchItem> items, int limit, int depth)
+    {
+        if (items.Count >= limit || depth > 4) return;
+
+        if (el.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var child in el.EnumerateArray())
+            {
+                Collect(child, items, limit, depth + 1);
+                if (items.Count >= limit) return;
+            }
+            return;
+        }
+
+        if (el.ValueKind != JsonValueKind.Object) return;
+
+        bool isContainer = el.TryGetProperty("entries", out var entries)
+                           && entries.ValueKind == JsonValueKind.Array;
+        if (isContainer)
+        {
+            foreach (var child in entries.EnumerateArray())
+            {
+                Collect(child, items, limit, depth + 1);
+                if (items.Count >= limit) return;
+            }
+            return;
+        }
+
+        if (Str(el, "_type") == "playlist") return;
+
+        string? id = Str(el, "id");
+        if (id is null || !VideoId.IsMatch(id)) return;
+        if (items.Any(i => i.Id == id)) return;
+
+        string title = Str(el, "title") ?? id;
+        string? artist = Str(el, "artist") ?? Str(el, "creator")
+                      ?? Str(el, "uploader") ?? Str(el, "channel");
+        double dur = Num(el, "duration");
+        items.Add(new YouTubeSearchItem(id, title, artist, dur,
+            $"https://www.youtube.com/watch?v={id}"));
     }
 
     // ── Fetch (download + cache + index) ───────────────────────────────────
@@ -269,18 +368,16 @@ public sealed class YouTubeFetchService
         => new() { Ok = false, Error = error };
 
     private static string? Str(JsonElement e, string prop)
-        => e.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+        => e.ValueKind == JsonValueKind.Object
+           && e.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String
+            ? v.GetString() : null;
 
     private static double Num(JsonElement e, string prop)
-        => e.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out var d) ? d : 0;
+        => e.ValueKind == JsonValueKind.Object
+           && e.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.Number
+           && v.TryGetDouble(out var d) ? d : 0;
 
     private static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
-
-    private static string FirstLine(string s)
-    {
-        int i = s.IndexOfAny(new[] { '\r', '\n' });
-        return (i < 0 ? s : s[..i]).Trim();
-    }
 
     private static string FirstMeaningful(string s)
     {

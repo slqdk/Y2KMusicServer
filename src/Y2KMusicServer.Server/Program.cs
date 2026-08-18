@@ -116,6 +116,14 @@ public static class Program
             // AdminIntegrationsController. No background work.
             builder.Services.AddSingleton<YouTubeFetchService>();
 
+            // YouTube download queue: pasted links (or search words) become jobs a
+            // single background worker drains — download + tags + cover art into a
+            // local temp folder, then a move into the operator's YouTube folder and
+            // an ordinary Tracks row. Singleton so the controller can enqueue and
+            // read progress; also a hosted service so the worker runs.
+            builder.Services.AddSingleton<YouTubeDownloadService>();
+            builder.Services.AddHostedService(sp => sp.GetRequiredService<YouTubeDownloadService>());
+
             // Web-cache housekeeping: size/count, on-demand clear, and size/age cap
             // enforcement after each fetch (never evicting a playing/armed/queued
             // track). Exposed via AdminIntegrationsController. No background work.

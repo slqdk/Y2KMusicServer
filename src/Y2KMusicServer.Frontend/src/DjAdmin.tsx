@@ -23,6 +23,13 @@ type QueueRow = {
 type FeedRow = {
   id: number; name: string; feed: boolean; scheduledNow: boolean; trackCount: number
 }
+type YtJob = {
+  id: number; videoId: string; title: string; artist: string | null
+  state: 'queued' | 'downloading' | 'indexing' | 'done' | 'failed' | 'cancelled'
+  percent: number; message: string | null; trackId: number | null
+}
+type YtDownloads = { folder: string; busy: boolean; jobs: YtJob[] }
+
 type DjState = {
   playing: boolean
   trackId: number | null
@@ -99,6 +106,10 @@ function HoldButton({
 export default function DjAdmin() {
   const [st, setSt] = useState<DjState | null>(null)
   const [msg, setMsg] = useState('')
+  // Paste-a-link downloads. Same server-side queue the admin page drives, so a
+  // job started on the phone shows up on the desktop and vice versa.
+  const [ytUrl, setYtUrl] = useState('')
+  const [yt, setYt] = useState<YtDownloads | null>(null)
 
   const post = useCallback(async (url: string, body?: unknown) => {
     try {
@@ -123,7 +134,21 @@ export default function DjAdmin() {
       const r = await fetch('/api/dj/state')
       if (r.ok) setSt(await r.json())
     } catch { /* keep the last good screen */ }
+    try {
+      const y = await fetch('/api/admin/integrations/youtube/downloads')
+      if (y.ok) setYt(await y.json())
+    } catch { /* the console still works without the download list */ }
   }, [])
+
+  // Queue whatever is in the box: a pasted link, an album link, or just words
+  // (which take YouTube's first hit — quicker than hunting a URL on a phone).
+  const queueDownload = useCallback(async () => {
+    const text = ytUrl.trim()
+    if (!text) return
+    const ok = await post('/api/admin/integrations/youtube/downloads', { urls: text })
+    if (ok) { setYtUrl(''); setMsg('Downloading…') }
+    void refresh()
+  }, [ytUrl, post, refresh])
 
   useEffect(() => {
     void refresh()
@@ -234,6 +259,39 @@ export default function DjAdmin() {
             )
           })}
           {(st?.upcoming.length ?? 0) === 0 && <li className="dj-empty">Queue is empty.</li>}
+        </ul>
+      </section>
+
+      <section className="dj-sect">
+        <h2 className="dj-sect-head">Add from YouTube</h2>
+        <input
+          className="dj-yt-input"
+          type="text"
+          value={ytUrl}
+          spellCheck={false}
+          placeholder="Paste a link, or type a song"
+          onChange={e => setYtUrl(e.target.value)}
+        />
+        <HoldButton
+          className="dj-yt-go"
+          label="⬇ Download to library"
+          sub={yt?.folder ? `hold · lands in ${yt.folder}` : 'hold ½s'}
+          disabled={!ytUrl.trim()}
+          onFire={() => { void queueDownload() }}
+        />
+        <ul className="dj-yt-list">
+          {(yt?.jobs ?? []).slice(0, 6).map(j => (
+            <li key={j.id} className={`dj-yt-row is-${j.state}`}>
+              <div className="dj-qmain">
+                <span className="dj-qartist">{j.artist ?? '—'}</span>
+                <span className="dj-qtitle">{j.title}</span>
+              </div>
+              <span className="dj-yt-state">
+                {j.state === 'downloading' ? `${Math.round(j.percent)}%` : j.state}
+              </span>
+            </li>
+          ))}
+          {(yt?.jobs.length ?? 0) === 0 && <li className="dj-empty">No downloads yet.</li>}
         </ul>
       </section>
 

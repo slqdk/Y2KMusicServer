@@ -176,4 +176,41 @@ public static class DataPaths
         Directory.CreateDirectory(dir);
         return dir;
     }
+
+    /// <summary>
+    /// Default landing folder for pasted-link YouTube downloads, at
+    /// <c>&lt;DataPath&gt;\youtube</c>. The operator can point this anywhere
+    /// (integrations.json → DownloadFolder), but wherever it points it must sit
+    /// OUTSIDE every Music folder: the folder-scoped library clear owns tracks
+    /// purely by path prefix, so a YouTube folder nested in a scanned one would
+    /// be pruned with it.
+    /// </summary>
+    public static string YouTubeDownloadDir(IConfiguration cfg)
+        => Path.Combine(DataDir(cfg), "youtube");
+
+    /// <summary>
+    /// Scratch space for in-flight downloads, at
+    /// <c>&lt;DataPath&gt;\youtube-tmp</c>. Downloads and the ffmpeg transcode
+    /// always happen here on local disk — even when the target folder is an SMB
+    /// share — so only the finished file crosses the network and a half-written
+    /// file never appears in the library folder. Safe to delete when idle.
+    /// </summary>
+    public static string YouTubeTempDir(IConfiguration cfg)
+        => Path.Combine(DataDir(cfg), "youtube-tmp");
+
+    /// <summary>Ensures the download scratch directory exists and returns it.</summary>
+    public static string EnsureYouTubeTempDir(IConfiguration cfg)
+    {
+        var dir = YouTubeTempDir(cfg);
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    /// <summary>
+    /// Record of which YouTube videos have already been downloaded and where they
+    /// landed, at <c>&lt;DataPath&gt;\youtube-downloads.json</c>. Lets a re-pasted
+    /// link be recognised even though the file is named after artist and title.
+    /// </summary>
+    public static string YouTubeDownloadsIndexPath(IConfiguration cfg)
+        => Path.Combine(DataDir(cfg), "youtube-downloads.json");
 }
