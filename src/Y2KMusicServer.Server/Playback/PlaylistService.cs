@@ -196,9 +196,13 @@ public sealed class PlaylistService
             .FirstOrDefault();
     }
 
-    /// <summary>Played entries kept visible above the current track (the
-    /// operator's recent-history view); anything older is pruned.</summary>
-    public const int PlayedHistoryKeep = 10;
+    /// <summary>
+    /// Played entries kept visible above the current track (the operator's
+    /// recent-history view); anything older is pruned. Three: enough to see
+    /// what just played and undo a mistake, few enough that the queue table
+    /// stays about the upcoming music rather than the evening's archive.
+    /// </summary>
+    public const int PlayedHistoryKeep = 3;
 
     /// <summary>
     /// Prunes consumed entries, but keeps the last <see cref="PlayedHistoryKeep"/>
