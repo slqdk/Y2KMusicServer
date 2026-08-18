@@ -463,9 +463,8 @@ export default function App() {
         </aside>
         )}
 
-        {/* Playlist rail (left) + results column (right) */}
-        <div className="lz-rescol-wrap">
-          {!requireName && pls?.showSelector && pls.playlists.length > 0 && (
+        {/* Playlist rail: first column of the page grid, hard against the left */}
+        {!requireName && pls?.showSelector && pls.playlists.length > 0 && (
             <aside className="lz-plcol">
               {pls.playlists.map(p => (
                 <button key={p.id}
@@ -478,8 +477,9 @@ export default function App() {
                 </button>
               ))}
             </aside>
-          )}
-          <div className="lz-rescol">
+        )}
+
+        <div className="lz-rescol">
           {/* Search box and the player/theme controls share one row: laid out
               side by side rather than floating over each other. */}
           <div className="lz-searchrow">
@@ -606,7 +606,6 @@ export default function App() {
           </div>
         </section>
           )}
-          </div>
         </div>
       </div>
 
