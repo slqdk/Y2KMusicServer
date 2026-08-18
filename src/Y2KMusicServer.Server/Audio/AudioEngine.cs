@@ -104,6 +104,10 @@ public sealed class AudioEngine
     private bool _duckActive;      // talk-over is holding the level down
     private bool _fadePaused;      // paused via the fading pause button
     private float _fadeBEntry;   // Normal-crossfade B start level (0..1 of target), 0 otherwise
+    // Normal crossfade only: B is held silent until A's volume has dropped to
+    // this fraction of where it started. 1 = no wait (B rides the whole fade).
+    private float _fadeBEnterAtA = 1f;
+    private bool _fadeBHeld;     // true while B is still waiting for that point
     private bool _bManualStarted;   // operator started the silent Deck B preview (pump running)
     private double _crossFadePos;
     private double _crossFadeStep;
@@ -511,6 +515,18 @@ public sealed class AudioEngine
         var secs = Math.Max(0.05, fadeSec);
         _duckStep = (float)(TickMs / 1000.0 / secs);   // full 0→1 travel in fadeSec
         _pauseAtSilence = pauseAtSilence;
+    }
+
+    /// <summary>
+    /// Seconds of fade still to run, from the current ramp step. Used when the
+    /// held-out Deck B is released partway through and the remaining travel has
+    /// to be re-spread over the time that's left.
+    /// </summary>
+    private double EffectiveFadeRemainingSec_Locked()
+    {
+        if (_crossFadeStep <= 0) return 1.0;
+        double totalSec = TickMs / 1000.0 / _crossFadeStep;
+        return Math.Max(0.2, totalSec * Math.Max(0.0, 1.0 - _crossFadePos));
     }
 
     /// <summary>Caller holds <see cref="_gate"/>. Pushes the gain to every deck.</summary>
@@ -1054,7 +1070,28 @@ public sealed class AudioEngine
                     }
                     else
                     {
-                        if (_deckBFading && _deckB != null)
+                        // Held-out B: silent until A has fallen to the configured
+                        // level, then it enters at the entry level and ramps over
+                        // whatever is left of the fade.
+                        if (_fadeBHeld && _deckB != null)
+                        {
+                            if (_fadeStartVolA <= 0f || volA <= _fadeStartVolA * _fadeBEnterAtA)
+                            {
+                                _fadeBHeld = false;
+                                _crossFadePos = 0;
+                                double leftSec = Math.Max(0.2, EffectiveFadeRemainingSec_Locked());
+                                _crossFadeStep = CrossfadeMath.StepPerTick(TickMs, leftSec);
+                                _fadeStartVolA = volA;
+                                _deckB.Vol.Volume = _fadeBEntry * _deckBTargetVol;
+                                _log.LogDebug("Normal crossfade: A reached {Pct:P0} — Deck B in at {Entry:P0} over {Left:F1}s.",
+                                    _fadeBEnterAtA, _fadeBEntry, leftSec);
+                            }
+                            else
+                            {
+                                _deckB.Vol.Volume = 0f;
+                            }
+                        }
+                        else if (_deckBFading && _deckB != null)
                             _deckB.Vol.Volume = CrossfadeMath.VolB(_deckBTargetVol, _crossFadePos, _fadeBEntry);
 
                         // Legacy SmartBeat fader. Beat drop no longer arms this
@@ -1347,10 +1384,13 @@ public sealed class AudioEngine
         // silence; every other transition keeps the from-silence ramp. A move's
         // steps (via _planOwnsB) or Beat drop's SmartBeat hold may override this.
         _deckBFading = true;
-        _fadeBEntry = winner == Transition.NormalCrossfade && !isMove
-            ? (float)Math.Clamp(MixRules.Load(_cfg).NormalEntryLevel, 0.0, 1.0)
-            : 0f;
-        _deckB.Vol.Volume = _fadeBEntry * _deckBTargetVol;
+        var normalRules = MixRules.Load(_cfg);
+        bool plainNormal = winner == Transition.NormalCrossfade && !isMove;
+        _fadeBEntry = plainNormal ? (float)Math.Clamp(normalRules.NormalEntryLevel, 0.0, 1.0) : 0f;
+        _fadeBEnterAtA = plainNormal ? (float)Math.Clamp(normalRules.NormalEntryAtA, 0.0, 1.0) : 1f;
+        // Hold B out until A has come down far enough, when that's configured.
+        _fadeBHeld = plainNormal && _fadeBEnterAtA < 0.999f;
+        _deckB.Vol.Volume = _fadeBHeld ? 0f : _fadeBEntry * _deckBTargetVol;
 
         // ── Move executor ────────────────────────────────────────────────────
         // A move runs its automation steps; a crossfade does not. When the plan
@@ -1375,6 +1415,7 @@ public sealed class AudioEngine
         _beatFadeInStep = 0f;
         _beatWaiting = false;
         _beatWaitTicksLeft = 0;
+        _fadeBHeld = false;
         _beatFallbackFadeSec = effFade;
         string smartBeatState;
         if (_activePlan != null) smartBeatState = $"n/a (move {_activePlan.StrategyName})";

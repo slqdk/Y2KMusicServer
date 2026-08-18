@@ -506,6 +506,7 @@ export interface MixRulesDto {
   bassBreakdown: boolean
   deckBEntryLevel: number
   normalEntryLevel: number
+  normalEntryAtA: number
   bassHoldBars: number
   maxOverlapBars: number
   sameTempoBars: number

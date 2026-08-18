@@ -196,7 +196,15 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
                     value={Math.round((mix?.normalEntryLevel ?? 0) * 100)} disabled={!mix || busy}
                     onChange={e => applyMix({ normalEntryLevel: Math.max(0, Math.min(100, Number(e.target.value))) / 100 })}
                     style={{ width: 64 }} /> %
-                  <span className="w-muted">of full volume when a Normal crossfade begins (0 = fade up from silence) — Normal crossfade only</span>
+                  <span className="w-muted">the volume Deck B enters at (0 = fade up from silence) — Normal crossfade only</span>
+                </div>
+                <div className="w-formrow">
+                  <label>Deck B waits until A is at:</label>
+                  <input type="number" min={0} max={100} step={5}
+                    value={Math.round((mix?.normalEntryAtA ?? 1) * 100)} disabled={!mix || busy}
+                    onChange={e => applyMix({ normalEntryAtA: Math.max(0, Math.min(100, Number(e.target.value))) / 100 })}
+                    style={{ width: 64 }} /> %
+                  <span className="w-muted">Deck B stays silent until Deck A has faded to this level (100 = B enters straight away)</span>
                 </div>
                 <div className="w-formrow">
                   <label>Beat-matched (same tempo):</label>

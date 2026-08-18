@@ -30,6 +30,15 @@ public sealed class MixRules
     /// Transition.NormalCrossfade — moves use DeckBEntryLevel via their steps,
     /// and Beat drop's SmartBeat hold is untouched.</summary>
     public double NormalEntryLevel { get; set; } = 0.0;
+
+    /// <summary>
+    /// Deck A's volume (as a fraction of where it started) at which Deck B is
+    /// allowed in during a NORMAL crossfade. 1.0 = B enters immediately with
+    /// the fade; 0.6 = B stays silent until A has fallen to 60%, then enters at
+    /// <see cref="NormalEntryLevel"/> and ramps up over the rest of the fade.
+    /// Normal crossfades only — moves and beat drops run their own timing.
+    /// </summary>
+    public double NormalEntryAtA { get; set; } = 1.0;
     public int BassHoldBars { get; set; } = 4;
     public int MaxOverlapBars { get; set; } = 8;
 
@@ -78,6 +87,7 @@ public sealed class MixRules
         r.BpmTolerance = Clamp(r.BpmTolerance, 0, 50);
         r.DeckBEntryLevel = Clamp(r.DeckBEntryLevel, 0, 1);
         r.NormalEntryLevel = Clamp(r.NormalEntryLevel, 0, 1);
+        r.NormalEntryAtA = Clamp(r.NormalEntryAtA, 0, 1);
         r.BassHoldBars = (int)Clamp(r.BassHoldBars, 0, 32);
         r.MaxOverlapBars = (int)Clamp(r.MaxOverlapBars, 1, 64);
         r.SameTempoBars = (int)Clamp(r.SameTempoBars, 1, 16);
