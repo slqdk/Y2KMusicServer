@@ -552,7 +552,7 @@ public sealed class AudioEngine
             if (_state == PlaybackEngineState.Playing) return true;
             _deckA.StopRequested = false;
             _deckA.Out.Play();
-            if (_crossfading) _deckB?.Out.Play();
+            if (_crossfading && !_fadeBHeld) _deckB?.Out.Play();   // a held-out B stays paused until it's let in
             if (_prepared?.Manual == true && _bManualStarted) _prepared.DeckB.Out.Play();
             if (_prepared?.PrerollStarted == true) _prepared.DeckB.Out.Play();
             _state = PlaybackEngineState.Playing;
@@ -1083,7 +1083,14 @@ public sealed class AudioEngine
                                 _fadeBHeld = false;
                                 _deckBFading = true;
                                 _fadeBStartPos = _crossFadePos;
+                                // B has been paused at its in-point the whole
+                                // time; re-seek (the warm burst may have moved
+                                // it), clear the tap backlog, and start it now
+                                // so it enters on its first bar, not partway in.
+                                try { _deckB.Reader.CurrentTime = TimeSpan.FromSeconds(_deckB.InPointSec); } catch { }
+                                _deckB.Tap.Reset();
                                 _deckB.Vol.Volume = _fadeBEntry * _deckBTargetVol;
+                                if (_state == PlaybackEngineState.Playing) _deckB.Out.Play();
                                 _log.LogDebug(
                                     "Normal crossfade: A down to {Pct:P0} — Deck B in at {Entry:P0} (A keeps fading to 0).",
                                     _fadeBEnterAtA, _fadeBEntry);
@@ -1492,7 +1499,10 @@ public sealed class AudioEngine
         _log.LogInformation("Transition: {Transition} | {Reason} | actual fade {Fade:F2}s",
             winner.ToString(), plan?.Reason ?? "normal crossfade", effFade);
 
-        if (_state == PlaybackEngineState.Playing) _deckB.Out.Play();
+        // A held-out B stays PAUSED until it is let in. Starting it here would
+        // let it play its opening bars silently and enter mid-phrase — the
+        // listener hears the song "missing its first seconds".
+        if (_state == PlaybackEngineState.Playing && !_fadeBHeld) _deckB.Out.Play();
         _crossfading = true;
         _bManualStarted = false;
 
