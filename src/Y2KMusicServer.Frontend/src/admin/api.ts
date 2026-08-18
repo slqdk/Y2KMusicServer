@@ -351,6 +351,12 @@ export const setIsoA = (mode: Iso) => post(`/api/admin/playback/iso-a?mode=${mod
 export const setIsoB = (mode: Iso) => post(`/api/admin/playback/iso-b?mode=${mode}`)
 
 // ── Playlist + Auto DJ ─────────────────────────────────────────────────
+export interface PlaylistState {
+  items: PlaylistItem[]
+  playedThroughEntryId: number
+  nowTrackId: number | null
+}
+export const getPlaylistState = () => req<PlaylistState>('/api/admin/playlist/state')
 export const getPlaylist = () => req<PlaylistItem[]>('/api/admin/playlist')
 export const addToPlaylist = (
   trackId: number, source: 'Manual' | 'Auto' | 'Request' = 'Manual', atEnd = false) =>

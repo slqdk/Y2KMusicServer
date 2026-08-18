@@ -151,20 +151,22 @@
   align-items: start;
 }
 
-/* Right column: the top search box + the results panel, together filling
-   the viewport down to the fixed bottom bar. */
+/* Right column: the search row sticks to the top, the results simply grow —
+   the PAGE scrolls, never a box inside it, so there's only ever one scrollbar. */
 .lz-rescol {
   display: flex; flex-direction: column; gap: 12px; min-width: 0;
-  position: sticky; top: 16px;
-  height: calc(100vh - var(--lz-nowbar-h) - 36px);
+  height: auto;
+}
+.lz-searchrow {
+  position: sticky; top: 0; z-index: 30;
+  background: var(--lz-bg); padding: 6px 0;
 }
 .lz-search-top { padding: 10px 12px 10px 34px; font-size: 1rem; background-position: 11px center; }
-.lz-rescol .lz-results { flex: 1; min-height: 0; max-height: none; }
+.lz-rescol .lz-results { flex: none; min-height: 0; max-height: none; overflow: visible; }
 .lz-side {
   position: sticky; top: 16px;
   display: flex; flex-direction: column;
-  height: calc(100vh - var(--lz-nowbar-h) - 36px);
-  overflow-y: auto;
+  max-height: calc(100vh - var(--lz-nowbar-h) - 36px);
 }
 .lz-side-bottom { margin-top: auto; padding-top: 14px; }
 
@@ -329,7 +331,7 @@
   border-radius: var(--lz-radius, 6px);
   box-shadow: var(--lz-raised, none);
   display: flex; flex-direction: column;
-  min-height: 360px; max-height: calc(100vh - 230px);
+  min-height: 0;
 }
 .lz-panel-head {
   font-size: .66rem; letter-spacing: .12em; font-weight: 700; text-transform: uppercase;
@@ -340,7 +342,7 @@
   border-radius: var(--lz-radius, 6px) var(--lz-radius, 6px) 0 0;
   display: flex; align-items: center; justify-content: space-between;
 }
-.lz-panel-body { flex: 1; overflow: auto; }
+.lz-panel-body { flex: 1; overflow: visible; }
 
 /* The results list needs no frame — it's the whole page. Dropping the border,
    fill and heading buys a row and a half of songs. */
@@ -353,7 +355,13 @@
 .lz-empty { display: flex; align-items: center; justify-content: center; height: 100%; min-height: 240px; color: var(--lz-faint); font-size: .9rem; }
 
 /* Results list */
-.lz-results-list { list-style: none; padding: 0; margin: 0; }
+/* Song rows flow into as many columns as the screen has room for — one on a
+   phone, two on a laptop, three or more on a wide monitor. */
+.lz-results-list {
+  list-style: none; padding: 0; margin: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(430px, 1fr));
+  column-gap: 18px;
+}
 .lz-result {
   display: grid; grid-template-columns: 1fr auto auto; gap: 4px 12px; align-items: center;
   padding: 5px 10px; border-bottom: 1px solid var(--lz-line-soft, var(--lz-line));
@@ -645,7 +653,6 @@
   .lz-has-banner.lz-has-cd .lz-main { padding-top: 126px; }
   .lz-side-bottom { margin-top: 12px; }
   .lz-rescol { position: static; height: auto; }
-  .lz-rescol .lz-results { min-height: 300px; }
   .lz-panel { max-height: none; }
   .lz-nowbar { flex-wrap: wrap; gap: 8px 24px; }
   .lz-nowbar-controls { flex: 1 1 100%; }

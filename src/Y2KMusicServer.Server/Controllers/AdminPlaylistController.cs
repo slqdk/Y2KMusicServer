@@ -36,6 +36,21 @@ public sealed class AdminPlaylistController : ControllerBase
         => await _playlist.GetAsync(ct);
 
     /// <summary>
+    /// The queue plus the persisted playhead — the entry the queue has played
+    /// up to. The grid needs the playhead separately because after a restart
+    /// nothing is loaded, and "what already played" can't be derived from the
+    /// now-playing track alone.
+    /// </summary>
+    [HttpGet("playlist/state")]
+    public async Task<object> GetState(CancellationToken ct)
+        => new
+        {
+            items = await _playlist.GetAsync(ct),
+            playedThroughEntryId = _playlist.PlayedThroughEntryId(),
+            nowTrackId = _engine.GetStatus().TrackId
+        };
+
+    /// <summary>
     /// Adds a track. <c>source</c> defaults to <c>Manual</c>; Manual/Request
     /// adds insert before the next Auto entry, Auto adds append. <c>atEnd=true</c>
     /// appends the pick to the very end of the queue instead.

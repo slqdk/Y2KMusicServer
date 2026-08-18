@@ -141,6 +141,17 @@ public sealed class PlaylistService
     }
 
     /// <summary>
+    /// The entry id the queue has played up to (0 = none). Survives restarts,
+    /// so the admin queue can still grey out what already played when nothing
+    /// is on the deck.
+    /// </summary>
+    public int PlayedThroughEntryId()
+    {
+        EnsurePlayheadLoaded();
+        return Volatile.Read(ref _playheadEntryId);
+    }
+
+    /// <summary>
     /// Where playback should start when nothing is loaded — after a restart, a
     /// power cut, or a plain Stop. The first entry AFTER the persisted playhead,
     /// so the rows already played are skipped; the queue head when there is no

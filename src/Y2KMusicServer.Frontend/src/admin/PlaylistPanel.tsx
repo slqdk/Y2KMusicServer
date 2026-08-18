@@ -45,7 +45,13 @@ export default function PlaylistPanel(
   const view = useColumnWidths('y2k.cols.savedlist', [5, 30, 25, 7, 8, 8, 9, 5])
 
   const [reqs, setReqs] = useState<api.RequestDto[]>([])
-  const refreshList = () => api.getPlaylist().then(setList).catch(() => {})
+  // The queue plus the persisted playhead: after a restart nothing is playing,
+  // so "already played" can only come from the playhead the server remembers.
+  const [playedThrough, setPlayedThrough] = useState(0)
+  const refreshList = () =>
+    api.getPlaylistState()
+      .then(s => { setList(s.items); setPlayedThrough(s.playedThroughEntryId) })
+      .catch(() => {})
   const refreshReqs = () => api.getRequests().then(setReqs).catch(() => {})
   const refreshTiles = () =>
     api.getSavedPlaylists().then(r => { setTiles(r.playlists); setMaxTiles(r.max) }).catch(() => {})
@@ -409,20 +415,33 @@ export default function PlaylistPanel(
                 {(() => {
                   // First entry matching the playing track = "now" row; rows
                   // before it are played history (they're retained server-side).
-                  const nowIdx = nowPlayingTrackId == null
-                    ? -1 : list.findIndex(x => x.trackId === nowPlayingTrackId)
+                  // The playhead entry is the anchor — by ENTRY id, so the same
+                  // song appearing twice can't drag the marker back to the first
+                  // copy. Green only while that entry is actually on air; with
+                  // the deck stopped it still marks how far the queue got.
+                  const headIdx = playedThrough > 0
+                    ? list.findIndex(x => x.id === playedThrough) : -1
+                  const nowIdx = nowPlayingTrackId != null && headIdx >= 0
+                      && list[headIdx].trackId === nowPlayingTrackId
+                    ? headIdx
+                    : nowPlayingTrackId == null
+                      ? -1
+                      : list.findIndex(x => x.trackId === nowPlayingTrackId)
+                  // Rows up to and including the playhead are history when the
+                  // deck is idle; while playing, history stops before the green row.
+                  const playedIdx = nowIdx >= 0 ? nowIdx - 1 : headIdx
                   return list.map((e, i) => (
                   <tr key={e.id}
                     ref={i === nowIdx ? nowRowRef : undefined}
                     className={[
                       selId === e.id ? 'w-rowsel' : '',
-                      i === nowIdx ? 'w-rownow' : nowIdx >= 0 && i < nowIdx ? 'w-rowplayed' : ''
+                      i === nowIdx ? 'w-rownow' : i <= playedIdx ? 'w-rowplayed' : ''
                     ].filter(Boolean).join(' ')}
                     onClick={() => setSelId(e.id)}
                     onDoubleClick={() => playNowEntry(e)}
                     onContextMenu={ev => openMenu(ev, e)}
                     title={i === nowIdx ? 'Now playing'
-                      : nowIdx >= 0 && i < nowIdx ? 'Already played'
+                      : i <= playedIdx ? 'Already played'
                       : 'Double-click to play now (crossfade) · right-click for more'}>
                     <td className="w-num">{e.position + 1}</td>
                     <td title={e.title ?? ''}>{e.title ?? '(untitled)'}</td>
