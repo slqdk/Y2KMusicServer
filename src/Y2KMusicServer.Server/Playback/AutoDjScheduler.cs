@@ -86,6 +86,19 @@ public sealed class AutoDjScheduler : BackgroundService
                     }
                 }
             }
+            else if (added > 0)
+            {
+                // Deck idle (fresh start, stopped, or the last track ran out):
+                // choosing playlists is an explicit human action, so start the
+                // music rather than leaving a full queue sitting silent.
+                var startId = await _playlist.ResumeTrackIdAsync(ct);
+                if (startId is int first && await _engine.LoadAsync(first, ct) == LoadResult.Ok && _engine.Play())
+                {
+                    _currentTrackId = first;
+                    _toppedUpThisTrack = false;
+                    _log.LogInformation("Live selection swap: deck was idle — started track {TrackId}.", first);
+                }
+            }
             else if (added == 0)
             {
                 _log.LogWarning("Live selection swap: nothing to play from the current selection ({Removed} cleared).",
