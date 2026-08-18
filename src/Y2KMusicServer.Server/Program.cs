@@ -265,6 +265,14 @@ public static class Program
 
             app.Run();
         }
+        catch (OperationCanceledException)
+        {
+            // Shutdown ran past the host's stop timeout (a stuck request, a slow
+            // disk). The service is stopping either way — log it as such rather
+            // than as a fatal crash, so the Windows service exits with a clean
+            // code and the installer's stop-wait doesn't see a failure.
+            Log.Information("Shutdown timed out; stopping anyway.");
+        }
         catch (Exception ex)
         {
             Log.Fatal(ex, "Host terminated unexpectedly");

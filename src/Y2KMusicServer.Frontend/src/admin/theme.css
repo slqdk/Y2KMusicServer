@@ -202,14 +202,26 @@
 .w-rownow td { background: var(--w-green, #C6E8C6); font-weight: bold; }
 .w-autodj-on { background: var(--w-green, #C6E8C6) !important; font-weight: bold; }
 /* Saved-playlist tiles (above the live queue) + the viewing-mode header. */
-.w-pltiles { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-bottom: 4px; }
-@media (max-width: 1500px) { .w-pltiles { grid-template-columns: repeat(5, 1fr); } }
-.w-pltile { padding: 3px 4px; cursor: pointer; text-align: center; }
+.w-pltiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; margin-bottom: 4px; align-items: stretch; }
+@media (max-width: 1500px) { .w-pltiles { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 1100px) { .w-pltiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.w-pltile {
+  padding: 3px 4px; cursor: pointer; text-align: center;
+  display: flex; flex-direction: column; justify-content: space-between;
+  min-height: 46px;   /* name (1–2 lines) + count + the Auto DJ switch */
+}
 .w-pltile.w-viewing { outline: 2px dotted var(--w-accent, var(--w-header)); outline-offset: -3px; }
 /* Must out-specify `.win2k button.w-btn` etc., whose min-height: 21px was
    winning and rendering this tiny corner button chunky. */
 button.w-btn.w-tilemenu-btn { position: absolute; top: 1px; right: 1px; min-height: 13px; padding: 0 3px; font-size: 9px; line-height: 11px; }
-.w-pltile .w-cat-name { font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Playlist names wrap in full instead of being clipped — the operator needs to
+   tell "FEST Dansk Dansemusik" from "FEST DANCE/Techno" at a glance. The right
+   padding keeps the last line clear of the ▾ button. */
+.w-pltile .w-cat-name {
+  font-weight: bold;
+  white-space: normal; overflow-wrap: anywhere; line-height: 1.15;
+  padding-right: 14px;
+}
 .w-pltile .w-cat-count { font-size: 10px; }
 /* Auto DJ feed switch on each tile. Green = the operator turned it on; amber =
    a timeslot has it on right now. Same specificity trick as the ▾ button. */

@@ -75,7 +75,6 @@ export default function DeckPanel(
   }
 ) {
   const isoA = isoFromCode(status?.isoA)
-  const isoB = isoFromCode(status?.isoB)
   const [busy, setBusy] = useState(false)
 
   const run = async (fn: () => Promise<unknown>) => {
@@ -86,7 +85,6 @@ export default function DeckPanel(
   const playing = status?.state === 1
   const crossfading = !!status?.crossfading
   const aId = status?.trackId ?? null
-  const bId = status?.nextTrackId ?? null
 
   // On-air track + master transport (Deck A).
   const aProg = live.progressA && live.progressA.trackId === aId ? live.progressA : null
@@ -98,25 +96,10 @@ export default function DeckPanel(
     ? `A: ${np?.title ?? '—'}${aBpm ? `  [${Math.round(aBpm)} BPM]` : ''}`
     : 'DECK A'
 
-  // Deck B.
-  const bStarted = !!status?.nextStarted
-  const bTitle = status?.nextTitle ?? null
-  const bProg = live.progressB && live.progressB.trackId === bId ? live.progressB : null
-  const bBpm = bProg?.bpm ?? null
-  const labelB = bId != null
-    ? `B: ${bTitle ?? '—'}${bBpm ? `  [${Math.round(bBpm)} BPM]` : ''}`
-    : 'DECK B'
-
+  // Deck B has no lane in the UI any more — the engine side is unchanged, the
+  // operator just drives everything from the queue and the transition bar.
   const advancingA = playing && aId != null
-  const advancingB = playing && bId != null && bStarted
-
-  const canStartB = bId != null && !bStarted && !crossfading && playing && !busy
-  const canStopB = bId != null && bStarted && !crossfading && !busy
-  const canNudge = bId != null && !crossfading && !busy
-  const canEjectB = bId != null && !crossfading && !busy
   const canIsoA = aId != null && !busy
-  const canIsoB = bId != null && !busy
-  const bTag = bId == null ? 'EMPTY' : crossfading ? 'MIXING' : bStarted ? 'PLAYING' : 'LOADED'
 
   // The transition planned for the next crossfade (or running during a mix), and
   // the operator's one-shot armed force (if any). Arming is allowed whenever a
@@ -220,37 +203,10 @@ export default function DeckPanel(
         </span>
       </div>
 
-      {/* Deck B */}
-      <div className="w-deckpanel-lane">
-        <div className="w-deck-ctrls">
-          <span className="w-deck-tag">{bTag}</span>
-          {bStarted
-            ? <button className="w-btn w-deckbtn" disabled={!canStopB} title="Pause Deck B's preview (stays cued)"
-                onClick={() => run(api.pauseDeckB)}>⏸ Stop B</button>
-            : <button className="w-btn w-deckbtn" disabled={!canStartB} title="Start Deck B's silent preview"
-                onClick={() => run(api.playDeckB)}>▶ Start B</button>}
-          <span className="w-nudge">
-            <button className="w-btn w-deckbtn" disabled={!canNudge} title="Nudge −50 ms"
-              onClick={() => run(() => api.nudgeDeckB(-50))}>⟪</button>
-            <button className="w-btn w-deckbtn" disabled={!canNudge} title="Nudge −10 ms"
-              onClick={() => run(() => api.nudgeDeckB(-10))}>◀</button>
-            <button className="w-btn w-deckbtn" disabled={!canNudge} title="Nudge +10 ms"
-              onClick={() => run(() => api.nudgeDeckB(10))}>▶</button>
-            <button className="w-btn w-deckbtn" disabled={!canNudge} title="Nudge +50 ms"
-              onClick={() => run(() => api.nudgeDeckB(50))}>⟫</button>
-          </span>
-          <button className="w-btn w-deckbtn" disabled={!canEjectB} title="Clear Deck B"
-            onClick={() => run(api.ejectDeckB)}>⏏ Eject</button>
-          <span style={{ flex: 1 }} />
-          <IsoButtons iso={isoB} onSet={(m) => run(() => api.setIsoB(m))} disabled={!canIsoB} />
-        </div>
-        <div className="w-deck-clockrow">
-          <div className="w-deckclock">
-            <BeatClock progress={bProg} advancing={advancingB} colorRgb="255,140,0" label={labelB} />
-          </div>
-          <VertVu vu={live.vuB} />
-        </div>
-      </div>
+      {/* Deck B's lane (cue transport, nudge, eject, isolators, waveform) was
+          removed from the panel: the operator has no screen space for it and
+          drives everything from the queue + the transition bar above. The
+          endpoints and the engine side are untouched — only the UI is gone. */}
     </div>
   )
 }

@@ -29,17 +29,29 @@ public sealed class StreamController : ControllerBase
 {
     private readonly StreamingEncoder _enc;
     private readonly ILogger<StreamController> _log;
+    private readonly IHostApplicationLifetime _life;
 
-    public StreamController(StreamingEncoder enc, ILogger<StreamController> log)
+    public StreamController(StreamingEncoder enc, ILogger<StreamController> log, IHostApplicationLifetime life)
     {
         _enc = enc;
         _log = log;
+        _life = life;
     }
 
     [HttpGet("/stream")]
     public async Task Stream([FromQuery] string? format)
     {
-        var ct = HttpContext.RequestAborted;
+        // A broadcast response never completes on its own, so Kestrel's graceful
+        // shutdown would sit here waiting for it: with a listener attached (a
+        // browser tab, a Cast speaker) the host hit its shutdown timeout and the
+        // process died with OperationCanceledException instead of stopping
+        // cleanly — which the installer then tripped over. Linking
+        // ApplicationStopping into the loop's token ends every stream the
+        // instant shutdown begins. Cancelling here is not an error path: the
+        // catch below already treats cancellation as a normal disconnect.
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(
+            HttpContext.RequestAborted, _life.ApplicationStopping);
+        var ct = linked.Token;
 
         bool mp3 = string.Equals(format, "mp3", StringComparison.OrdinalIgnoreCase);
 
