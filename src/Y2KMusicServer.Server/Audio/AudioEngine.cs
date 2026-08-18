@@ -56,6 +56,10 @@ public sealed class AudioEngine
     private const double TickMs = 50.0;
     private const float CrossFadeMinVol = 0.001f;
 
+    /// <summary>How fast A is taken out once a beat drop actually fires — long
+    /// enough to avoid a click, short enough to read as a cut.</summary>
+    private const double BeatDropCutSec = 0.35;
+
     // How long before the scheduled crossfade trigger an auto/queued Deck B starts
     // pumping silently, to warm its decode pipeline, the OS file cache (the music
     // lives on a network share), and the JIT, and to spin up the source's sequential
@@ -109,6 +113,16 @@ public sealed class AudioEngine
 
     // SmartBeat fader state (guarded by _gate).
     private bool _smartBeatActive;
+
+    // Beat drop, waiting phase. The old code sampled A's bass onset once, at the
+    // instant the fade opened, and fell back to a plain ramp if that single
+    // sample missed the kick — which it usually did, turning a "drop" into a
+    // long entry-less overlap. Now the fade OPENS but holds: A stays at full and
+    // B stays silent until a real kick lands (or the window runs out).
+    private bool _beatWaiting;
+    private int _beatWaitTicksLeft;
+    private float _beatWaitOnsetGate = 0.1f;
+    private double _beatFallbackFadeSec;   // fade to run if no kick arrives
     private float _beatFadeInPos;
     private float _beatFadeInStep;
 
@@ -959,6 +973,53 @@ public sealed class AudioEngine
                 {
                     onsetB = _deckB?.Fft.BassOnset ?? 0f;
 
+                    // ── Beat drop: hold everything until A's kick ───────────
+                    // While waiting the fade does not advance at all: A keeps
+                    // playing at full and B stays silent, so a missed kick can
+                    // never turn into a slow double-play. Either a kick lands
+                    // (drop B in, cut A short) or the window expires and this
+                    // becomes a Normal crossfade with the configured entry level.
+                    bool frozen = false;
+                    if (_beatWaiting && _deckB != null)
+                    {
+                        _beatWaitTicksLeft--;
+                        bool kick = onsetA > _beatWaitOnsetGate;
+
+                        if (kick)
+                        {
+                            _beatWaiting = false;
+                            _deckB.Vol.Volume = _deckBTargetVol;   // B lands at full, on the beat
+                            _deckBFading = false;                  // and stays there; no ramp rewrites it
+                            // A gets a short, clean cut rather than a click.
+                            _crossFadePos = 0;
+                            _crossFadeStep = CrossfadeMath.StepPerTick(TickMs, BeatDropCutSec);
+                            _fadeStartVolA = _deckA.Vol.Volume;
+                            _log.LogDebug("Beat drop: kick at onset {Onset:F2} — B in, A cut over {Cut:F2}s.",
+                                onsetA, BeatDropCutSec);
+                        }
+                        else if (_beatWaitTicksLeft <= 0)
+                        {
+                            _beatWaiting = false;
+                            _deckBFading = true;
+                            _fadeBEntry = (float)Math.Clamp(MixRules.Load(_cfg).NormalEntryLevel, 0.0, 1.0);
+                            _deckB.Vol.Volume = _fadeBEntry * _deckBTargetVol;
+                            _crossFadePos = 0;
+                            _crossFadeStep = CrossfadeMath.StepPerTick(TickMs, _beatFallbackFadeSec);
+                            _fadeStartVolA = _deckA.Vol.Volume;
+                            _log.LogInformation(
+                                "Beat drop: no kick in the window — falling back to a normal crossfade (B enters at {Entry:P0}).",
+                                _fadeBEntry);
+                        }
+                        else
+                        {
+                            // Still waiting: hold A where it is, leave B silent.
+                            _deckA.Vol.Volume = _fadeStartVolA;
+                            frozen = true;
+                        }
+                    }
+
+                    if (!frozen)
+                    {
                     _crossFadePos += _crossFadeStep;
                     float volA = CrossfadeMath.VolA(_fadeStartVolA, _crossFadePos);
                     _deckA.Vol.Volume = volA;
@@ -996,7 +1057,10 @@ public sealed class AudioEngine
                         if (_deckBFading && _deckB != null)
                             _deckB.Vol.Volume = CrossfadeMath.VolB(_deckBTargetVol, _crossFadePos, _fadeBEntry);
 
-                        // SmartBeat: hold B silent until A is quiet, then fade B in.
+                        // Legacy SmartBeat fader. Beat drop no longer arms this
+                        // (it waits for a kick and then drops B in at full), so
+                        // this is inert — kept only so a future move plan can
+                        // reuse the ramp.
                         if (_smartBeatActive && _deckB != null && volA <= CrossFadeMinVol)
                         {
                             _beatFadeInPos += _beatFadeInStep;
@@ -1012,6 +1076,7 @@ public sealed class AudioEngine
 
                     if (_crossFadePos >= 1.0)
                         (np, toDispose) = FinishCrossfade_Locked();
+                    }
                 }
                 else if (_prepared != null && _state == PlaybackEngineState.Playing)
                 {
@@ -1308,26 +1373,37 @@ public sealed class AudioEngine
         _smartBeatActive = false;
         _beatFadeInPos = 0f;
         _beatFadeInStep = 0f;
+        _beatWaiting = false;
+        _beatWaitTicksLeft = 0;
+        _beatFallbackFadeSec = effFade;
         string smartBeatState;
         if (_activePlan != null) smartBeatState = $"n/a (move {_activePlan.StrategyName})";
         else if (!beatDrop) smartBeatState = "n/a (not beat-drop)";
         else
         {
-            float onset = _deckA.Fft.BassOnset; // set by the audio thread; volatile
-            if (onset > 0.1f)
+            // Wait up to two bars of A's tempo for a kick, but never past the
+            // point where A would run out of track — a drop that arrives after
+            // the song ends is just silence.
+            double barSec = _deckA.Bpm is > 0 ? 4 * 60.0 / _deckA.Bpm.Value : 2.0;
+            double roomSec = Math.Max(0, _deckA.DurationSec - triggerSec - effFade);
+            double waitSec = Math.Clamp(Math.Min(2 * barSec, roomSec), 0, 4.0);
+
+            if (waitSec >= 0.2)
             {
-                // Kill B now; SmartBeat controls it exclusively until A is silent.
+                // Hold the picture: A at full, B silent, fade ramp frozen.
                 _deckB.Vol.Volume = 0f;
                 _deckBFading = false;
-                _deckBTargetVol = 0f;
-                _smartBeatActive = true;
-                _beatFadeInPos = 0f;
-                _beatFadeInStep = (float)CrossfadeMath.StepPerTick(TickMs, effFade);
-                smartBeatState = $"active (onset {onset:F2})";
+                _beatWaiting = true;
+                _beatWaitTicksLeft = (int)Math.Round(waitSec * 1000.0 / TickMs);
+                smartBeatState = $"waiting up to {waitSec:F1}s for a kick";
             }
             else
             {
-                smartBeatState = $"fallback ramp (no beat {onset:F2})";
+                // No room to wait — behave exactly like a Normal crossfade,
+                // entry level included, instead of a silent-start overlap.
+                _fadeBEntry = (float)Math.Clamp(MixRules.Load(_cfg).NormalEntryLevel, 0.0, 1.0);
+                _deckB.Vol.Volume = _fadeBEntry * _deckBTargetVol;
+                smartBeatState = "no room to wait -> normal crossfade";
             }
         }
 
@@ -1435,6 +1511,8 @@ public sealed class AudioEngine
         _smartBeatActive = false;
         _beatFadeInPos = 0;
         _beatFadeInStep = 0;
+        _beatWaiting = false;
+        _beatWaitTicksLeft = 0;
         _activePlan = null;
         _planOwnsB = false;
         _planASilentFired = false;
