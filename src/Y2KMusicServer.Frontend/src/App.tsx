@@ -115,8 +115,10 @@ export default function App() {
   // Which playlists Auto DJ plays from (chips, when the DJ allows it). Local
   // echo so a tap reacts at once; the poll reconciles a moment later.
   const [djSel, setDjSel] = useState<number[]>([])
+  const selEchoUntil = useRef(0)
   const setLiveSelection = (ids: number[]) => {
     setDjSel(ids)
+    selEchoUntil.current = Date.now() + 3000   // local echo wins briefly
     void fetch('/api/playlists/selection', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ playlistIds: ids })
@@ -237,9 +239,14 @@ export default function App() {
 
   useEffect(() => {
     refresh()
-    j<PlaylistsInfo>('/api/playlists').then(setPls).catch(() => {})
+    const loadPls = () => j<PlaylistsInfo>('/api/playlists').then(setPls).catch(() => {})
+    loadPls()
     const id = setInterval(refresh, 3000)
-    return () => clearInterval(id)
+    // The playlist payload carries the LIVE SELECTION, which any phone or the DJ
+    // page can change — so it has to be polled, not fetched once. Track counts
+    // and the operator's "may visitors choose" switch ride along with it.
+    const plsId = setInterval(loadPls, 4000)
+    return () => { clearInterval(id); clearInterval(plsId) }
   }, [refresh])
 
   useEffect(() => { setArtOk(true) }, [np?.trackId])
@@ -329,7 +336,11 @@ export default function App() {
   // Playlist chip (single-select toggle) and album navigation. Opening an
   // album replaces the results; Back returns to whatever search/browse was
   // active. Typing again also leaves the album.
-  useEffect(() => { if (pls?.selected) setDjSel(pls.selected) }, [pls?.selected?.join(',')])
+  useEffect(() => {
+    if (!pls?.selected) return
+    if (Date.now() < selEchoUntil.current) return   // our own tap is still in flight
+    setDjSel(pls.selected)
+  }, [pls?.selected?.join(',')])
 
   // A chip does two jobs: browse that playlist's songs, and — when the DJ has
   // allowed it — add or remove it from what Auto DJ plays from.
