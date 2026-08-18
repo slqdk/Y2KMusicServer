@@ -314,11 +314,21 @@ export default function App() {
     return playlist
   }, [playlist, npId, np])
 
-  // The fixed bottom bar shows what's on air plus the next two queued songs.
-  const nextTwo = useMemo(() => {
+  // The fixed bottom bar shows what's on air plus the next queued songs — one
+  // card each. Three are rendered; narrow screens hide the later ones in CSS.
+  const nextUp = useMemo(() => {
     const idx = npId != null ? plRows.findIndex(p => p.trackId === npId) : -1
-    return (idx >= 0 ? plRows.slice(idx + 1) : plRows).slice(0, 2)
+    return (idx >= 0 ? plRows.slice(idx + 1) : plRows).slice(0, 3)
   }, [plRows, npId])
+
+  // Cover art for a queue card; falls back to the note glyph when the track
+  // has none (each card tracks its own failure, unlike the now-playing art).
+  const QueueArt = ({ trackId }: { trackId: number }) => {
+    const [ok, setOk] = useState(true)
+    return ok
+      ? <img className="lz-np-art" src={`/api/albumart?trackId=${trackId}`} alt="" loading="lazy" onError={() => setOk(false)} />
+      : <div className="lz-np-art lz-np-art-empty">♪</div>
+  }
 
   const themeSelect = (cls: string) => (
     <select className={`lz-theme ${cls}`} value={theme} onChange={e => setTheme(e.target.value)} title="Theme" aria-label="Theme">
@@ -498,8 +508,8 @@ export default function App() {
                               <div key={t.id} className="lz-tile">
                                 <img className="lz-tile-art" src={`/api/albumart?trackId=${t.id}`} alt=""
                                   loading="lazy" onError={() => failArt(t.id)} />
-                                <div className="lz-tile-title">{t.title ?? '(untitled)'}</div>
                                 {t.artist && <div className="lz-tile-artist">{t.artist}</div>}
+                                <div className="lz-tile-title">{t.title ?? '(untitled)'}</div>
                                 <div className="lz-tile-foot">
                                   <span className="lz-tile-dur">{fmt(t.durationSec)}</span>
                                   {!cd && <button className="lz-btn lz-req-btn" onClick={() => requestTrack(t)} title="Request this song">Request</button>}
@@ -517,8 +527,11 @@ export default function App() {
                               <li key={t.id} className="lz-result lz-result-icon">
                                 <span className="lz-mini-icon" aria-hidden="true">♪</span>
                                 <div className="lz-result-main">
-                                  <div className="lz-result-title">{t.title ?? '(untitled)'}</div>
-                                  {t.artist && <div className="lz-result-artist">{t.artist}</div>}
+                                  {t.artist && <>
+                                    <span className="lz-result-artist">{t.artist}</span>
+                                    <span className="lz-result-sep">–</span>
+                                  </>}
+                                  <span className="lz-result-title">{t.title ?? '(untitled)'}</span>
                                 </div>
                                 <span className="lz-result-dur">{fmt(t.durationSec)}</span>
                                 {!cd && <button className="lz-btn lz-req-btn" onClick={() => requestTrack(t)} title="Request this song">Request</button>}
@@ -568,28 +581,33 @@ export default function App() {
             </button>
           )}
         </div>
-        <div className="lz-np">
+        {/* On air — the loud card. */}
+        <div className="lz-np lz-barcard lz-barcard-now">
           {np?.trackId && artOk
             ? <img className="lz-np-art" src={`/api/albumart?trackId=${np.trackId}`} alt="" onError={() => setArtOk(false)} />
             : <div className="lz-np-art lz-np-art-empty">♪</div>}
           <div className="lz-np-body">
             <div className="lz-np-state">● {stateLabel}</div>
-            <div className="lz-np-title">{np?.title ?? '—'}</div>
             {np?.artist && <div className="lz-np-artist">{np.artist}</div>}
+            <div className="lz-np-title">{np?.title ?? '—'}</div>
           </div>
         </div>
-        <div className="lz-nextup">
-          <div className="lz-field-label">Next up</div>
-          {nextTwo.length === 0
-            ? <div className="lz-nextup-empty">Nothing queued.</div>
-            : nextTwo.map(r => (
-                <div key={`${r.position}-${r.trackId}`} className="lz-nextup-row">
-                  <span className="lz-nextup-title">{r.title ?? '(untitled)'}</span>
-                  {r.artist && <span className="lz-nextup-artist">{r.artist}</span>}
-                  <span className="lz-nextup-dur">{fmt(r.durationSec)}</span>
+
+        {/* Queue — one dimmed card per song, so it reads as "coming later". */}
+        {nextUp.length === 0
+          ? <div className="lz-barcard lz-barcard-next lz-barcard-empty">Nothing queued.</div>
+          : nextUp.map((r, i) => (
+              <div key={`${r.position}-${r.trackId}`}
+                className={`lz-barcard lz-barcard-next lz-barcard-n${i + 1}`}>
+                <QueueArt trackId={r.trackId} />
+                <div className="lz-np-body">
+                  <div className="lz-np-state lz-next-label">{i === 0 ? 'Next up' : `In ${i + 1}`}</div>
+                  {r.artist && <div className="lz-np-artist">{r.artist}</div>}
+                  <div className="lz-np-title">{r.title ?? '(untitled)'}</div>
                 </div>
-              ))}
-        </div>
+                <span className="lz-nextup-dur">{fmt(r.durationSec)}</span>
+              </div>
+            ))}
       </div>
 
       {toast && <div className="lz-toast">{toast}</div>}

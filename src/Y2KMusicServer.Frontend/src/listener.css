@@ -53,9 +53,33 @@
   border-top: 1px solid var(--lz-line);
   box-shadow: 0 -4px 16px rgba(0, 0, 0, .18);
 }
-.lz-nowbar .lz-np { flex: 1 1 50%; min-width: 0; }
-.lz-nextup { flex: 1 1 45%; min-width: 0; }
-.lz-nextup .lz-field-label { margin: 0 0 4px; }
+/* Bottom bar sections: one loud card for what's on air, then one dimmed card
+   per queued song so the queue reads as "later", not as another player. */
+.lz-nowbar { gap: 12px; }
+.lz-barcard {
+  display: flex; align-items: center; gap: 12px; min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--lz-line);
+  border-radius: var(--lz-radius, 6px);
+}
+.lz-barcard-now {
+  flex: 1 1 34%;
+  background: var(--lz-panel);
+  border-color: var(--lz-green, var(--lz-line));
+  box-shadow: var(--lz-raised, 0 1px 6px rgba(0, 0, 0, .18));
+}
+.lz-barcard-next {
+  flex: 1 1 22%;
+  opacity: .62;
+  background: transparent;
+  border-style: dashed;
+}
+.lz-barcard-next .lz-np-art { width: 34px; height: 34px; }
+.lz-barcard-next .lz-np-title { font-size: .84rem; font-weight: 400; }
+.lz-barcard-next .lz-np-artist { font-size: .78rem; }
+.lz-barcard-empty { flex: 1 1 22%; color: var(--lz-faint); font-size: .82rem; justify-content: center; }
+.lz-next-label { color: var(--lz-faint); }
+.lz-barcard .lz-nextup-dur { margin-left: auto; }
 .lz-nextup-row {
   display: flex; align-items: baseline; gap: 8px; min-width: 0;
   font-size: .84rem; padding: 1px 0;
@@ -75,8 +99,8 @@
 .lz-np-art-empty { display: flex; align-items: center; justify-content: center; font-size: 1.4rem; color: var(--lz-faint); }
 .lz-np-body { min-width: 0; }
 .lz-np-state { font-size: .62rem; letter-spacing: .15em; font-weight: 700; color: var(--lz-now); }
-.lz-np-title { font-size: 1.05rem; font-weight: 700; color: var(--lz-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lz-np-artist { font-size: .85rem; color: var(--lz-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lz-np-title { font-size: .95rem; color: var(--lz-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lz-np-artist { font-size: 1rem; font-weight: 700; color: var(--lz-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .lz-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
 .lz-tag {
@@ -356,29 +380,37 @@
 
 /* Results list */
 /* Song rows flow into as many columns as the screen has room for — one on a
-   phone, two on a laptop, three or more on a wide monitor. */
+   phone, two on a laptop, three or more on a wide monitor. The wide column gap
+   plus a per-row frame keeps the columns visually apart, so nobody taps the
+   Request button belonging to the row next door. */
 .lz-results-list {
   list-style: none; padding: 0; margin: 0;
   display: grid; grid-template-columns: repeat(auto-fill, minmax(430px, 1fr));
-  column-gap: 18px;
+  column-gap: 26px; row-gap: 4px;
 }
 .lz-result {
   display: grid; grid-template-columns: 1fr auto auto; gap: 4px 12px; align-items: center;
-  padding: 5px 10px; border-bottom: 1px solid var(--lz-line-soft, var(--lz-line));
+  padding: 6px 10px;
+  border: 1px solid var(--lz-line-soft, var(--lz-line));
+  border-radius: var(--lz-radius-sm, 6px);
 }
 .lz-result:hover { background: var(--lz-rowhover); }
 .lz-result.is-selected { background: var(--lz-sel-row); }
 .lz-result.is-selected .lz-result-title { color: var(--lz-sel-fg); }
 .lz-result-main { min-width: 0; }
 .lz-result-title { color: var(--lz-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lz-result-artist { font-size: .82rem; color: var(--lz-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lz-result-artist {
+  font-weight: 700; color: var(--lz-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex: 0 1 auto;
+}
+.lz-result-sep { color: var(--lz-faint); flex: 0 0 auto; }
 .lz-result-dur { font-size: .8rem; color: var(--lz-faint); font-variant-numeric: tabular-nums; }
 
 /* Result rows with a leading mini icon (songs without artwork) */
 .lz-result.lz-result-icon { grid-template-columns: auto 1fr auto auto; }
 /* Compact rows: title and artist share one line so more songs fit on screen. */
-.lz-result-main { display: flex; align-items: baseline; gap: 8px; }
-.lz-result-main .lz-result-artist { flex: 0 1 auto; }
+.lz-result-main { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .lz-mini-icon {
   width: 24px; height: 24px; flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
@@ -432,8 +464,11 @@
   background: var(--lz-art-bg, var(--lz-panel));
   border: 1px solid var(--lz-line-soft, var(--lz-line));
 }
-.lz-tile-title { margin-top: 5px; font-size: .8rem; color: var(--lz-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lz-tile-artist { font-size: .72rem; color: var(--lz-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lz-tile-artist {
+  margin-top: 5px; font-size: .78rem; font-weight: 700; color: var(--lz-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.lz-tile-title { font-size: .76rem; color: var(--lz-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lz-tile-dur { font-size: .7rem; color: var(--lz-faint); font-variant-numeric: tabular-nums; margin-top: 2px; }
 
 /* Album drill-down header */
@@ -654,9 +689,13 @@
   .lz-side-bottom { margin-top: 12px; }
   .lz-rescol { position: static; height: auto; }
   .lz-panel { max-height: none; }
-  .lz-nowbar { flex-wrap: wrap; gap: 8px 24px; }
+  .lz-nowbar { flex-wrap: wrap; gap: 8px 12px; }
   .lz-nowbar-controls { flex: 1 1 100%; }
-  .lz-nowbar .lz-np, .lz-nextup { flex: 1 1 100%; }
+  .lz-barcard-n3 { display: none; }
+  /* Phones: the on-air card owns the row; a single queue card sits under it. */
+  .lz-nowbar .lz-np { flex: 1 1 100%; }
+  .lz-barcard-next { flex: 1 1 100%; }
+  .lz-barcard-n2, .lz-barcard-n3 { display: none; }
 }
 
 /* ── Phones ──────────────────────────────────────────────────────────────
