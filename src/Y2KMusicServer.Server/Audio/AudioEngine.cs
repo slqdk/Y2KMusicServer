@@ -68,6 +68,16 @@ public sealed class AudioEngine
     // starts, so the pre-roll never changes where B enters the mix.
     private const double PrerollSec = 3.0;
 
+    /// <summary>
+    /// A short warm burst run as soon as Deck B is cued, on top of the timed
+    /// pre-roll before the trigger. Hand-fired transitions (Next on the deck
+    /// panel, the DJ page, a listener skip) open the fade with no warning, so
+    /// the timed window never gets to run and B's first samples come straight
+    /// off the SMB share — the 34–46 ms read spikes in the log. Kept short so
+    /// B can't decode itself to the end of the track while it waits.
+    /// </summary>
+    private const double ArmWarmSec = 1.5;
+
     // Fixed format the stream mixes at. Every deck is normalised to this rate
     // (and to stereo) ahead of its DeckTap, so the broadcast header stays
     // constant no matter what the source files are.
@@ -1071,7 +1081,6 @@ public sealed class AudioEngine
                                 // so the transition length stays exactly the
                                 // configured Normal-crossfade time.
                                 _fadeBHeld = false;
-        _fadeBStartPos = 0;
                                 _deckBFading = true;
                                 _fadeBStartPos = _crossFadePos;
                                 _deckB.Vol.Volume = _fadeBEntry * _deckBTargetVol;
@@ -1119,6 +1128,27 @@ public sealed class AudioEngine
                 {
                     double pos = 0;
                     try { pos = _deckA.Reader.CurrentTime.TotalSeconds; } catch { }
+
+                    // Arm-time warm burst: open the file, fill the OS cache and
+                    // the read-ahead, then stop and re-seek to the in-point. This
+                    // is what makes a hand-fired Next sound the same as a
+                    // scheduled one — the decode path is already hot.
+                    if (!_prepared.Manual && !_prepared.ArmWarmStarted)
+                    {
+                        _prepared.ArmWarmStarted = true;
+                        _prepared.ArmWarmUntilSec = pos + ArmWarmSec;
+                        _prepared.DeckB.SilentPreroll = true;
+                        _prepared.DeckB.Out.Play();
+                        _log.LogDebug("Warm: {Sec:F1}s burst on the cued Deck B (arm time).", ArmWarmSec);
+                    }
+                    else if (_prepared.ArmWarmStarted && !_prepared.ArmWarmDone
+                             && !_prepared.PrerollStarted && pos >= _prepared.ArmWarmUntilSec)
+                    {
+                        _prepared.ArmWarmDone = true;
+                        _prepared.DeckB.Out.Pause();
+                        try { _prepared.DeckB.Reader.CurrentTime = TimeSpan.FromSeconds(_prepared.DeckB.InPointSec); }
+                        catch { }
+                    }
 
                     // Warm an auto Deck B ahead of the trigger: start its silent pump
                     // so the decode pipeline, OS file cache, and read-ahead are hot
@@ -1341,7 +1371,7 @@ public sealed class AudioEngine
         // operator nudged it to.) Clearing SilentPreroll lets B's VU/progress flow now
         // that it is the live incoming deck.
         _deckB.SilentPreroll = false;
-        if (p.PrerollStarted)
+        if (p.PrerollStarted || p.ArmWarmStarted)
         {
             try { _deckB.Reader.CurrentTime = TimeSpan.FromSeconds(_deckB.InPointSec); } catch { }
         }
@@ -1416,11 +1446,16 @@ public sealed class AudioEngine
         _beatFadeInStep = 0f;
         _beatWaiting = false;
         _beatWaitTicksLeft = 0;
-        _fadeBHeld = false;
         _beatFallbackFadeSec = effFade;
+        // NB: _fadeBHeld is NOT reset here — it was armed a few lines above for
+        // plain Normal crossfades. Clearing it here (as an earlier version did)
+        // silently disabled the whole "Deck B waits until A is at X%" gate.
         string smartBeatState;
         if (_activePlan != null) smartBeatState = $"n/a (move {_activePlan.StrategyName})";
-        else if (!beatDrop) smartBeatState = "n/a (not beat-drop)";
+        else if (!beatDrop)
+            smartBeatState = _fadeBHeld
+                ? $"n/a (not beat-drop) — B held until A at {_fadeBEnterAtA:P0}, then enters at {_fadeBEntry:P0}"
+                : $"n/a (not beat-drop) — B enters at {_fadeBEntry:P0} with the fade";
         else
         {
             // Wait up to two bars of A's tempo for a kick, but never past the
@@ -1454,8 +1489,8 @@ public sealed class AudioEngine
         // log next to the planned line.
         if (_activePlan != null)
             ApplyPlanSteps_Locked("fadeStart");
-        _log.LogInformation("Transition: {Transition} | {Reason}",
-            winner.ToString(), plan?.Reason ?? "normal crossfade");
+        _log.LogInformation("Transition: {Transition} | {Reason} | actual fade {Fade:F2}s",
+            winner.ToString(), plan?.Reason ?? "normal crossfade", effFade);
 
         if (_state == PlaybackEngineState.Playing) _deckB.Out.Play();
         _crossfading = true;
@@ -1555,6 +1590,8 @@ public sealed class AudioEngine
         _beatFadeInStep = 0;
         _beatWaiting = false;
         _beatWaitTicksLeft = 0;
+        _fadeBHeld = false;
+        _fadeBStartPos = 0;
         _activePlan = null;
         _planOwnsB = false;
         _planASilentFired = false;
@@ -1860,7 +1897,7 @@ public sealed class AudioEngine
 
                 var incoming = p.DeckB;
                 incoming.SilentPreroll = false;
-                if (p.PrerollStarted)
+                if (p.PrerollStarted || p.ArmWarmStarted)
                 {
                     // The warm-up decoded past the in-point while silent; re-seek
                     // so the cut still enters where the planner chose.
@@ -1948,6 +1985,9 @@ public sealed class AudioEngine
         public required bool BeatAligned { get; init; }
         public bool Manual { get; init; }   // operator-started Deck B (silent preview): skip auto-fire, crossfade on demand
         public bool PrerollStarted { get; set; }   // auto Deck B warm-up pump has been started (re-seek to in-point at fade start)
+        public bool ArmWarmStarted { get; set; }   // short warm burst at cue time has begun
+        public bool ArmWarmDone { get; set; }      // …and has finished (B paused and re-seeked)
+        public double ArmWarmUntilSec { get; set; }
         public string? Reason { get; init; }
 
         // Carried for the verbose mix-decision card (Debug logging only).
