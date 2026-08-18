@@ -391,21 +391,33 @@ export default function App() {
   )
 
   return (
-    <div className={`lz lz-${theme}${cd ? ' lz-has-cd' : ''}${np?.bannerText ? ' lz-has-banner' : ''}`}>
+    <div className={`lz lz-${theme}${cd && !np?.bannerText ? ' lz-has-cd' : ''}${np?.bannerText ? ' lz-has-banner' : ''}`}>
       {/* Party banner — text + color come from the admin settings */}
       {np?.bannerText && (
         <div className="lz-banner" style={{
           background: `linear-gradient(90deg, color-mix(in srgb, ${np.bannerColor ?? '#0A246A'} 65%, black), ${np.bannerColor ?? '#0A246A'} 30%, ${np.bannerColor ?? '#0A246A'} 70%, color-mix(in srgb, ${np.bannerColor ?? '#0A246A'} 65%, black))`,
           color: bannerFg(np.bannerColor ?? '#0A246A')
         }}>
+          {/* During a request cooldown the party banner IS the progress bar:
+              the whole width fills as the wait elapses, which is far harder to
+              miss than a thin line. */}
+          {cd && (() => {
+            const remaining = Math.max(0, cd.until - Date.now())
+            const pct = Math.min(100, 100 * (1 - remaining / (cd.total * 1000)))
+            return <div className="lz-banner-fill" style={{ width: `${pct}%` }} aria-hidden="true" />
+          })()}
           <span className="lz-banner-orn" aria-hidden="true">✦</span>
-          <span className="lz-banner-text">{np.bannerText}</span>
+          <span className="lz-banner-text">
+            {cd
+              ? `You can request again in ${fmt(Math.ceil(Math.max(0, cd.until - Date.now()) / 1000))}`
+              : np.bannerText}
+          </span>
           <span className="lz-banner-orn" aria-hidden="true">✦</span>
         </div>
       )}
 
-      {/* Countdown line: fills left→right while the request cooldown runs */}
-      {cd && (() => {
+      {/* No banner set → the standalone countdown line still does the job */}
+      {cd && !np?.bannerText && (() => {
         const remaining = Math.max(0, cd.until - Date.now())
         const pct = Math.min(100, 100 * (1 - remaining / (cd.total * 1000)))
         return (
@@ -504,15 +516,21 @@ export default function App() {
           {/* Search box and the player/theme controls share one row: laid out
               side by side rather than floating over each other. */}
           <div className="lz-searchrow">
-            <input
-              className="lz-input lz-input-search lz-search-top"
-              type="search"
-              value={q}
-              onChange={e => onQueryChange(e.target.value)}
-              disabled={!nameOk}
-              placeholder={nameOk ? 'Search songs or artists…' : 'Enter your name first (min. 3 letters)…'}
-              title={nameOk ? 'Search songs' : 'Type at least 3 letters of your name to unlock the search'}
-            />
+            <div className="lz-searchbox">
+              <input
+                className="lz-input lz-input-search lz-search-top"
+                type="search"
+                value={q}
+                onChange={e => onQueryChange(e.target.value)}
+                disabled={!nameOk}
+                placeholder={nameOk ? 'Search songs or artists…' : 'Enter your name first (min. 3 letters)…'}
+                title={nameOk ? 'Search songs' : 'Type at least 3 letters of your name to unlock the search'}
+              />
+              {q.length > 0 && (
+                <button className="lz-searchclear" title="Clear the search"
+                  onClick={() => { onQueryChange(''); setAlbumView(null) }}>✕</button>
+              )}
+            </div>
             <div className="lz-topctrls">
               {stream?.showListenLive && (
                 <button
