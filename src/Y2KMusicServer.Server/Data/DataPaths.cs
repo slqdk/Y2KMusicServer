@@ -83,6 +83,14 @@ public static class DataPaths
         => Path.Combine(DataDir(cfg), "web-config.json");
 
     /// <summary>
+    /// Google Cast settings + the remembered speaker allow-list, at
+    /// <c>&lt;DataPath&gt;\cast-config.json</c>. JSON, not the database
+    /// (no-migrations rule).
+    /// </summary>
+    public static string CastConfigPath(IConfiguration cfg)
+        => Path.Combine(DataDir(cfg), "cast-config.json");
+
+    /// <summary>
     /// Audio black-box dumps, under <c>&lt;DataPath&gt;\diagnostics</c> — WAV
     /// captures of the deck taps / post-mix ring written on demand or on a
     /// detected audio anomaly. Pure diagnostics output, safe to delete.

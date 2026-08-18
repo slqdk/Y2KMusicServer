@@ -87,6 +87,7 @@ public sealed class AudioEngine
 
     // Crossfade ramp state (guarded by _gate).
     private bool _crossfading;
+    private float _fadeBEntry;   // Normal-crossfade B start level (0..1 of target), 0 otherwise
     private bool _bManualStarted;   // operator started the silent Deck B preview (pump running)
     private double _crossFadePos;
     private double _crossFadeStep;
@@ -890,7 +891,7 @@ public sealed class AudioEngine
                     else
                     {
                         if (_deckBFading && _deckB != null)
-                            _deckB.Vol.Volume = CrossfadeMath.VolB(_deckBTargetVol, _crossFadePos);
+                            _deckB.Vol.Volume = CrossfadeMath.VolB(_deckBTargetVol, _crossFadePos, _fadeBEntry);
 
                         // SmartBeat: hold B silent until A is quiet, then fade B in.
                         if (_smartBeatActive && _deckB != null && volA <= CrossFadeMinVol)
@@ -1173,10 +1174,15 @@ public sealed class AudioEngine
         // other crossfade ramps B up from silence.
         bool beatDrop = winner == Transition.BeatDropCrossfade;
 
-        // Every transition now ramps B up from silence (a real crossfade). A move's
+        // Every transition ramps B up over the fade. A NORMAL crossfade may start
+        // B at the configured entry level (mixrules NormalEntryLevel) instead of
+        // silence; every other transition keeps the from-silence ramp. A move's
         // steps (via _planOwnsB) or Beat drop's SmartBeat hold may override this.
         _deckBFading = true;
-        _deckB.Vol.Volume = 0f;
+        _fadeBEntry = winner == Transition.NormalCrossfade && !isMove
+            ? (float)Math.Clamp(MixRules.Load(_cfg).NormalEntryLevel, 0.0, 1.0)
+            : 0f;
+        _deckB.Vol.Volume = _fadeBEntry * _deckBTargetVol;
 
         // ── Move executor ────────────────────────────────────────────────────
         // A move runs its automation steps; a crossfade does not. When the plan

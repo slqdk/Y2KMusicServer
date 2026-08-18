@@ -3,6 +3,7 @@ import './admin/theme.css'
 import * as api from './admin/api'
 import { useHub } from './admin/useHub'
 import SettingsDialog from './admin/SettingsDialog'
+import SpeakersDialog from './admin/SpeakersDialog'
 import YouTubeDialog from './admin/YouTubeDialog'
 import LibraryBrowser from './admin/LibraryBrowser'
 import PlaylistPanel from './admin/PlaylistPanel'
@@ -26,6 +27,7 @@ export default function Admin() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [logOpen, setLogOpen] = useState(false)
   const [ytOpen, setYtOpen] = useState(false)
+  const [speakersOpen, setSpeakersOpen] = useState(false)
   const [theme, setTheme] = useState<string>(readTheme)
   const [status, setStatus] = useState<api.PlaybackStatus | null>(null)
   // The Crossfade and Mixing section toggles on the deck panel; both live in the
@@ -104,6 +106,7 @@ export default function Admin() {
         <button onClick={() => setSettingsOpen(true)}>Settings</button>
         <button onClick={() => setLogOpen(o => !o)}>Log</button>
         <button onClick={() => setYtOpen(true)}>YouTube</button>
+        <button onClick={() => setSpeakersOpen(true)}>Speakers</button>
         {live.scan && (live.scan.state === 1 || live.scan.state === 2) && (
           <span className="w-muted" style={{ marginLeft: 'auto', alignSelf: 'center' }}>
             Scanning… {live.scan.filesProcessed}/{live.scan.filesFound}
@@ -128,6 +131,8 @@ export default function Admin() {
       {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); refreshMixRules() }} />}
 
       {ytOpen && <YouTubeDialog onClose={() => setYtOpen(false)} onPlayNow={playNow} />}
+
+      {speakersOpen && <SpeakersDialog onClose={() => setSpeakersOpen(false)} />}
     </div>
   )
 }

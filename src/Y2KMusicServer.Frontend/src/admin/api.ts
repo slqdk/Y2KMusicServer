@@ -234,6 +234,30 @@ export const getSavedPlaylistTracks = (id: number) =>
   req<{ items: SavedPlaylistTrackDto[] }>(`/api/admin/saved-playlists/${id}/tracks`)
 export const removeSavedPlaylistTrack = (id: number, entryId: number) =>
   req<{ removed: boolean }>(`/api/admin/saved-playlists/${id}/tracks/${entryId}`, { method: 'DELETE' })
+export interface CastDeviceDto {
+  id: string; name: string; model: string; host: string; port: number
+  allowed: boolean; online: boolean; casting: boolean
+}
+export interface CastStatusDto {
+  enabled: boolean; showOnListener: boolean; volume: number
+  streamUrl: string; streamUrlOverride: string; detectedIp: string
+  devices: CastDeviceDto[]
+}
+export const getCastStatus = () => req<CastStatusDto>('/api/admin/cast/status')
+export const discoverCastDevices = () =>
+  req<{ devices: CastDeviceDto[] }>('/api/admin/cast/discover', { method: 'POST' })
+export const setCastConfig = (p: { enabled?: boolean; showOnListener?: boolean; streamUrl?: string; volume?: number }) =>
+  req<unknown>('/api/admin/cast/config',
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) })
+export const setCastAllowed = (id: string, value: boolean) =>
+  req<unknown>(`/api/admin/cast/${encodeURIComponent(id)}/allowed?value=${value}`, { method: 'POST' })
+export const playCast = (id: string) =>
+  req<{ ok: boolean; message: string }>(`/api/admin/cast/${encodeURIComponent(id)}/play`, { method: 'POST' })
+export const stopCast = (id: string) =>
+  req<{ ok: boolean; message: string }>(`/api/admin/cast/${encodeURIComponent(id)}/stop`, { method: 'POST' })
+export const stopAllCasts = () =>
+  req<{ ok: boolean; stopped: number }>('/api/admin/cast/stop-all', { method: 'POST' })
+
 export interface PlaylistImportResult {
   id: number; name: string; matched: number; missing: number; missingSamples: string[]
 }
@@ -459,6 +483,7 @@ export interface MixRulesDto {
   bassSwap: boolean
   bassBreakdown: boolean
   deckBEntryLevel: number
+  normalEntryLevel: number
   bassHoldBars: number
   maxOverlapBars: number
   sameTempoBars: number

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using Y2KMusicServer.Server.Audio;
+using Y2KMusicServer.Server.Cast;
 using Y2KMusicServer.Server.Data;
 using Y2KMusicServer.Server.Diagnostics;
 using Y2KMusicServer.Server.Hubs;
@@ -168,6 +169,10 @@ public static class Program
             // thread and subscribes to the engine's tap changes in StartAsync).
             builder.Services.AddSingleton<StreamingEncoder>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<StreamingEncoder>());
+
+            // Google Cast. Singleton so the speaker sessions (one socket each)
+            // survive across requests; disposal at shutdown drops them.
+            builder.Services.AddSingleton<CastService>();
 
             // Auto DJ. PlaylistService is the singleton that owns the playlist
             // table + the track selector + the in-memory play history; the

@@ -170,6 +170,37 @@
 
 /* Theme picker alone in the top-right corner */
 .lz-topright { position: fixed; top: 10px; right: 16px; z-index: 45; }
+
+/* Burger + drawer: mobile only (media query below); desktop keeps the sidebar */
+.lz-burger {
+  display: none;
+  position: fixed; top: 8px; left: 10px; z-index: 46;
+  min-height: 40px; min-width: 44px;
+  border: 1px solid var(--lz-line); border-radius: 10px;
+  background: var(--lz-panel); color: var(--lz-text);
+  font-size: 1.25rem; line-height: 1; cursor: pointer;
+}
+.lz-has-cd .lz-burger { top: 32px; }
+.lz-has-banner .lz-burger { top: 52px; }
+.lz-has-banner.lz-has-cd .lz-burger { top: 76px; }
+.lz-drawer-backdrop {
+  position: fixed; inset: 0; z-index: 90;
+  background: rgba(0, 0, 0, .45);
+}
+.lz-drawer {
+  position: absolute; top: 0; left: 0; bottom: 0;
+  width: min(78vw, 320px);
+  background: var(--lz-panel); color: var(--lz-text);
+  border-right: 1px solid var(--lz-line);
+  box-shadow: 4px 0 24px rgba(0, 0, 0, .35);
+  padding: 14px 14px 24px;
+  overflow-y: auto;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.lz-drawer-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.lz-drawer-title { font-weight: 700; letter-spacing: .04em; }
+.lz-drawer-close { min-width: 44px; }
+.lz-theme-drawer { width: 100%; }
 .lz-theme-corner { min-width: 130px; }
 .lz-has-cd .lz-topright { top: 34px; }
 
@@ -555,7 +586,15 @@
 }
 @media (max-width: 700px) {
   .lz-main { --lz-nowbar-h: 232px; grid-template-columns: 1fr; }
-  .lz-side { position: static; height: auto; overflow: visible; }
+  /* Name + theme + playlists move into the burger drawer */
+  .lz-side { display: none; }
+  .lz-topright { display: none; }
+  .lz-burger { display: block; }
+  /* Room for the burger so the search box doesn't sit under it */
+  .lz-main { padding-top: 58px; }
+  .lz-has-cd .lz-main { padding-top: 82px; }
+  .lz-has-banner .lz-main { padding-top: 102px; }
+  .lz-has-banner.lz-has-cd .lz-main { padding-top: 126px; }
   .lz-side-bottom { margin-top: 12px; }
   .lz-rescol { position: static; height: auto; }
   .lz-rescol .lz-results { min-height: 300px; }

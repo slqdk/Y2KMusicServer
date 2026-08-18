@@ -41,4 +41,16 @@ public static class CrossfadeMath
     /// <summary>Deck B volume at fade progress <paramref name="pos"/> (0→target).</summary>
     public static float VolB(float targetVolB, double pos)
         => (float)Math.Min(targetVolB, targetVolB * Math.Max(0.0, pos));
+
+    /// <summary>
+    /// Deck B volume with a configured entry level: starts at
+    /// <paramref name="entry"/>×target and ramps linearly to target over the
+    /// fade. entry 0 is exactly the classic from-silence ramp above.
+    /// </summary>
+    public static float VolB(float targetVolB, double pos, double entry)
+    {
+        var e = Math.Clamp(entry, 0.0, 1.0);
+        var level = e + (1.0 - e) * Math.Max(0.0, pos);
+        return (float)Math.Min(targetVolB, targetVolB * level);
+    }
 }

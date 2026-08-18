@@ -118,6 +118,10 @@ export default function App() {
   // been issued (same 500 ms settle as the fetch).
   const [showResults, setShowResults] = useState(false)
 
+  // Mobile burger drawer (name + theme + playlists). CSS hides the burger on
+  // desktop, where the sidebar stays as-is.
+  const [drawerOpen, setDrawerOpen] = useState(false)
+
   // Per-device request cooldown. While active, every Request button is gone
   // and the countdown line at the very top fills as the wait elapses. Seeded
   // from the server on load (so F5 can't dodge it), then from each request's
@@ -307,8 +311,40 @@ export default function App() {
         )
       })()}
 
-      {/* Theme picker, alone in the top-right corner */}
+      {/* Theme picker, alone in the top-right corner (desktop only) */}
       <div className="lz-topright">{themeSelect('lz-theme-corner')}</div>
+
+      {/* Mobile burger + slide-in drawer: name, theme, playlists. The inputs
+          are the same controlled state as the desktop sidebar, so the two
+          renderings can never disagree. */}
+      <button className="lz-burger" aria-label="Menu" onClick={() => setDrawerOpen(true)}>☰</button>
+      {drawerOpen && (
+        <div className="lz-drawer-backdrop" onMouseDown={() => setDrawerOpen(false)}>
+          <div className="lz-drawer" onMouseDown={e => e.stopPropagation()}>
+            <div className="lz-drawer-head">
+              <span className="lz-drawer-title">Menu</span>
+              <button className="lz-btn lz-drawer-close" aria-label="Close menu" onClick={() => setDrawerOpen(false)}>✕</button>
+            </div>
+            <div className="lz-field-label">Your name <span className="lz-req">*</span></div>
+            <input className="lz-input" type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Enter your name…" maxLength={40} />
+            <div className="lz-field-label" style={{ marginTop: 14 }}>Theme</div>
+            {themeSelect('lz-theme-drawer')}
+            {pls?.showSelector && pls.playlists.length > 0 && (
+              <>
+                <div className="lz-field-label" style={{ marginTop: 14 }}>♫ Playlists</div>
+                <div className="lz-chips lz-chips-side">
+                  {pls.playlists.map(p => (
+                    <button key={p.id} className={`lz-chip${selPl === p.id ? ' is-on' : ''}`}
+                      onClick={() => { togglePlaylist(p.id); setDrawerOpen(false) }}>
+                      <span className="lz-chip-name">{p.name}</span><span className="lz-chip-count">{p.count}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Main area: left sidebar + centered results ─────────────────── */}
       <div className="lz-main">

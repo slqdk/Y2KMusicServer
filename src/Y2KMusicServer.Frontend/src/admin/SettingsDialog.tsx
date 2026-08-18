@@ -59,7 +59,9 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
         allowWebNext: s.allowWebNext, showWebCategories: s.showWebCategories,
         debugLogging: s.debugLogging,
         showListenLive: s.showListenLive, requestLimitEnabled: s.requestLimitEnabled,
-        requestIntervalMinutes: s.requestIntervalMinutes, autoAcceptRequests: s.autoAcceptRequests
+        requestIntervalMinutes: s.requestIntervalMinutes, autoAcceptRequests: s.autoAcceptRequests,
+        webNextAfterMinutes: s.webNextAfterMinutes,
+        bannerText: s.bannerText, bannerColor: s.bannerColor
       })
       setS(r); setSaved(true)
     } catch { setErr('Save failed.') } finally { setBusy(false) }
@@ -187,6 +189,14 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
                   <input type="number" min={0} max={30} value={s.nextFadeSeconds}
                     onChange={e => patch({ nextFadeSeconds: Number(e.target.value) })} style={{ width: 64 }} /> sec
                   <span className="w-muted">caps a Normal (un-aligned) crossfade</span>
+                </div>
+                <div className="w-formrow">
+                  <label>Deck B starts at:</label>
+                  <input type="number" min={0} max={100} step={5}
+                    value={Math.round((mix?.normalEntryLevel ?? 0) * 100)} disabled={!mix || busy}
+                    onChange={e => applyMix({ normalEntryLevel: Math.max(0, Math.min(100, Number(e.target.value))) / 100 })}
+                    style={{ width: 64 }} /> %
+                  <span className="w-muted">of full volume when a Normal crossfade begins (0 = fade up from silence) — Normal crossfade only</span>
                 </div>
                 <div className="w-formrow">
                   <label>Beat-matched (same tempo):</label>
