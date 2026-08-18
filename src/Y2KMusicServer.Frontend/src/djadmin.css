@@ -51,7 +51,8 @@
 .dj-row { display: flex; gap: 10px; }
 .dj-row .dj-btn { flex: 1 1 0; }
 
-/* Talk-over: acts on press, so it gets no fill — it's coloured to stand apart. */
+/* Talk-over latches like the others; it's just taller and louder, since it's
+   the button the DJ reaches for in the dark. */
 .dj-talk { min-height: 88px; background: #1d2432; border-color: #3a4658; }
 .dj-talk.is-on { background: #7a4a12; border-color: #ffb454; }
 .dj-pause.is-on { background: #3a2a12; border-color: #ffb454; }

@@ -99,7 +99,6 @@ function HoldButton({
 export default function DjAdmin() {
   const [st, setSt] = useState<DjState | null>(null)
   const [msg, setMsg] = useState('')
-  const [talking, setTalking] = useState(false)
 
   const post = useCallback(async (url: string, body?: unknown) => {
     try {
@@ -138,26 +137,6 @@ export default function DjAdmin() {
     return () => window.clearTimeout(t)
   }, [msg])
 
-  // Talk-over: press and hold, released anywhere. Not a HoldButton — this one
-  // is meant to react instantly on press.
-  const talkDown = () => { setTalking(true); void post('/api/dj/duck', { on: true }) }
-  const talkUp = () => {
-    if (!talking) return
-    setTalking(false)
-    void post('/api/dj/duck', { on: false })
-  }
-  useEffect(() => {
-    // A pointerup that lands outside the button (finger slid off) must still
-    // bring the music back — otherwise the party stays quiet.
-    const up = () => talkUp()
-    window.addEventListener('pointerup', up)
-    window.addEventListener('pointercancel', up)
-    return () => {
-      window.removeEventListener('pointerup', up)
-      window.removeEventListener('pointercancel', up)
-    }
-  })
-
   const np = split(st?.artist ?? null, st?.title ?? null)
   const gainPct = Math.round((st?.duckGain ?? 1) * 100)
 
@@ -179,15 +158,16 @@ export default function DjAdmin() {
         </div>
       </section>
 
-      {/* Talk-over is press-and-hold; the other two are hold-to-confirm. */}
-      <button
-        className={`dj-btn dj-talk${talking ? ' is-on' : ''}`}
-        onPointerDown={talkDown}
-        onContextMenu={e => e.preventDefault()}
-      >
-        <span className="dj-btn-label">🎤 Hold to talk</span>
-        <span className="dj-btn-sub">music drops to {st?.duckLevelPercent ?? 20}% over {st?.fadeSeconds ?? 5}s</span>
-      </button>
+      {/* Talk-over latches: hold to duck, hold again to bring the music back —
+          so the DJ can put the phone in a pocket while talking. */}
+      <HoldButton
+        className={`dj-talk${st?.ducked ? ' is-on' : ''}`}
+        label={st?.ducked ? '🎤 Talking — hold to restore' : '🎤 Hold to talk'}
+        sub={st?.ducked
+          ? `music is at ${st?.duckLevelPercent ?? 20}% · hold ½s to bring it back`
+          : `hold ½s · drops to ${st?.duckLevelPercent ?? 20}% over ${st?.fadeSeconds ?? 5}s`}
+        onFire={() => { void post('/api/dj/duck', { on: !st?.ducked }).then(refresh) }}
+      />
 
       <div className="dj-row">
         <HoldButton
