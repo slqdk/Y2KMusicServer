@@ -91,7 +91,7 @@ public sealed class AdminCastController : ControllerBase
         });
         if (!found) return NotFound(new { error = "unknown speaker" });
 
-        if (!value) await _cast.StopAsync(id);
+        if (!value) await _cast.StopAsync(id, guest: false);
         return Ok(new { id, allowed = value, devices = _cast.Known() });
     }
 
@@ -116,7 +116,7 @@ public sealed class AdminCastController : ControllerBase
     [HttpPost("{id}/play")]
     public async Task<IActionResult> Play(string id, CancellationToken ct)
     {
-        var r = await _cast.PlayAsync(id, ct);
+        var r = await _cast.PlayAsync(id, guest: false, ct: ct);
         return r.Ok
             ? Ok(new { ok = true, message = r.Message, streamUrl = r.StreamUrl, devices = _cast.Known() })
             : UnprocessableEntity(new { ok = false, error = r.Message, streamUrl = r.StreamUrl });
@@ -126,7 +126,7 @@ public sealed class AdminCastController : ControllerBase
     [HttpPost("{id}/stop")]
     public async Task<IActionResult> Stop(string id, CancellationToken ct)
     {
-        var r = await _cast.StopAsync(id, ct);
+        var r = await _cast.StopAsync(id, guest: false, ct: ct);
         return Ok(new { ok = true, message = r.Message, devices = _cast.Known() });
     }
 

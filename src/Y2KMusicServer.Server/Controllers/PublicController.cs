@@ -414,7 +414,7 @@ public sealed class PublicController : ControllerBase
         if (string.IsNullOrWhiteSpace(body?.DeviceId))
             return BadRequest(new { error = "deviceId required" });
 
-        var r = await _cast.PlayAsync(body.DeviceId.Trim(), guest: true, ct);
+        var r = await _cast.PlayAsync(body.DeviceId.Trim(), guest: true, ct: ct);
         return r.Ok
             ? Ok(new { ok = true, message = r.Message })
             : StatusCode(403, new { ok = false, error = r.Message });
@@ -427,7 +427,7 @@ public sealed class PublicController : ControllerBase
         if (string.IsNullOrWhiteSpace(body?.DeviceId))
             return BadRequest(new { error = "deviceId required" });
 
-        var r = await _cast.StopAsync(body.DeviceId.Trim(), guest: true, ct);
+        var r = await _cast.StopAsync(body.DeviceId.Trim(), guest: true, ct: ct);
         return r.Ok
             ? Ok(new { ok = true, message = r.Message })
             : StatusCode(403, new { ok = false, error = r.Message });
