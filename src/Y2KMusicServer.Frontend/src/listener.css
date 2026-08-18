@@ -205,6 +205,25 @@
 .lz-searchrow { display: flex; align-items: center; gap: 10px; }
 .lz-searchrow .lz-input-search { flex: 1; min-width: 0; }
 .lz-topctrls { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+/* Playlist column: a full-height rail down the left, not a band across the top,
+   so the list is reachable however far the results scroll. */
+.lz-plcol {
+  position: sticky; top: 0; align-self: start;
+  display: flex; flex-direction: column; gap: 6px;
+  width: 220px; flex: 0 0 220px;
+  max-height: calc(100vh - var(--lz-nowbar-h) - 24px);
+  overflow-y: auto; padding-right: 4px;
+}
+.lz-plcol .lz-chip { width: 100%; justify-content: space-between; }
+/* A chip Auto DJ is currently playing from. */
+.lz-chip.is-live { border-color: var(--lz-green); box-shadow: inset 0 0 0 1px var(--lz-green); font-weight: 700; }
+.lz-rescol-wrap { display: flex; gap: 14px; align-items: flex-start; min-width: 0; }
+.lz-rescol-wrap > .lz-rescol { flex: 1; min-width: 0; }
+@media (max-width: 700px) {
+  .lz-plcol { position: static; width: auto; flex: 1 1 auto; max-height: none; flex-direction: row; flex-wrap: wrap; }
+  .lz-rescol-wrap { flex-direction: column; }
+}
+
 /* Playlist chips above the results when there is no left column */
 .lz-chips-top { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 /* No sidebar → the results column spans the full width */

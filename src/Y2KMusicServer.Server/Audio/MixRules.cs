@@ -39,6 +39,13 @@ public sealed class MixRules
     /// Normal crossfades only — moves and beat drops run their own timing.
     /// </summary>
     public double NormalEntryAtA { get; set; } = 1.0;
+
+    /// <summary>
+    /// Normal-crossfade length in seconds, with decimals. 0 = fall back to the
+    /// whole-second Settings.NextFadeSeconds. Kept here rather than on the
+    /// Settings row because that column is an int and the schema never migrates.
+    /// </summary>
+    public double NormalFadeSeconds { get; set; } = 0;
     public int BassHoldBars { get; set; } = 4;
     public int MaxOverlapBars { get; set; } = 8;
 
@@ -88,6 +95,7 @@ public sealed class MixRules
         r.DeckBEntryLevel = Clamp(r.DeckBEntryLevel, 0, 1);
         r.NormalEntryLevel = Clamp(r.NormalEntryLevel, 0, 1);
         r.NormalEntryAtA = Clamp(r.NormalEntryAtA, 0, 1);
+        r.NormalFadeSeconds = Clamp(r.NormalFadeSeconds, 0, 30);
         r.BassHoldBars = (int)Clamp(r.BassHoldBars, 0, 32);
         r.MaxOverlapBars = (int)Clamp(r.MaxOverlapBars, 1, 64);
         r.SameTempoBars = (int)Clamp(r.SameTempoBars, 1, 16);

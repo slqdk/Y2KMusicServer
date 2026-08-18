@@ -150,6 +150,17 @@ export default function PlaylistPanel(
   // Auto DJ feed toggle — the old category switch. A playlist feeds the queue
   // when it's toggled on OR when one of its timeslots covers right now, so the
   // tile shows both states.
+  // Switching a playlist off stops future picks; this clears what Auto DJ
+  // already queued from it (upcoming rows only — never the playing track).
+  const purgeQueued = (pl: api.SavedPlaylistDto) =>
+    guard(async () => {
+      const r = await api.purgeQueuedFromPlaylist(pl.id)
+      setNote(r.removed === 0
+        ? `Nothing queued from “${r.playlist}”.`
+        : `Removed ${r.removed} queued track(s) from “${r.playlist}”.`)
+      await refreshList()
+    })
+
   const toggleFeed = (pl: api.SavedPlaylistDto) =>
     guard(async () => { await api.setPlaylistFeed(pl.id, !pl.feed); await refreshTiles() })
 
@@ -319,15 +330,17 @@ export default function PlaylistPanel(
             <div className="w-cat-name">{pl.name}</div>
             <div className="w-cat-count">{pl.trackCount} tracks</div>
             <button
-              className={`w-btn w-tilefeed${pl.feed ? ' w-tilefeed-on' : (pl.scheduledNow ? ' w-tilefeed-sched' : '')}`}
+              className={`w-btn w-tilefeed${pl.feed ? ' w-tilefeed-on' : (pl.forcedOff ? ' w-tilefeed-off' : '')}`}
               disabled={busy}
               title={pl.feed
-                ? 'Auto DJ is using this playlist — click to stop'
-                : (pl.scheduledNow
-                  ? 'A timeslot has this playlist on right now — click to keep it on regardless of the clock'
-                  : 'Let Auto DJ pick songs from this playlist')}
+                ? (pl.scheduledNow
+                  ? 'Feeding Auto DJ (a timeslot covers now) — click to switch it off anyway'
+                  : 'Feeding Auto DJ — click to switch it off')
+                : (pl.forcedOff
+                  ? 'Switched off by you — timeslots are ignored while it is off'
+                  : 'Not feeding right now — click to switch it on')}
               onClick={e => { e.stopPropagation(); toggleFeed(pl) }}>
-              {pl.feed ? 'Auto DJ ✓' : (pl.scheduledNow ? 'Auto DJ ⏱' : 'Auto DJ')}
+              {pl.feed ? (pl.scheduledNow ? 'Auto DJ ⏱' : 'Auto DJ ✓') : (pl.forcedOff ? 'Auto DJ ✕' : 'Auto DJ')}
             </button>
           </div>
         ))}
@@ -574,6 +587,9 @@ export default function PlaylistPanel(
             onClick={() => { setRenaming(tileMenu.pl); setRenameVal(tileMenu.pl.name); setTileMenu(null) }}>Rename…</li>
           <li className="w-ctxitem" role="menuitem"
             onClick={() => { exportPlaylist(tileMenu.pl); setTileMenu(null) }}>Export…</li>
+          <li className="w-ctxitem" role="menuitem"
+            title="Drop this playlist's not-yet-played tracks from the live queue"
+            onClick={() => { purgeQueued(tileMenu.pl); setTileMenu(null) }}>Remove queued tracks…</li>
           <li className="w-ctxitem" role="menuitem"
             onClick={() => { setConfirmDel(tileMenu.pl); setTileMenu(null) }}>Delete…</li>
           <li className="w-ctxsep" role="separator" />

@@ -22,7 +22,8 @@ export interface SavedPlaylistDto {
   tileOrder: number
   trackCount: number
   slotCount: number
-  feed: boolean          // operator toggled Auto DJ to use this playlist
+  feed: boolean          // feeding right now (toggle or timeslot)
+  forcedOff: boolean     // operator switched it off; overrides the timeslot
   scheduledNow: boolean  // a timeslot covers this moment
 }
 
@@ -273,6 +274,8 @@ export const moveSavedPlaylistTracks = (id: number, entryIds: number[], targetPl
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ entryIds, targetPlaylistId, copy })
   })
+export const purgeQueuedFromPlaylist = (id: number) =>
+  req<{ removed: number; playlist: string }>(`/api/admin/saved-playlists/${id}/purge-queued`, { method: 'POST' })
 export const setPlaylistFeed = (id: number, value: boolean) =>
   req<{ id: number; feed: boolean }>(`/api/admin/saved-playlists/${id}/feed?value=${value}`, { method: 'POST' })
 export const exportSavedPlaylistUrl = (id: number) =>
@@ -470,6 +473,7 @@ export interface SettingsDto {
   bannerText: string
   bannerColor: string
   requireListenerName: boolean
+  allowWebPlaylistChoice: boolean
 }
 export interface SettingsUpdate {
   nextTriggerPct?: number
@@ -490,6 +494,7 @@ export interface SettingsUpdate {
   bannerText?: string
   bannerColor?: string
   requireListenerName?: boolean
+  allowWebPlaylistChoice?: boolean
 }
 export const getSettings = () => req<SettingsDto>('/api/admin/settings')
 export const putSettings = (u: SettingsUpdate) =>
@@ -507,6 +512,7 @@ export interface MixRulesDto {
   deckBEntryLevel: number
   normalEntryLevel: number
   normalEntryAtA: number
+  normalFadeSeconds: number
   bassHoldBars: number
   maxOverlapBars: number
   sameTempoBars: number

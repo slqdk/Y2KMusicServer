@@ -191,10 +191,18 @@ export default function DjAdmin() {
           {(st?.playlists ?? []).map(p => (
             <HoldButton
               key={p.id}
-              className={`dj-feed${p.feed ? ' is-on' : p.scheduledNow ? ' is-sched' : ''}`}
+              className={`dj-feed${p.feed ? (p.scheduledNow ? ' is-sched' : ' is-on') : ''}`}
               label={p.name}
-              sub={p.feed ? `ON · ${p.trackCount} songs` : p.scheduledNow ? `timeslot · ${p.trackCount}` : `off · ${p.trackCount}`}
-              onFire={() => { void post(`/api/dj/feed/${p.id}?value=${!p.feed}`).then(refresh) }}
+              sub={p.feed
+                ? (p.scheduledNow ? `on · timeslot · ${p.trackCount}` : `on · ${p.trackCount} songs`)
+                : `off · ${p.trackCount}`}
+              onFire={() => {
+                // Same function as the listener chips: set the whole selection,
+                // sweep the queue 5s later and crossfade into the new music.
+                const cur = (st?.playlists ?? []).filter(x => x.feed).map(x => x.id)
+                const next = p.feed ? cur.filter(id => id !== p.id) : [...cur, p.id]
+                void post('/api/dj/selection', { playlistIds: next }).then(refresh)
+              }}
             />
           ))}
           {(st?.playlists.length ?? 0) === 0 && <div className="dj-empty">No playlists yet.</div>}

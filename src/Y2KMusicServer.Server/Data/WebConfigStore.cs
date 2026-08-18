@@ -45,6 +45,13 @@ public static class WebConfigStore
         /// instead, so the admin queue still shows who asked for what.
         /// </summary>
         public bool RequireListenerName { get; set; } = true;
+
+        /// <summary>
+        /// Let website visitors decide which playlists Auto DJ draws from (the
+        /// chips swap the live queue). Off by default — at a party this is the
+        /// DJ's control, and the same function lives on /DJAdmin.
+        /// </summary>
+        public bool AllowWebPlaylistChoice { get; set; } = false;
     }
 
     private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };

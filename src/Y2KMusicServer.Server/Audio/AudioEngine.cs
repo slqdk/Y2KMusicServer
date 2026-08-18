@@ -649,7 +649,12 @@ public sealed class AudioEngine
         if (next == null) return QueueResult.NotFound;
         if (!File.Exists(next.FilePath)) return QueueResult.FileMissing;
 
-        double configuredFade = settings.NextFadeSeconds;
+        // Decimal seconds from mixrules.json win; the int on the Settings row is
+        // the fallback for installs that never touched the new field.
+        var fadeRules = MixRules.Load(_cfg);
+        double configuredFade = fadeRules.NormalFadeSeconds > 0
+            ? fadeRules.NormalFadeSeconds
+            : settings.NextFadeSeconds;
         var rules = MixRules.Load(_cfg);
 
         double outPoint, inPoint, fadeSec, score;

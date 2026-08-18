@@ -18,11 +18,16 @@ public sealed class AdminSavedPlaylistsController : ControllerBase
 {
     private readonly IDbContextFactory<Y2KDbContext> _dbf;
     private readonly IConfiguration _cfg;
+    private readonly PlaylistService _playlist;
+    private readonly ILogger<AdminSavedPlaylistsController> _log;
 
-    public AdminSavedPlaylistsController(IDbContextFactory<Y2KDbContext> dbf, IConfiguration cfg)
+    public AdminSavedPlaylistsController(IDbContextFactory<Y2KDbContext> dbf, IConfiguration cfg,
+        PlaylistService playlist, ILogger<AdminSavedPlaylistsController> log)
     {
         _dbf = dbf;
         _cfg = cfg;
+        _playlist = playlist;
+        _log = log;
     }
 
     public sealed record NameBody(string Name);
@@ -52,7 +57,7 @@ public sealed class AdminSavedPlaylistsController : ControllerBase
         // Feed = the operator's "Auto DJ may use this playlist" toggle; Scheduled
         // = a slot covers this moment. Auto DJ draws from the union of the two,
         // and the UI shows both so it's clear WHY a playlist is feeding.
-        var feeds = AutoDjFeedStore.Load(_cfg);
+        var feeds = AutoDjFeedStore.LoadState(_cfg);
         var now = DateTime.Now;
         var withSlots = await db.SavedPlaylists.AsNoTracking()
             .Include(p => p.Slots)
@@ -70,7 +75,9 @@ public sealed class AdminSavedPlaylistsController : ControllerBase
             p.TileOrder,
             p.TrackCount,
             p.SlotCount,
-            Feed = feeds.Contains(p.Id),
+            // Feed = "is it feeding right now"; the two flags below say why.
+            Feed = !feeds.Off.Contains(p.Id) && (feeds.On.Contains(p.Id) || scheduled.Contains(p.Id)),
+            ForcedOff = feeds.Off.Contains(p.Id),
             ScheduledNow = scheduled.Contains(p.Id)
         }).ToList();
 
@@ -173,6 +180,25 @@ public sealed class AdminSavedPlaylistsController : ControllerBase
         // id can't inherit a deleted playlist's "on" state.
         AutoDjFeedStore.Prune(_cfg, await db.SavedPlaylists.Select(p => p.Id).ToListAsync(ct));
         return Ok(new { deleted = pl.Name });
+    }
+
+    /// <summary>
+    /// Removes this playlist's still-unplayed tracks from the live queue.
+    /// Turning a playlist off only stops FUTURE picks — anything Auto DJ already
+    /// queued keeps its place, which is surprising when you're trying to kill a
+    /// genre mid-party. This is the explicit purge for that; played rows and the
+    /// track on air are never touched.
+    /// </summary>
+    [HttpPost("{id:int}/purge-queued")]
+    public async Task<IActionResult> PurgeQueued(int id, CancellationToken ct)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        var pl = await db.SavedPlaylists.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
+        if (pl == null) return NotFound();
+
+        var removed = await _playlist.RemoveUpcomingBySourceAsync(pl.Name, ct);
+        _log.LogInformation("Purged {Count} queued track(s) that came from {Playlist}.", removed, pl.Name);
+        return Ok(new { removed, playlist = pl.Name });
     }
 
     // ── Moving tracks between playlists ───────────────────────────────────────

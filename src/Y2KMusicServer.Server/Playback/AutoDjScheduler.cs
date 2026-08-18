@@ -62,6 +62,37 @@ public sealed class AutoDjScheduler : BackgroundService
     {
         var status = _engine.GetStatus();
 
+        // ── Live selection swap ───────────────────────────────────────────────
+        // Someone changed which playlists feed Auto DJ (listener chips or the DJ
+        // page) and the 5s debounce has expired: sweep the upcoming queue, refill
+        // from the new selection, and crossfade straight into the first new song
+        // so the room hears the change immediately.
+        if (_playlist.TakeDueSwap())
+        {
+            var (removed, added) = await _playlist.SwapQueueToActiveFeedsAsync(status.TrackId, ct);
+            _toppedUpThisTrack = true;   // this IS the top-up for the current track
+
+            if (added > 0 && status.State == PlaybackEngineState.Playing)
+            {
+                var nextId = await _playlist.NextUpcomingTrackIdAsync(status.TrackId, ct);
+                if (nextId is int firstNew)
+                {
+                    _engine.ArmTransition(Transition.NormalCrossfade);
+                    var q = await _engine.QueueNextAsync(firstNew, ct);
+                    if (q == QueueResult.Ok)
+                    {
+                        await _engine.NextAsync(null, ct);
+                        _log.LogInformation("Live selection swap: crossfading into track {TrackId}.", firstNew);
+                    }
+                }
+            }
+            else if (added == 0)
+            {
+                _log.LogWarning("Live selection swap: nothing to play from the current selection ({Removed} cleared).",
+                    removed);
+            }
+        }
+
         // ── Reconcile on track change (promotion or manual load) ──────────────
         if (status.State == PlaybackEngineState.Playing && status.TrackId is int nowId)
         {

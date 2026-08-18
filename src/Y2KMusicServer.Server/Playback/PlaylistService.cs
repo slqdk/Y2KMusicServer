@@ -140,6 +140,104 @@ public sealed class PlaylistService
         return (next, curPos >= 0);
     }
 
+    // ── Live playlist selection (listener chips / DJ page) ────────────────────
+
+    /// <summary>
+    /// A selection change is pending; the scheduler performs the swap once this
+    /// moment passes. Every further change pushes it out again, so a burst of
+    /// tapping produces exactly one queue swap instead of one per tap.
+    /// </summary>
+    private DateTime _swapDueUtc = DateTime.MaxValue;
+    private static readonly TimeSpan SwapDebounce = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Records which playlists Auto DJ should draw from and arms the debounced
+    /// swap. An empty selection clears every override, handing control back to
+    /// the timeslots. Non-empty means exactly those playlists: chosen ones are
+    /// forced ON, all others forced OFF, so the clock cannot add anything else.
+    /// </summary>
+    public async Task SetLiveSelectionAsync(IReadOnlyCollection<int> playlistIds, CancellationToken ct = default)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        var all = await db.SavedPlaylists.AsNoTracking().Select(p => p.Id).ToListAsync(ct);
+
+        if (playlistIds.Count == 0)
+        {
+            AutoDjFeedStore.Clear(_cfg);
+            _log.LogInformation("Live selection cleared — timeslots decide again; queue swap in {Sec}s.",
+                SwapDebounce.TotalSeconds);
+        }
+        else
+        {
+            var chosen = playlistIds.ToHashSet();
+            foreach (var id in all) AutoDjFeedStore.Set(_cfg, id, chosen.Contains(id));
+            _log.LogInformation("Live selection: {Count} playlist(s) forced on, the rest off; queue swap in {Sec}s.",
+                chosen.Count, SwapDebounce.TotalSeconds);
+        }
+
+        _swapDueUtc = DateTime.UtcNow + SwapDebounce;
+    }
+
+    /// <summary>The ids currently forced on (for the UI's chip state).</summary>
+    public HashSet<int> LiveSelection() => AutoDjFeedStore.LoadState(_cfg).On;
+
+    /// <summary>True when a debounced swap has come due (and consumes it).</summary>
+    public bool TakeDueSwap()
+    {
+        if (_swapDueUtc == DateTime.MaxValue || DateTime.UtcNow < _swapDueUtc) return false;
+        _swapDueUtc = DateTime.MaxValue;
+        return true;
+    }
+
+    /// <summary>
+    /// Clean sweep: drop EVERY upcoming entry — Auto DJ picks, activated
+    /// playlist rows and outstanding requests alike — then refill from whatever
+    /// is feeding now. The playing track and the played history stay. Returns
+    /// how many were removed and how many were added.
+    /// </summary>
+    public async Task<(int Removed, int Added)> SwapQueueToActiveFeedsAsync(int? currentTrackId, CancellationToken ct = default)
+    {
+        int removed = await ClearUpcomingAsync(currentTrackId, ct);
+        int added = await TopUpAsync(ct);
+        _log.LogInformation("Queue swap: {Removed} upcoming entr(ies) cleared, {Added} added from the live selection.",
+            removed, added);
+        return (removed, added);
+    }
+
+    /// <summary>
+    /// Removes every UPCOMING queue entry that came from a given saved playlist
+    /// (matched on the Added-by label the top-up writes). The playing track and
+    /// the played history are left alone, and positions are closed up
+    /// afterwards. Returns how many were removed.
+    /// </summary>
+    public async Task<int> RemoveUpcomingBySourceAsync(string playlistName, CancellationToken ct = default)
+    {
+        await _mutateGate.WaitAsync(ct);
+        try
+        {
+            await using var db = await _dbf.CreateDbContextAsync(ct);
+            var entries = await db.PlaylistEntries.OrderBy(e => e.Position).ToListAsync(ct);
+            if (entries.Count == 0) return 0;
+
+            EnsurePlayheadLoaded();
+            int head = Volatile.Read(ref _playheadEntryId);
+            var cur = head != 0 ? entries.FirstOrDefault(e => e.Id == head) : null;
+            int curPos = cur?.Position ?? -1;
+
+            var doomed = entries
+                .Where(e => e.Position > curPos
+                            && string.Equals(e.AddedBy, playlistName, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (doomed.Count == 0) return 0;
+
+            db.PlaylistEntries.RemoveRange(doomed);
+            await db.SaveChangesAsync(ct);
+            await RenumberAsync(db, ct);
+            return doomed.Count;
+        }
+        finally { _mutateGate.Release(); }
+    }
+
     /// <summary>
     /// The saved playlists with their slots loaded — for callers that need to
     /// ask <see cref="IsPlaylistActiveNow"/> about each one (the DJ page).
@@ -504,9 +602,10 @@ public sealed class PlaylistService
             // of its enabled slots covers this moment. Union, so the clock keeps
             // working in the background while a manual toggle can force a
             // playlist in outside its window.
-            var feeds = AutoDjFeedStore.Load(_cfg);
+            // ON beats the clock, OFF beats both — see AutoDjFeedStore.
+            var feeds = AutoDjFeedStore.LoadState(_cfg);
             var active = playlists
-                .Where(pl => feeds.Contains(pl.Id) || IsPlaylistActiveNow(pl, now))
+                .Where(pl => feeds.IsActive(pl, now, IsPlaylistActiveNow))
                 .ToList();
             if (active.Count == 0)
             {

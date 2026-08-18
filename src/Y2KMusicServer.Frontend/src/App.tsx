@@ -22,7 +22,12 @@ interface NowPlaying {
 interface StreamInfo { enabled: boolean; bitrate: number; listeners: number; showListenLive: boolean }
 interface SearchItem { id: number; title: string | null; artist: string | null; album: string | null; durationSec: number }
 interface PublicPlaylist { id: number; name: string; count: number }
-interface PlaylistsInfo { showSelector: boolean; playlists: PublicPlaylist[] }
+interface PlaylistsInfo {
+  showSelector: boolean
+  canChoose?: boolean
+  selected?: number[]
+  playlists: PublicPlaylist[]
+}
 interface AlbumHit { album: string; artist: string | null; trackId: number; count: number }
 interface SearchResp { items: SearchItem[]; albums?: AlbumHit[]; fallbackQuery?: string | null }
 interface PlaylistRow { position: number; trackId: number; title: string | null; artist: string | null; durationSec: number; source: string | null }
@@ -107,6 +112,21 @@ export default function App() {
   const [stream, setStream] = useState<StreamInfo | null>(null)
   const [pls, setPls] = useState<PlaylistsInfo | null>(null)
   const [selPl, setSelPl] = useState<number | null>(null)
+  // Which playlists Auto DJ plays from (chips, when the DJ allows it). Local
+  // echo so a tap reacts at once; the poll reconciles a moment later.
+  const [djSel, setDjSel] = useState<number[]>([])
+  const setLiveSelection = (ids: number[]) => {
+    setDjSel(ids)
+    void fetch('/api/playlists/selection', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playlistIds: ids })
+    }).then(r => {
+      if (!r.ok) { flash('The DJ has kept playlist control.'); return }
+      flash(ids.length === 0
+        ? 'Back to the DJ\u2019s schedule \u2014 new songs in a moment.'
+        : `Playing from ${ids.length} playlist${ids.length === 1 ? '' : 's'} \u2014 new songs in a moment.`)
+    }).catch(() => {})
+  }
   const [albums, setAlbums] = useState<AlbumHit[]>([])
   const [albumView, setAlbumView] = useState<AlbumHit | null>(null)
   const [artFail, setArtFail] = useState<Set<number>>(new Set())
@@ -309,7 +329,16 @@ export default function App() {
   // Playlist chip (single-select toggle) and album navigation. Opening an
   // album replaces the results; Back returns to whatever search/browse was
   // active. Typing again also leaves the album.
-  const togglePlaylist = (id: number) => { setAlbumView(null); setSelPl(prev => prev === id ? null : id) }
+  useEffect(() => { if (pls?.selected) setDjSel(pls.selected) }, [pls?.selected?.join(',')])
+
+  // A chip does two jobs: browse that playlist's songs, and — when the DJ has
+  // allowed it — add or remove it from what Auto DJ plays from.
+  const togglePlaylist = (id: number) => {
+    setAlbumView(null)
+    setSelPl(prev => prev === id ? null : id)
+    if (pls?.canChoose)
+      setLiveSelection(djSel.includes(id) ? djSel.filter(x => x !== id) : [...djSel, id])
+  }
   const openAlbum = (a: AlbumHit) => setAlbumView(a)
   const backToSearch = () => setAlbumView(null)
   const onQueryChange = (v: string) => { setAlbumView(null); setQ(v) }
@@ -434,17 +463,23 @@ export default function App() {
         </aside>
         )}
 
-        {/* Center/right: top search box + results */}
-        <div className="lz-rescol">
+        {/* Playlist rail (left) + results column (right) */}
+        <div className="lz-rescol-wrap">
           {!requireName && pls?.showSelector && pls.playlists.length > 0 && (
-            <div className="lz-chips lz-chips-top">
+            <aside className="lz-plcol">
               {pls.playlists.map(p => (
-                <button key={p.id} className={`lz-chip${selPl === p.id ? ' is-on' : ''}`} onClick={() => togglePlaylist(p.id)}>
+                <button key={p.id}
+                  className={`lz-chip${selPl === p.id ? ' is-on' : ''}${djSel.includes(p.id) ? ' is-live' : ''}`}
+                  title={pls.canChoose
+                    ? (djSel.includes(p.id) ? 'Playing from this — tap to stop' : 'Tap to play from this playlist')
+                    : 'Browse this playlist'}
+                  onClick={() => togglePlaylist(p.id)}>
                   <span className="lz-chip-name">{p.name}</span><span className="lz-chip-count">{p.count}</span>
                 </button>
               ))}
-            </div>
+            </aside>
           )}
+          <div className="lz-rescol">
           {/* Search box and the player/theme controls share one row: laid out
               side by side rather than floating over each other. */}
           <div className="lz-searchrow">
@@ -571,6 +606,7 @@ export default function App() {
           </div>
         </section>
           )}
+          </div>
         </div>
       </div>
 

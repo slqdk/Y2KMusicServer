@@ -228,6 +228,8 @@ button.w-btn.w-tilemenu-btn { position: absolute; top: 1px; right: 1px; min-heig
 button.w-btn.w-tilefeed { margin-top: 2px; width: 100%; min-height: 15px; padding: 0 2px; font-size: 10px; line-height: 13px; }
 button.w-btn.w-tilefeed-on { background: var(--w-on, #C6E8C6); font-weight: bold; }
 button.w-btn.w-tilefeed-sched { background: #F4E4B0; }
+/* Switched off by the operator — a timeslot cannot re-enable it. */
+button.w-btn.w-tilefeed-off { background: #E8C6C6; }
 .w-pltile.w-newtile { color: var(--w-disabled); }
 .w-viewhead {
   display: flex; align-items: center; gap: 6px; padding: 2px 6px; margin-bottom: 4px;

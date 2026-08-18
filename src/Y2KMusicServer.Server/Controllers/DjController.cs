@@ -53,14 +53,14 @@ public sealed class DjController : ControllerBase
             .Select(e => new { e.Id, e.TrackId, e.Title, e.Artist, e.DurationSec, e.Source, e.AddedBy })
             .ToList();
 
-        var feeds = AutoDjFeedStore.Load(_cfg);
+        var feeds = AutoDjFeedStore.LoadState(_cfg);
         var now = DateTime.Now;
         var playlists = (await _playlist.SavedPlaylistsWithSlotsAsync(ct))
             .Select(pl => new
             {
                 pl.Id,
                 pl.Name,
-                Feed = feeds.Contains(pl.Id),
+                Feed = feeds.IsActive(pl, now, PlaylistService.IsPlaylistActiveNow),
                 ScheduledNow = PlaylistService.IsPlaylistActiveNow(pl, now),
                 TrackCount = pl.Tracks.Count
             })
@@ -138,6 +138,22 @@ public sealed class DjController : ControllerBase
         AutoDjFeedStore.Set(_cfg, playlistId, value);
         _log.LogInformation("DJ page set Auto DJ feed for playlist {Id} to {Value}.", playlistId, value);
         return Ok(new { playlistId, feed = value });
+    }
+
+    public sealed record SelectionBody(List<int>? PlaylistIds);
+
+    /// <summary>
+    /// Sets the live playlist selection. Five seconds after the last change the
+    /// queue is swept and refilled from it, and playback crossfades into the
+    /// first new song. Empty list = back to the timeslots. Always available
+    /// here, whatever the website is allowed to do.
+    /// </summary>
+    [HttpPost("selection")]
+    public async Task<IActionResult> SetSelection([FromBody] SelectionBody? body, CancellationToken ct)
+    {
+        var ids = body?.PlaylistIds ?? new List<int>();
+        await _playlist.SetLiveSelectionAsync(ids, ct);
+        return Ok(new { selected = ids, swapInSec = 5 });
     }
 
     public sealed record DuckSettingsBody(int? LevelPercent, double? FadeSeconds);

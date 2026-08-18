@@ -171,11 +171,11 @@ public sealed class PublicController : ControllerBase
         // top-up draws from. Shuffled, so the same rows aren't always on top.
         if (!hasText && genres.Count == 0 && decades.Count == 0)
         {
-            var feeds = AutoDjFeedStore.Load(_cfg);
+            var feeds = AutoDjFeedStore.LoadState(_cfg);
             var nowLocal = DateTime.Now;
             var activeIds = (await db.SavedPlaylists.AsNoTracking()
                     .Include(pl => pl.Slots).ToListAsync(ct))
-                .Where(pl => feeds.Contains(pl.Id) || PlaylistService.IsPlaylistActiveNow(pl, nowLocal))
+                .Where(pl => feeds.IsActive(pl, nowLocal, PlaylistService.IsPlaylistActiveNow))
                 .Select(pl => pl.Id)
                 .ToHashSet();
             if (activeIds.Count == 0)
@@ -349,7 +349,17 @@ public sealed class PublicController : ControllerBase
             .OrderBy(p => p.TileOrder).ThenBy(p => p.Name)
             .Select(p => new { id = p.Id, name = p.Name, count = p.Tracks.Count })
             .ToListAsync(ct);
-        return new { showSelector = show, playlists };
+        // canChoose drives the chips' second job: selecting which playlists Auto
+        // DJ feeds from. selected is the current live selection, so a phone that
+        // arrives late shows the same state as everyone else.
+        var web = WebConfigStore.Load(_cfg);
+        return new
+        {
+            showSelector = show,
+            canChoose = web.AllowWebPlaylistChoice,
+            selected = _playlist.LiveSelection().ToList(),
+            playlists
+        };
     }
 
     /// <summary>
@@ -434,6 +444,27 @@ public sealed class PublicController : ControllerBase
             accepted = autoAccept,
             cooldownSec = web.RequestLimitEnabled ? web.RequestIntervalMinutes * 60 : 0
         });
+    }
+
+    public sealed record SelectionBody(List<int>? PlaylistIds);
+
+    /// <summary>
+    /// Sets which playlists Auto DJ plays from. Five seconds after the last
+    /// change the queue is swept and refilled from the selection, and the room
+    /// crossfades into the first new song. An empty list hands control back to
+    /// the timeslots. 403 unless the operator allowed website visitors to do
+    /// this — the same function is always available on /DJAdmin.
+    /// </summary>
+    [HttpPost("playlists/selection")]
+    public async Task<IActionResult> SetSelection([FromBody] SelectionBody? body, CancellationToken ct)
+    {
+        var web = WebConfigStore.Load(_cfg);
+        if (!web.AllowWebPlaylistChoice)
+            return StatusCode(403, new { error = "the DJ has kept playlist control" });
+
+        var ids = body?.PlaylistIds ?? new List<int>();
+        await _playlist.SetLiveSelectionAsync(ids, ct);
+        return Ok(new { selected = ids, swapInSec = 5 });
     }
 
     // ── Speakers (Google Cast) ───────────────────────────────────────────────

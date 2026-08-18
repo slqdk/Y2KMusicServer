@@ -61,6 +61,7 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
         showListenLive: s.showListenLive, requestLimitEnabled: s.requestLimitEnabled,
         requestIntervalMinutes: s.requestIntervalMinutes, autoAcceptRequests: s.autoAcceptRequests,
         webNextAfterMinutes: s.webNextAfterMinutes, requireListenerName: s.requireListenerName,
+        allowWebPlaylistChoice: s.allowWebPlaylistChoice,
         bannerText: s.bannerText, bannerColor: s.bannerColor
       })
       setS(r); setSaved(true)
@@ -181,22 +182,25 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
                 <legend>Next transition</legend>
                 <div className="w-formrow">
                   <label>Normal crossfade:</label>
-                  <input type="number" min={0} max={30} value={s.nextFadeSeconds}
-                    onChange={e => patch({ nextFadeSeconds: Number(e.target.value) })} style={{ width: 64 }} /> sec
+                  <input type="number" min={0.5} max={30} step={0.1}
+                    value={(mix?.normalFadeSeconds ?? 0) > 0 ? mix!.normalFadeSeconds : s.nextFadeSeconds}
+                    disabled={!mix || busy}
+                    onChange={e => applyMix({ normalFadeSeconds: Math.max(0.5, Math.min(30, Number(e.target.value))) })}
+                    style={{ width: 64 }} /> sec
                   <span className="w-muted">how long Deck A takes to fade 100% → 0%</span>
                 </div>
                 <div className="w-formrow">
                   <label>Deck B starts at:</label>
-                  <input type="number" min={0} max={100} step={5}
-                    value={Math.round((mix?.normalEntryLevel ?? 0) * 100)} disabled={!mix || busy}
+                  <input type="number" min={0} max={100} step={0.5}
+                    value={Math.round((mix?.normalEntryLevel ?? 0) * 1000) / 10} disabled={!mix || busy}
                     onChange={e => applyMix({ normalEntryLevel: Math.max(0, Math.min(100, Number(e.target.value))) / 100 })}
                     style={{ width: 64 }} /> %
                   <span className="w-muted">the volume Deck B enters at (0 = fade up from silence) — Normal crossfade only</span>
                 </div>
                 <div className="w-formrow">
                   <label>Deck B waits until A is at:</label>
-                  <input type="number" min={0} max={100} step={5}
-                    value={Math.round((mix?.normalEntryAtA ?? 1) * 100)} disabled={!mix || busy}
+                  <input type="number" min={0} max={100} step={0.5}
+                    value={Math.round((mix?.normalEntryAtA ?? 1) * 1000) / 10} disabled={!mix || busy}
                     onChange={e => applyMix({ normalEntryAtA: Math.max(0, Math.min(100, Number(e.target.value))) / 100 })}
                     style={{ width: 64 }} /> %
                   <span className="w-muted">Deck B stays silent until Deck A has fallen to this level, then enters; A keeps fading to 0 on the same clock</span>
@@ -284,6 +288,15 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
                 <div className="w-muted" style={{ margin: '2px 0 6px 22px' }}>
                   Off: the name box (and the whole left column) disappears from the website, and
                   requests are listed as “Guest-1A2B” per device instead.
+                </div>
+                <label className="w-check">
+                  <input type="checkbox" checked={s.allowWebPlaylistChoice}
+                    onChange={e => patch({ allowWebPlaylistChoice: e.target.checked })} />
+                  {' '}Let website visitors choose which playlists Auto DJ plays from
+                </label>
+                <div className="w-muted" style={{ margin: '2px 0 6px 22px' }}>
+                  Their choice replaces the live queue 5 s later and crossfades in. The same control is
+                  always available on the DJ page (/DJAdmin), whatever this is set to.
                 </div>
                 <label className="w-check"><input type="checkbox" checked={s.allowWebNext} onChange={e => patch({ allowWebNext: e.target.checked })} /> Allow website visitors to skip to next song</label>
                 <div className="w-formrow">
