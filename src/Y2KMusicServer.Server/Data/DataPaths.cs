@@ -83,6 +83,15 @@ public static class DataPaths
         => Path.Combine(DataDir(cfg), "web-config.json");
 
     /// <summary>
+    /// The Auto DJ feed toggles (which saved playlists feed the queue right now
+    /// irrespective of their schedule), at
+    /// <c>&lt;DataPath&gt;\autodj-feeds.json</c>. JSON, not the database
+    /// (no-migrations rule).
+    /// </summary>
+    public static string AutoDjFeedsPath(IConfiguration cfg)
+        => Path.Combine(DataDir(cfg), "autodj-feeds.json");
+
+    /// <summary>
     /// Google Cast settings + the remembered speaker allow-list, at
     /// <c>&lt;DataPath&gt;\cast-config.json</c>. JSON, not the database
     /// (no-migrations rule).

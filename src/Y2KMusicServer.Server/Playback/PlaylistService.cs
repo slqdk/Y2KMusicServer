@@ -120,6 +120,26 @@ public sealed class PlaylistService
         return entries.Count(e => e.Position > curPos);
     }
 
+    /// <summary>
+    /// The next entry to play plus whether the current track was actually found
+    /// in the queue. The scheduler needs both: when the current track IS in the
+    /// queue, a next entry with the same TrackId is a genuine repeat and must be
+    /// armed; when it is not (operator played something off-playlist), arming
+    /// the same id again would replay what's already on the deck.
+    /// </summary>
+    public async Task<(int? TrackId, bool CurrentInQueue)> NextUpcomingAsync(int? currentTrackId, CancellationToken ct = default)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        var entries = await db.PlaylistEntries.AsNoTracking()
+            .OrderBy(e => e.Position).ToListAsync(ct);
+        int curPos = CurrentPosition(entries, currentTrackId);
+        var next = entries.Where(e => e.Position > curPos)
+            .OrderBy(e => e.Position)
+            .Select(e => (int?)e.TrackId)
+            .FirstOrDefault();
+        return (next, curPos >= 0);
+    }
+
     /// <summary>The TrackId of the first entry after the current track, or null.</summary>
     public async Task<int?> NextUpcomingTrackIdAsync(int? currentTrackId, CancellationToken ct = default)
     {
@@ -418,10 +438,18 @@ public sealed class PlaylistService
             var playlists = await db.SavedPlaylists.AsNoTracking()
                 .Include(pl => pl.Slots)
                 .ToListAsync(ct);
-            var active = playlists.Where(pl => IsPlaylistActiveNow(pl, now)).ToList();
+            // A playlist feeds the queue when the operator toggled it on
+            // (autodj-feeds.json — the old "category enabled" switch) OR when one
+            // of its enabled slots covers this moment. Union, so the clock keeps
+            // working in the background while a manual toggle can force a
+            // playlist in outside its window.
+            var feeds = AutoDjFeedStore.Load(_cfg);
+            var active = playlists
+                .Where(pl => feeds.Contains(pl.Id) || IsPlaylistActiveNow(pl, now))
+                .ToList();
             if (active.Count == 0)
             {
-                _log.LogDebug("Auto DJ top-up skipped: no saved playlist has an active timeslot right now.");
+                _log.LogDebug("Auto DJ top-up skipped: no playlist is toggled on and no timeslot covers right now.");
                 return 0;
             }
 
@@ -637,7 +665,12 @@ public sealed class PlaylistService
 
     /// <summary>True when any of the playlist's enabled slots covers the given
     /// moment. A playlist with no slots is never schedule-active.</summary>
-    private static bool IsPlaylistActiveNow(SavedPlaylist pl, DateTime now)
+    /// <summary>
+    /// True when one of the playlist's enabled slots covers <paramref name="now"/>.
+    /// Public so the admin API can light the same lamp the top-up actually uses —
+    /// one implementation, no drift between what the UI claims and what plays.
+    /// </summary>
+    public static bool IsPlaylistActiveNow(SavedPlaylist pl, DateTime now)
     {
         if (pl.Slots.Count == 0) return false;
         int todayDow = ((int)now.DayOfWeek + 6) % 7; // Mon=0 … Sun=6
@@ -686,14 +719,46 @@ public sealed class PlaylistService
         s is PlaylistSource.Auto or PlaylistSource.Schedule;
 
     /// <summary>
+    /// The entry the playhead is on. Tracked by ENTRY id, not track id: the same
+    /// song may legitimately appear in the queue more than once (a request for
+    /// something already scheduled, an activated playlist containing a repeat),
+    /// and resolving the playhead by track id alone snapped it back to the FIRST
+    /// copy — after which "everything after the current track" pointed at the
+    /// wrong slice and playback looped over the songs between the two copies
+    /// forever. Entry ids survive renumbering; positions don't.
+    /// </summary>
+    private int _playheadEntryId;   // 0 = none yet
+
+    /// <summary>
     /// The Position of the current track in the (ordered) entry list, or -1 if
     /// it isn't present — in which case the whole list is "upcoming".
     /// </summary>
-    private static int CurrentPosition(List<PlaylistEntry> ordered, int? currentTrackId)
+    private int CurrentPosition(List<PlaylistEntry> ordered, int? currentTrackId)
     {
         if (currentTrackId is not int id) return -1;
-        var match = ordered.FirstOrDefault(e => e.TrackId == id);
-        return match?.Position ?? -1;
+
+        // 1. Same entry as last time → nothing to re-resolve.
+        int head = Volatile.Read(ref _playheadEntryId);
+        if (head != 0)
+        {
+            var cur = ordered.FirstOrDefault(e => e.Id == head);
+            if (cur != null && cur.TrackId == id) return cur.Position;
+        }
+
+        // 2. New track: adopt the first copy AFTER the previous playhead, so a
+        //    duplicate earlier in the queue can never drag the playhead back.
+        int minPos = -1;
+        if (head != 0)
+        {
+            var prev = ordered.FirstOrDefault(e => e.Id == head);
+            if (prev != null) minPos = prev.Position;
+        }
+        var match = ordered.FirstOrDefault(e => e.TrackId == id && e.Position > minPos)
+                    ?? ordered.FirstOrDefault(e => e.TrackId == id);
+        if (match == null) return -1;
+
+        Volatile.Write(ref _playheadEntryId, match.Id);
+        return match.Position;
     }
 
     /// <summary>Reassigns contiguous 0..n-1 positions after any structural change.</summary>

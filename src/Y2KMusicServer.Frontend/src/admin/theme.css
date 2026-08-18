@@ -211,6 +211,11 @@
 button.w-btn.w-tilemenu-btn { position: absolute; top: 1px; right: 1px; min-height: 13px; padding: 0 3px; font-size: 9px; line-height: 11px; }
 .w-pltile .w-cat-name { font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .w-pltile .w-cat-count { font-size: 10px; }
+/* Auto DJ feed switch on each tile. Green = the operator turned it on; amber =
+   a timeslot has it on right now. Same specificity trick as the ▾ button. */
+button.w-btn.w-tilefeed { margin-top: 2px; width: 100%; min-height: 15px; padding: 0 2px; font-size: 10px; line-height: 13px; }
+button.w-btn.w-tilefeed-on { background: var(--w-on, #C6E8C6); font-weight: bold; }
+button.w-btn.w-tilefeed-sched { background: #F4E4B0; }
 .w-pltile.w-newtile { color: var(--w-disabled); }
 .w-viewhead {
   display: flex; align-items: center; gap: 6px; padding: 2px 6px; margin-bottom: 4px;

@@ -141,6 +141,12 @@ export default function PlaylistPanel(
     }
   }
 
+  // Auto DJ feed toggle — the old category switch. A playlist feeds the queue
+  // when it's toggled on OR when one of its timeslots covers right now, so the
+  // tile shows both states.
+  const toggleFeed = (pl: api.SavedPlaylistDto) =>
+    guard(async () => { await api.setPlaylistFeed(pl.id, !pl.feed); await refreshTiles() })
+
   const acceptReq = (id: number) =>
     guard(async () => { await api.acceptRequest(id); await refreshReqs(); await refreshList() })
   const dismissReq = (id: number) =>
@@ -271,11 +277,23 @@ export default function PlaylistPanel(
             onClick={() => setViewing(v => v?.id === pl.id ? null : pl)}
             onContextMenu={e => openTileMenu(e, pl)}
             style={{ position: 'relative' }}
-            title={`Priority ${pl.priority} · ${pl.slotCount} timeslot(s)`}>
-            <button className="w-btn w-tilemenu-btn" title="Playlist actions (activate / schedule / rename / delete / priority)"
+            title={`Priority ${pl.priority} · ${pl.slotCount} timeslot(s)`
+              + (pl.feed ? ' · Auto DJ: ON' : (pl.scheduledNow ? ' · Auto DJ: ON (timeslot)' : ' · Auto DJ: off'))}>
+            <button className="w-btn w-tilemenu-btn" title="Playlist actions (Auto DJ / activate / schedule / rename / export / delete / priority)"
               onClick={e => { e.stopPropagation(); openTileMenu(e, pl) }}>▾</button>
             <div className="w-cat-name">{pl.name}</div>
             <div className="w-cat-count">{pl.trackCount} tracks</div>
+            <button
+              className={`w-btn w-tilefeed${pl.feed ? ' w-tilefeed-on' : (pl.scheduledNow ? ' w-tilefeed-sched' : '')}`}
+              disabled={busy}
+              title={pl.feed
+                ? 'Auto DJ is using this playlist — click to stop'
+                : (pl.scheduledNow
+                  ? 'A timeslot has this playlist on right now — click to keep it on regardless of the clock'
+                  : 'Let Auto DJ pick songs from this playlist')}
+              onClick={e => { e.stopPropagation(); toggleFeed(pl) }}>
+              {pl.feed ? 'Auto DJ ✓' : (pl.scheduledNow ? 'Auto DJ ⏱' : 'Auto DJ')}
+            </button>
           </div>
         ))}
         {tiles.length < maxTiles && !naming && (
@@ -467,7 +485,11 @@ export default function PlaylistPanel(
         <ul className="w-ctxmenu" role="menu" style={{ left: tileMenu.x, top: tileMenu.y, minWidth: MENU_W }}
           onContextMenu={e => e.preventDefault()}>
           <li className="w-ctxitem" role="menuitem"
-            onClick={() => { activate(tileMenu.pl); setTileMenu(null) }}>▶ Activate</li>
+            onClick={() => { toggleFeed(tileMenu.pl); setTileMenu(null) }}>
+            {tileMenu.pl.feed ? '✓ Auto DJ uses this playlist' : 'Let Auto DJ use this playlist'}
+          </li>
+          <li className="w-ctxitem" role="menuitem"
+            onClick={() => { activate(tileMenu.pl); setTileMenu(null) }}>▶ Activate (replace queue now)</li>
           <li className="w-ctxitem" role="menuitem"
             onClick={() => { setSchedFor(tileMenu.pl); setTileMenu(null) }}>Schedule…</li>
           <li className="w-ctxitem" role="menuitem"

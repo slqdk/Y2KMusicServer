@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Y2KMusicServer.Server.Data;
 using Y2KMusicServer.Server.Data.Entities;
+using Y2KMusicServer.Server.Playback;
 
 namespace Y2KMusicServer.Server.Controllers;
 
@@ -16,8 +17,13 @@ namespace Y2KMusicServer.Server.Controllers;
 public sealed class AdminSavedPlaylistsController : ControllerBase
 {
     private readonly IDbContextFactory<Y2KDbContext> _dbf;
+    private readonly IConfiguration _cfg;
 
-    public AdminSavedPlaylistsController(IDbContextFactory<Y2KDbContext> dbf) => _dbf = dbf;
+    public AdminSavedPlaylistsController(IDbContextFactory<Y2KDbContext> dbf, IConfiguration cfg)
+    {
+        _dbf = dbf;
+        _cfg = cfg;
+    }
 
     public sealed record NameBody(string Name);
     public sealed record AddTrackBody(int TrackId);
@@ -30,7 +36,7 @@ public sealed class AdminSavedPlaylistsController : ControllerBase
     public async Task<object> List(CancellationToken ct)
     {
         await using var db = await _dbf.CreateDbContextAsync(ct);
-        var items = await db.SavedPlaylists.AsNoTracking()
+        var rows = await db.SavedPlaylists.AsNoTracking()
             .OrderBy(p => p.TileOrder)
             .Select(p => new
             {
@@ -42,7 +48,47 @@ public sealed class AdminSavedPlaylistsController : ControllerBase
                 SlotCount = p.Slots.Count(s => s.Enabled)
             })
             .ToListAsync(ct);
+
+        // Feed = the operator's "Auto DJ may use this playlist" toggle; Scheduled
+        // = a slot covers this moment. Auto DJ draws from the union of the two,
+        // and the UI shows both so it's clear WHY a playlist is feeding.
+        var feeds = AutoDjFeedStore.Load(_cfg);
+        var now = DateTime.Now;
+        var withSlots = await db.SavedPlaylists.AsNoTracking()
+            .Include(p => p.Slots)
+            .ToListAsync(ct);
+        var scheduled = withSlots
+            .Where(p => PlaylistService.IsPlaylistActiveNow(p, now))
+            .Select(p => p.Id)
+            .ToHashSet();
+
+        var items = rows.Select(p => new
+        {
+            p.Id,
+            p.Name,
+            p.Priority,
+            p.TileOrder,
+            p.TrackCount,
+            p.SlotCount,
+            Feed = feeds.Contains(p.Id),
+            ScheduledNow = scheduled.Contains(p.Id)
+        }).ToList();
+
         return new { playlists = items, max = SavedPlaylist.MaxPlaylists };
+    }
+
+    /// <summary>
+    /// Turns Auto DJ feeding on/off for one playlist (the old category switch).
+    /// Independent of the schedule: Auto DJ uses toggled-on playlists PLUS any
+    /// whose timeslot covers the moment.
+    /// </summary>
+    [HttpPost("{id:int}/feed")]
+    public async Task<IActionResult> SetFeed(int id, [FromQuery] bool value, CancellationToken ct)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        if (!await db.SavedPlaylists.AnyAsync(p => p.Id == id, ct)) return NotFound();
+        AutoDjFeedStore.Set(_cfg, id, value);
+        return Ok(new { id, feed = value });
     }
 
     /// <summary>Creates a playlist (cap 14). 422 when full or the name is
@@ -122,6 +168,10 @@ public sealed class AdminSavedPlaylistsController : ControllerBase
         if (pl == null) return NotFound();
         db.SavedPlaylists.Remove(pl); // tracks + slots cascade
         await db.SaveChangesAsync(ct);
+
+        // Keep the feed toggles free of ids that no longer exist, so a recycled
+        // id can't inherit a deleted playlist's "on" state.
+        AutoDjFeedStore.Prune(_cfg, await db.SavedPlaylists.Select(p => p.Id).ToListAsync(ct));
         return Ok(new { deleted = pl.Name });
     }
 

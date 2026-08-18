@@ -97,8 +97,12 @@ public sealed class AutoDjScheduler : BackgroundService
         // stale scheduled track and the request would be pruned unplayed.
         if (!status.Crossfading)
         {
-            var nextId = await _playlist.NextUpcomingTrackIdAsync(status.TrackId, ct);
-            if (nextId is int n && n != status.TrackId && n != status.NextTrackId)
+            var (nextId, currentInQueue) = await _playlist.NextUpcomingAsync(status.TrackId, ct);
+            // Arm the next entry unless it's already armed. A next entry with the
+            // same TrackId is only skipped when the current track ISN'T in the
+            // queue — otherwise a deliberate repeat (same song twice in a row)
+            // would leave Deck B empty and the queue would stall.
+            if (nextId is int n && n != status.NextTrackId && (currentInQueue || n != status.TrackId))
             {
                 var r = await _engine.QueueNextAsync(n, ct);
                 if (r != QueueResult.Ok)

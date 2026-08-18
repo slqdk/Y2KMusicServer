@@ -22,6 +22,8 @@ export interface SavedPlaylistDto {
   tileOrder: number
   trackCount: number
   slotCount: number
+  feed: boolean          // operator toggled Auto DJ to use this playlist
+  scheduledNow: boolean  // a timeslot covers this moment
 }
 
 export interface GenreRule { raw: string; substring: boolean; bucket: string }
@@ -263,6 +265,8 @@ export const stopAllCasts = () =>
 export interface PlaylistImportResult {
   id: number; name: string; matched: number; missing: number; missingSamples: string[]
 }
+export const setPlaylistFeed = (id: number, value: boolean) =>
+  req<{ id: number; feed: boolean }>(`/api/admin/saved-playlists/${id}/feed?value=${value}`, { method: 'POST' })
 export const exportSavedPlaylistUrl = (id: number) =>
   `/api/admin/saved-playlists/${id}/export`
 export const importSavedPlaylist = (payload: unknown) =>
