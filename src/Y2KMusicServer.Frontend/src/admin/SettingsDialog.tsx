@@ -60,7 +60,7 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
         debugLogging: s.debugLogging,
         showListenLive: s.showListenLive, requestLimitEnabled: s.requestLimitEnabled,
         requestIntervalMinutes: s.requestIntervalMinutes, autoAcceptRequests: s.autoAcceptRequests,
-        webNextAfterMinutes: s.webNextAfterMinutes,
+        webNextAfterMinutes: s.webNextAfterMinutes, requireListenerName: s.requireListenerName,
         bannerText: s.bannerText, bannerColor: s.bannerColor
       })
       setS(r); setSaved(true)
@@ -273,6 +273,15 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
 
               <fieldset className="w-group">
                 <legend>Web requests</legend>
+                <label className="w-check">
+                  <input type="checkbox" checked={s.requireListenerName}
+                    onChange={e => patch({ requireListenerName: e.target.checked })} />
+                  {' '}Ask website visitors for their name
+                </label>
+                <div className="w-muted" style={{ margin: '2px 0 6px 22px' }}>
+                  Off: the name box (and the whole left column) disappears from the website, and
+                  requests are listed as “Guest-1A2B” per device instead.
+                </div>
                 <label className="w-check"><input type="checkbox" checked={s.allowWebNext} onChange={e => patch({ allowWebNext: e.target.checked })} /> Allow website visitors to skip to next song</label>
                 <div className="w-formrow">
                   <label>Skip unlocks after:</label>

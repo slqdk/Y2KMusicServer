@@ -17,6 +17,7 @@ interface NowPlaying {
   type: string | null
   bannerText?: string | null
   bannerColor?: string | null
+  requireName?: boolean
 }
 interface StreamInfo { enabled: boolean; bitrate: number; listeners: number; showListenLive: boolean }
 interface SearchItem { id: number; title: string | null; artist: string | null; album: string | null; durationSec: number }
@@ -107,12 +108,16 @@ export default function App() {
   // The search bar stays locked until the guest has typed at least 3 letters
   // of their name; the unlock settles 500 ms after they stop typing. Dropping
   // below 3 letters locks again immediately.
-  const [nameOk, setNameOk] = useState(false)
+  // The name requirement is an admin setting; default to requiring it until
+  // the first nowplaying poll answers, so the gate can't flash open.
+  const requireName = np?.requireName !== false
+  const [nameTyped, setNameTyped] = useState(false)
   useEffect(() => {
-    if (name.trim().length < 3) { setNameOk(false); return }
-    const t = window.setTimeout(() => setNameOk(true), 500)
+    if (name.trim().length < 3) { setNameTyped(false); return }
+    const t = window.setTimeout(() => setNameTyped(true), 500)
     return () => window.clearTimeout(t)
   }, [name])
+  const nameOk = !requireName || nameTyped
 
   // The results panel is hidden entirely until a search/browse has actually
   // been issued (same 500 ms settle as the fetch).
@@ -213,7 +218,7 @@ export default function App() {
   useEffect(() => {
     window.clearTimeout(debounce.current)
     const term = q.trim()
-    if (!nameOk || (!albumView && !term && selPl == null)) {
+    if (!nameOk) {
       setResults([]); setAlbums([]); setFallbackQ(null); setShowResults(false)
       return
     }
@@ -347,8 +352,25 @@ export default function App() {
         )
       })()}
 
-      {/* Theme picker, alone in the top-right corner (desktop only) */}
-      <div className="lz-topright">{themeSelect('lz-theme-corner')}</div>
+      {/* Top-right corner: Listen Live + the theme picker (desktop only). The
+          player button lives up here rather than in the now-bar, which is for
+          what's playing, not for controls. */}
+      <div className="lz-topright">
+        {stream?.showListenLive && (
+          <button
+            className={`lz-btn${live ? ' is-live' : ''}`}
+            onClick={toggleLive}
+            disabled={!stream?.enabled}
+            title={stream?.enabled ? 'Listen to the live stream' : 'The stream is off air'}
+          >
+            {!stream?.enabled ? 'Off air' : live ? '● LIVE' : '▶ Listen Live'}
+          </button>
+        )}
+        {stream?.showListenLive && stream?.enabled && (
+          <span className="lz-kbps">{stream.bitrate} kbps{live ? ` · ${stream.listeners} listening` : ''}</span>
+        )}
+        {themeSelect('lz-theme-corner')}
+      </div>
 
       {/* Mobile burger + slide-in drawer: name, theme, playlists. The inputs
           are the same controlled state as the desktop sidebar, so the two
@@ -385,7 +407,8 @@ export default function App() {
       {/* ── Main area: left sidebar + centered results ─────────────────── */}
       <div className="lz-main">
 
-        {/* Left: play controls + name + search + playlists + recent */}
+        {/* Left column: only exists when the DJ asks visitors for a name. */}
+        {requireName && (
         <aside className="lz-side">
           <div className="lz-field-label">Your name <span className="lz-req">*</span></div>
           <input className="lz-input" type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Enter your name…" maxLength={40} />
@@ -403,9 +426,19 @@ export default function App() {
             </div>
           )}
         </aside>
+        )}
 
-        {/* Center/right: top search box + results (hidden until a search) */}
+        {/* Center/right: top search box + results */}
         <div className="lz-rescol">
+          {!requireName && pls?.showSelector && pls.playlists.length > 0 && (
+            <div className="lz-chips lz-chips-top">
+              {pls.playlists.map(p => (
+                <button key={p.id} className={`lz-chip${selPl === p.id ? ' is-on' : ''}`} onClick={() => togglePlaylist(p.id)}>
+                  <span className="lz-chip-name">{p.name}</span><span className="lz-chip-count">{p.count}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <input
             className="lz-input lz-input-search lz-search-top"
             type="search"
@@ -526,19 +559,6 @@ export default function App() {
                 </>
               )}
             </div>
-          )}
-          {stream?.showListenLive && (
-            <button
-              className={`lz-btn${live ? ' is-live' : ''}`}
-              onClick={toggleLive}
-              disabled={!stream?.enabled}
-              title={stream?.enabled ? 'Listen to the live stream' : 'The stream is off air'}
-            >
-              {!stream?.enabled ? 'Off air' : live ? '● LIVE' : '▶ Listen Live'}
-            </button>
-          )}
-          {stream?.showListenLive && stream?.enabled && (
-            <span className="lz-kbps">{stream.bitrate} kbps{live ? ` · ${stream.listeners} listening` : ''}</span>
           )}
           {np?.allowNext && np?.trackId != null && (
             <button className="lz-btn" onClick={skip} title="Skip to the next track">

@@ -83,6 +83,15 @@ public static class DataPaths
         => Path.Combine(DataDir(cfg), "web-config.json");
 
     /// <summary>
+    /// How far the live queue has played, at
+    /// <c>&lt;DataPath&gt;\playhead.json</c> — survives a restart so playback
+    /// resumes at the first unplayed entry. JSON, not the database
+    /// (no-migrations rule).
+    /// </summary>
+    public static string PlayheadPath(IConfiguration cfg)
+        => Path.Combine(DataDir(cfg), "playhead.json");
+
+    /// <summary>
     /// The Auto DJ feed toggles (which saved playlists feed the queue right now
     /// irrespective of their schedule), at
     /// <c>&lt;DataPath&gt;\autodj-feeds.json</c>. JSON, not the database

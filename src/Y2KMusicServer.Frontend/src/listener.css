@@ -171,6 +171,13 @@
 /* Theme picker alone in the top-right corner */
 .lz-topright { position: fixed; top: 10px; right: 16px; z-index: 45; }
 
+/* Top-right cluster: Listen Live + kbps + theme picker on one line */
+.lz-topright { display: flex; align-items: center; gap: 8px; }
+/* Playlist chips above the results when there is no left column */
+.lz-chips-top { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+/* No sidebar → the results column spans the full width */
+.lz-main:has(> .lz-rescol:only-child) { grid-template-columns: minmax(0, 1fr); }
+
 /* Speakers popover (Google Cast) — opens upward from the bottom bar */
 .lz-spwrap { position: relative; }
 .lz-sp-backdrop { position: fixed; inset: 0; z-index: 78; }

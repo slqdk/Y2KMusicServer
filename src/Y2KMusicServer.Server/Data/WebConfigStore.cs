@@ -37,6 +37,14 @@ public static class WebConfigStore
 
         /// <summary>Banner background color, #rrggbb.</summary>
         public string BannerColor { get; set; } = "#0A246A";
+
+        /// <summary>
+        /// Make visitors type a name before they can search or request. Off =
+        /// the name field (and the whole left sidebar) disappears from the
+        /// listener page and requests are labelled with a per-device name
+        /// instead, so the admin queue still shows who asked for what.
+        /// </summary>
+        public bool RequireListenerName { get; set; } = true;
     }
 
     private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };

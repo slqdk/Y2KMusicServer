@@ -91,7 +91,8 @@ public sealed class PublicController : ControllerBase
             year,
             type,
             bannerText = string.IsNullOrWhiteSpace(web.BannerText) ? null : web.BannerText,
-            bannerColor = web.BannerColor
+            bannerColor = web.BannerColor,
+            requireName = web.RequireListenerName
         };
     }
 
@@ -163,8 +164,35 @@ public sealed class PublicController : ControllerBase
             .Select(s => int.TryParse(s, out var d) ? (int?)d : null)
             .Where(d => d != null).Select(d => d!.Value).ToHashSet();
 
+        // ── Nothing typed: browse what Auto DJ is playing from ────────────
+        // An empty box used to show an empty page. Instead, show the songs the
+        // DJ has actually put in play tonight: the playlists toggled on for
+        // Auto DJ plus any whose timeslot covers right now — the same set the
+        // top-up draws from. Shuffled, so the same rows aren't always on top.
         if (!hasText && genres.Count == 0 && decades.Count == 0)
-            return new { items = Array.Empty<object>(), albums = Array.Empty<object>() };
+        {
+            var feeds = AutoDjFeedStore.Load(_cfg);
+            var nowLocal = DateTime.Now;
+            var activeIds = (await db.SavedPlaylists.AsNoTracking()
+                    .Include(pl => pl.Slots).ToListAsync(ct))
+                .Where(pl => feeds.Contains(pl.Id) || PlaylistService.IsPlaylistActiveNow(pl, nowLocal))
+                .Select(pl => pl.Id)
+                .ToHashSet();
+            if (activeIds.Count == 0)
+                return new { items = Array.Empty<object>(), albums = Array.Empty<object>(), browsing = true };
+
+            var feedRows = await db.SavedPlaylistTracks.AsNoTracking()
+                .Where(pt => activeIds.Contains(pt.SavedPlaylistId) && pt.Track != null)
+                .Select(pt => pt.Track!)
+                .ToListAsync(ct);
+
+            feedRows = ApplyFolderVisibility(feedRows);
+            var shuffled = PreferFlac(feedRows)
+                .OrderBy(_ => Guid.NewGuid())
+                .Take(take)
+                .ToList();
+            return new { items = ToItems(shuffled), albums = Array.Empty<object>(), browsing = true };
+        }
 
         var query = db.Tracks.AsNoTracking().AsQueryable();
         // Word-by-word: every word typed must hit title, artist or album, in any
@@ -221,6 +249,21 @@ public sealed class PublicController : ControllerBase
             .ToList();
 
         return new { items = ToItems(deduped.Take(take)), albums, fallbackQuery };
+    }
+
+    /// <summary>
+    /// A short, stable, human-readable label for an anonymous device:
+    /// "Guest-7F3A". Derived from the device id the page generates (or the
+    /// caller IP as a fallback) — not reversible, just consistent.
+    /// </summary>
+    private static string DeviceLabel(string? deviceId, string? ip)
+    {
+        var seed = !string.IsNullOrWhiteSpace(deviceId) ? deviceId!.Trim()
+                 : !string.IsNullOrWhiteSpace(ip) ? ip!
+                 : "unknown";
+        uint h = 2166136261;
+        foreach (var c in seed) { h ^= c; h *= 16777619; }
+        return $"Guest-{h % 0xFFFF:X4}";
     }
 
     private static readonly HashSet<string> StopTokens = new(StringComparer.OrdinalIgnoreCase)
@@ -358,6 +401,12 @@ public sealed class PublicController : ControllerBase
 
         var name = body.RequesterName?.Trim();
         if (name is { Length: > 40 }) name = name[..40];
+
+        // With the name requirement switched off nobody types one, so the admin
+        // queue would show a blank requester. Label it by device instead —
+        // stable per phone/tablet, so the DJ can still tell requests apart.
+        if (string.IsNullOrWhiteSpace(name))
+            name = DeviceLabel(body.DeviceId, HttpContext.Connection.RemoteIpAddress?.ToString());
 
         // Auto-accept (web-config.json) short-circuits the DJ approve step: the
         // request is stored as Accepted and dropped straight into the playlist as

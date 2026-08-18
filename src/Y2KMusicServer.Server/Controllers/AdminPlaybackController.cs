@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Y2KMusicServer.Server.Audio;
+using Y2KMusicServer.Server.Playback;
 
 namespace Y2KMusicServer.Server.Controllers;
 
@@ -13,16 +14,50 @@ namespace Y2KMusicServer.Server.Controllers;
 public sealed class AdminPlaybackController : ControllerBase
 {
     private readonly AudioEngine _engine;
+    private readonly PlaylistService _playlist;
+    private readonly ILogger<AdminPlaybackController> _log;
 
-    public AdminPlaybackController(AudioEngine engine) => _engine = engine;
+    public AdminPlaybackController(AudioEngine engine, PlaylistService playlist,
+        ILogger<AdminPlaybackController> log)
+    {
+        _engine = engine;
+        _playlist = playlist;
+        _log = log;
+    }
 
     [HttpPost("load")]
     public async Task<IActionResult> Load([FromQuery] int trackId, CancellationToken ct)
         => LoadResultToResponse(await _engine.LoadAsync(trackId, ct), trackId);
 
+    /// <summary>
+    /// Starts playback. With a deck already loaded this is a plain resume; with
+    /// nothing loaded (a fresh service start, or after a power cut) it picks up
+    /// the queue where it left off — the first entry after the persisted
+    /// playhead, so the rows that already played are skipped. If the queue is
+    /// exhausted it asks Auto DJ for a top-up first, when Auto DJ is on.
+    /// </summary>
     [HttpPost("play")]
-    public IActionResult Play()
-        => _engine.Play() ? Ok(_engine.GetStatus()) : Conflict(new { error = "nothing loaded" });
+    public async Task<IActionResult> Play(CancellationToken ct)
+    {
+        if (_engine.Play()) return Ok(_engine.GetStatus());
+
+        var resumeId = await _playlist.ResumeTrackIdAsync(ct);
+        if (resumeId == null && await _playlist.IsAutoDjOnAsync(ct))
+        {
+            await _playlist.TopUpAsync(ct);
+            resumeId = await _playlist.ResumeTrackIdAsync(ct);
+        }
+        if (resumeId is not int trackId)
+            return Conflict(new { error = "nothing loaded and the queue is empty" });
+
+        var load = await _engine.LoadAsync(trackId, ct);
+        if (load != LoadResult.Ok) return LoadResultToResponse(load, trackId);
+
+        _log.LogInformation("Play with an empty deck resumed the queue at track {TrackId}.", trackId);
+        return _engine.Play()
+            ? Ok(_engine.GetStatus())
+            : Conflict(new { error = "could not start playback" });
+    }
 
     [HttpPost("pause")]
     public IActionResult Pause()

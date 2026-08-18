@@ -455,6 +455,7 @@ export interface SettingsDto {
   webNextAfterMinutes: number
   bannerText: string
   bannerColor: string
+  requireListenerName: boolean
 }
 export interface SettingsUpdate {
   nextTriggerPct?: number
@@ -474,6 +475,7 @@ export interface SettingsUpdate {
   webNextAfterMinutes?: number
   bannerText?: string
   bannerColor?: string
+  requireListenerName?: boolean
 }
 export const getSettings = () => req<SettingsDto>('/api/admin/settings')
 export const putSettings = (u: SettingsUpdate) =>

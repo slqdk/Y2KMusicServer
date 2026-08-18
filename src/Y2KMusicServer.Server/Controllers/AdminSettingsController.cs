@@ -37,7 +37,8 @@ public sealed class AdminSettingsController : ControllerBase
         bool? NormalizeEnabled, bool? LimiterEnabled, double? TargetLufs, int? Volume,
         int? ScanWorkers, bool? AllowWebNext, bool? ShowWebCategories, bool? DebugLogging,
         bool? ShowListenLive, bool? RequestLimitEnabled, int? RequestIntervalMinutes,
-        bool? AutoAcceptRequests, int? WebNextAfterMinutes, string? BannerText, string? BannerColor);
+        bool? AutoAcceptRequests, int? WebNextAfterMinutes, string? BannerText, string? BannerColor,
+        bool? RequireListenerName);
 
     [HttpGet]
     public async Task<IActionResult> Get(CancellationToken ct)
@@ -85,6 +86,7 @@ public sealed class AdminSettingsController : ControllerBase
         if (u.WebNextAfterMinutes is int wnm) web.WebNextAfterMinutes = wnm;
         if (u.BannerText is string bt) web.BannerText = bt;
         if (u.BannerColor is string bc) web.BannerColor = bc;
+        if (u.RequireListenerName is bool rln) web.RequireListenerName = rln;
         web = WebConfigStore.Save(_cfg, web);
 
         return Ok(Shape(s, web));
@@ -98,6 +100,6 @@ public sealed class AdminSettingsController : ControllerBase
         s.StreamingBitrate, s.AllowWebNext, s.ShowWebCategories,
         s.DebugLogging,
         w.ShowListenLive, w.RequestLimitEnabled, w.RequestIntervalMinutes, w.AutoAcceptRequests,
-        w.WebNextAfterMinutes, w.BannerText, w.BannerColor
+        w.WebNextAfterMinutes, w.BannerText, w.BannerColor, w.RequireListenerName
     };
 }

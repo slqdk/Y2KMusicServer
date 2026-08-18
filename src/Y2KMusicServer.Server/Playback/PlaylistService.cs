@@ -140,6 +140,38 @@ public sealed class PlaylistService
         return (next, curPos >= 0);
     }
 
+    /// <summary>
+    /// Where playback should start when nothing is loaded — after a restart, a
+    /// power cut, or a plain Stop. The first entry AFTER the persisted playhead,
+    /// so the rows already played are skipped; the queue head when there is no
+    /// playhead (a fresh queue); null when the whole queue has been played
+    /// (the caller can top up and ask again).
+    /// </summary>
+    public async Task<int?> ResumeTrackIdAsync(CancellationToken ct = default)
+    {
+        EnsurePlayheadLoaded();
+
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        var entries = await db.PlaylistEntries.AsNoTracking()
+            .OrderBy(e => e.Position).ToListAsync(ct);
+        if (entries.Count == 0) return null;
+
+        int head = Volatile.Read(ref _playheadEntryId);
+        var cur = head != 0 ? entries.FirstOrDefault(e => e.Id == head) : null;
+
+        // The remembered entry is gone (pruned, or the queue was replaced) but
+        // its track may still be in the list — resume after that copy instead of
+        // replaying the whole queue.
+        if (cur == null && head != 0)
+        {
+            int tid = Volatile.Read(ref _playheadTrackId);
+            if (tid != 0) cur = entries.LastOrDefault(e => e.TrackId == tid);
+        }
+
+        if (cur == null) return entries[0].TrackId;   // nothing remembered → start at the top
+        return entries.FirstOrDefault(e => e.Position > cur.Position)?.TrackId;
+    }
+
     /// <summary>The TrackId of the first entry after the current track, or null.</summary>
     public async Task<int?> NextUpcomingTrackIdAsync(int? currentTrackId, CancellationToken ct = default)
     {
@@ -728,6 +760,25 @@ public sealed class PlaylistService
     /// forever. Entry ids survive renumbering; positions don't.
     /// </summary>
     private int _playheadEntryId;   // 0 = none yet
+    private int _playheadTrackId;
+    private bool _playheadLoaded;
+
+    /// <summary>
+    /// Reads the persisted playhead once per process, so the first status tick
+    /// after a restart already knows where the queue left off.
+    /// </summary>
+    private void EnsurePlayheadLoaded()
+    {
+        if (_playheadLoaded) return;
+        _playheadLoaded = true;
+        var p = PlayheadStore.Load(_cfg);
+        if (p.EntryId > 0)
+        {
+            Volatile.Write(ref _playheadEntryId, p.EntryId);
+            Volatile.Write(ref _playheadTrackId, p.TrackId);
+            _log.LogInformation("Queue playhead restored: entry {EntryId} (track {TrackId}).", p.EntryId, p.TrackId);
+        }
+    }
 
     /// <summary>
     /// The Position of the current track in the (ordered) entry list, or -1 if
@@ -736,6 +787,7 @@ public sealed class PlaylistService
     private int CurrentPosition(List<PlaylistEntry> ordered, int? currentTrackId)
     {
         if (currentTrackId is not int id) return -1;
+        EnsurePlayheadLoaded();
 
         // 1. Same entry as last time → nothing to re-resolve.
         int head = Volatile.Read(ref _playheadEntryId);
@@ -758,6 +810,8 @@ public sealed class PlaylistService
         if (match == null) return -1;
 
         Volatile.Write(ref _playheadEntryId, match.Id);
+        Volatile.Write(ref _playheadTrackId, match.TrackId);
+        PlayheadStore.Save(_cfg, match.Id, match.TrackId);   // survives a restart / power cut
         return match.Position;
     }
 
