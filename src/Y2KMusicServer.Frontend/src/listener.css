@@ -220,8 +220,32 @@
   overflow-y: auto; padding-right: 4px;
 }
 .lz-plcol .lz-chip { width: 100%; justify-content: space-between; }
-/* A chip Auto DJ is currently playing from. */
-.lz-chip.is-live { border-color: var(--lz-green); box-shadow: inset 0 0 0 1px var(--lz-green); font-weight: 700; }
+
+/* Playing from this playlist — the state that accumulates as you tap. */
+.lz-plcol .lz-chip.is-live {
+  background: var(--lz-green); color: var(--lz-green-fg);
+  border-color: var(--lz-green-bd, var(--lz-green)); font-weight: 700;
+}
+.lz-plcol .lz-chip.is-live::before { content: "✔"; opacity: 1; }
+/* Merely browsing this one — a ring, so it can move without looking like a
+   selection being replaced. */
+.lz-plcol .lz-chip.is-on {
+  background: var(--lz-chip-bg); color: var(--lz-chip-fg); font-weight: 600;
+  box-shadow: 0 0 0 2px var(--lz-line);
+}
+.lz-plcol .lz-chip.is-on::before { content: "◆"; opacity: .7; }
+.lz-plcol .lz-chip.is-on.is-live {
+  background: var(--lz-green); color: var(--lz-green-fg);
+  box-shadow: 0 0 0 2px var(--lz-line);
+}
+.lz-plcol .lz-chip.is-on.is-live::before { content: "✔"; }
+.lz-plcol-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 4px 2px; border-top: 1px solid var(--lz-line-soft, var(--lz-line));
+  margin-top: 2px;
+}
+.lz-muted-sm { font-size: .74rem; color: var(--lz-muted); }
+.lz-clearsel { padding: 3px 10px; font-size: .74rem; }
 @media (max-width: 700px) {
   .lz-main:has(> .lz-plcol) { grid-template-columns: minmax(0, 1fr); }
   .lz-plcol { position: static; max-height: none; flex-direction: row; flex-wrap: wrap; }

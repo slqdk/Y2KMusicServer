@@ -476,6 +476,16 @@ export default function App() {
                   <span className="lz-chip-name">{p.name}</span><span className="lz-chip-count">{p.count}</span>
                 </button>
               ))}
+              {pls.canChoose && (
+                <div className="lz-plcol-foot">
+                  {djSel.length === 0
+                    ? <span className="lz-muted-sm">Tap to choose what plays</span>
+                    : <>
+                        <span className="lz-muted-sm">Playing from {djSel.length}</span>
+                        <button className="lz-btn lz-clearsel" onClick={() => setLiveSelection([])}>Clear</button>
+                      </>}
+                </div>
+              )}
             </aside>
         )}
 
