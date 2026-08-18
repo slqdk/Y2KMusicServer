@@ -352,25 +352,7 @@ export default function App() {
         )
       })()}
 
-      {/* Top-right corner: Listen Live + the theme picker (desktop only). The
-          player button lives up here rather than in the now-bar, which is for
-          what's playing, not for controls. */}
-      <div className="lz-topright">
-        {stream?.showListenLive && (
-          <button
-            className={`lz-btn${live ? ' is-live' : ''}`}
-            onClick={toggleLive}
-            disabled={!stream?.enabled}
-            title={stream?.enabled ? 'Listen to the live stream' : 'The stream is off air'}
-          >
-            {!stream?.enabled ? 'Off air' : live ? '● LIVE' : '▶ Listen Live'}
-          </button>
-        )}
-        {stream?.showListenLive && stream?.enabled && (
-          <span className="lz-kbps">{stream.bitrate} kbps{live ? ` · ${stream.listeners} listening` : ''}</span>
-        )}
-        {themeSelect('lz-theme-corner')}
-      </div>
+
 
       {/* Mobile burger + slide-in drawer: name, theme, playlists. The inputs
           are the same controlled state as the desktop sidebar, so the two
@@ -439,27 +421,47 @@ export default function App() {
               ))}
             </div>
           )}
-          <input
-            className="lz-input lz-input-search lz-search-top"
-            type="search"
-            value={q}
-            onChange={e => onQueryChange(e.target.value)}
-            disabled={!nameOk}
-            placeholder={nameOk ? 'Search songs or artists…' : 'Enter your name first (min. 3 letters)…'}
-            title={nameOk ? 'Search songs' : 'Type at least 3 letters of your name to unlock the search'}
-          />
+          {/* Search box and the player/theme controls share one row: laid out
+              side by side rather than floating over each other. */}
+          <div className="lz-searchrow">
+            <input
+              className="lz-input lz-input-search lz-search-top"
+              type="search"
+              value={q}
+              onChange={e => onQueryChange(e.target.value)}
+              disabled={!nameOk}
+              placeholder={nameOk ? 'Search songs or artists…' : 'Enter your name first (min. 3 letters)…'}
+              title={nameOk ? 'Search songs' : 'Type at least 3 letters of your name to unlock the search'}
+            />
+            <div className="lz-topctrls">
+              {stream?.showListenLive && (
+                <button
+                  className={`lz-btn${live ? ' is-live' : ''}`}
+                  onClick={toggleLive}
+                  disabled={!stream?.enabled}
+                  title={stream?.enabled ? 'Listen to the live stream' : 'The stream is off air'}
+                >
+                  {!stream?.enabled ? 'Off air' : live ? '● LIVE' : '▶ Listen Live'}
+                </button>
+              )}
+              {stream?.showListenLive && stream?.enabled && (
+                <span className="lz-kbps">{stream.bitrate} kbps{live ? ` · ${stream.listeners} listening` : ''}</span>
+              )}
+              {themeSelect('lz-theme-corner')}
+            </div>
+          </div>
 
           {showResults && (
-          <section className="lz-panel lz-results">
-          <div className="lz-panel-head">
-            {albumView
-              ? <span className="lz-albhead">
-                  <button className="lz-btn lz-back" onClick={backToSearch}>← Back</button>
-                  <span className="lz-albhead-name">{albumView.album}</span>
-                  {albumView.artist && <span className="lz-albhead-artist">{albumView.artist}</span>}
-                </span>
-              : <>Search results{results.length > 0 && <span style={{ fontWeight: 400, opacity: .8 }}>{results.length}</span>}</>}
-          </div>
+          <section className="lz-panel lz-results lz-results-bare">
+          {albumView && (
+            <div className="lz-panel-head">
+              <span className="lz-albhead">
+                <button className="lz-btn lz-back" onClick={backToSearch}>← Back</button>
+                <span className="lz-albhead-name">{albumView.album}</span>
+                {albumView.artist && <span className="lz-albhead-artist">{albumView.artist}</span>}
+              </span>
+            </div>
+          )}
           <div className="lz-panel-body">
             {results.length === 0 && albums.length === 0
               ? <div className="lz-empty">No matches.</div>

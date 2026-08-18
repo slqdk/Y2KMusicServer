@@ -169,10 +169,11 @@
 .lz-side-bottom { margin-top: auto; padding-top: 14px; }
 
 /* Theme picker alone in the top-right corner */
-.lz-topright { position: fixed; top: 10px; right: 16px; z-index: 45; }
 
-/* Top-right cluster: Listen Live + kbps + theme picker on one line */
-.lz-topright { display: flex; align-items: center; gap: 8px; }
+/* Search row: the box grows, the player + theme controls sit beside it */
+.lz-searchrow { display: flex; align-items: center; gap: 10px; }
+.lz-searchrow .lz-input-search { flex: 1; min-width: 0; }
+.lz-topctrls { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 /* Playlist chips above the results when there is no left column */
 .lz-chips-top { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 /* No sidebar → the results column spans the full width */
@@ -237,7 +238,6 @@
 .lz-drawer-close { min-width: 44px; }
 .lz-theme-drawer { width: 100%; }
 .lz-theme-corner { min-width: 130px; }
-.lz-has-cd .lz-topright { top: 34px; }
 
 /* Party banner — pinned above everything, incl. the countdown line */
 .lz-banner {
@@ -254,10 +254,8 @@
 
 /* Stacking: banner (44) then countdown line (24) then content */
 .lz-has-banner .lz-cdline { top: 44px; }
-.lz-has-banner .lz-topright { top: 54px; }
 .lz-has-banner .lz-main { padding-top: 60px; }
 .lz-has-banner .lz-side, .lz-has-banner .lz-rescol { top: 60px; }
-.lz-has-banner.lz-has-cd .lz-topright { top: 78px; }
 .lz-has-banner.lz-has-cd .lz-main { padding-top: 84px; }
 
 /* Countdown line — request cooldown, pinned to the very top. The fill grows
@@ -343,13 +341,22 @@
   display: flex; align-items: center; justify-content: space-between;
 }
 .lz-panel-body { flex: 1; overflow: auto; }
+
+/* The results list needs no frame — it's the whole page. Dropping the border,
+   fill and heading buys a row and a half of songs. */
+.lz-results-bare {
+  background: transparent; border: 0; box-shadow: none;
+  border-radius: 0; min-height: 0;
+}
+.lz-results-bare .lz-panel-head { border-bottom: 0; padding: 6px 2px; background: transparent; }
+.lz-results-bare .lz-panel-body { padding-top: 2px; }
 .lz-empty { display: flex; align-items: center; justify-content: center; height: 100%; min-height: 240px; color: var(--lz-faint); font-size: .9rem; }
 
 /* Results list */
 .lz-results-list { list-style: none; padding: 0; margin: 0; }
 .lz-result {
-  display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center;
-  padding: 8px 12px; border-bottom: 1px solid var(--lz-line-soft, var(--lz-line));
+  display: grid; grid-template-columns: 1fr auto auto; gap: 4px 12px; align-items: center;
+  padding: 5px 10px; border-bottom: 1px solid var(--lz-line-soft, var(--lz-line));
 }
 .lz-result:hover { background: var(--lz-rowhover); }
 .lz-result.is-selected { background: var(--lz-sel-row); }
@@ -360,9 +367,12 @@
 .lz-result-dur { font-size: .8rem; color: var(--lz-faint); font-variant-numeric: tabular-nums; }
 
 /* Result rows with a leading mini icon (songs without artwork) */
-.lz-result.lz-result-icon { grid-template-columns: auto 1fr auto; }
+.lz-result.lz-result-icon { grid-template-columns: auto 1fr auto auto; }
+/* Compact rows: title and artist share one line so more songs fit on screen. */
+.lz-result-main { display: flex; align-items: baseline; gap: 8px; }
+.lz-result-main .lz-result-artist { flex: 0 1 auto; }
 .lz-mini-icon {
-  width: 28px; height: 28px; flex: 0 0 auto;
+  width: 24px; height: 24px; flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
   border-radius: var(--lz-radius-sm, 6px);
   background: var(--lz-art-bg, var(--lz-panel)); color: var(--lz-faint);
@@ -623,7 +633,10 @@
   .lz-main { --lz-nowbar-h: 232px; grid-template-columns: 1fr; }
   /* Name + theme + playlists move into the burger drawer */
   .lz-side { display: none; }
-  .lz-topright { display: none; }
+  /* The theme picker lives in the burger drawer on phones; Listen Live
+     stays in the search row. */
+  .lz-searchrow .lz-theme-corner { display: none; }
+  .lz-searchrow { flex-wrap: wrap; }
   .lz-burger { display: block; }
   /* Room for the burger so the search box doesn't sit under it */
   .lz-main { padding-top: 58px; }
