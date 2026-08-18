@@ -178,6 +178,10 @@ public static class Program
             // table + the track selector + the in-memory play history; the
             // scheduler is the loop that chains the engine and triggers top-ups.
             builder.Services.AddSingleton<PlaylistService>();
+
+            // Cues the queue's next unplayed track on startup so the deck isn't
+            // empty after a restart. Load only — never starts playback.
+            builder.Services.AddHostedService<QueueResumeService>();
             builder.Services.AddHostedService<AutoDjScheduler>();
 
             // Audio analysis pass (Phase 5): fills loudness (and later BPM/beats).
