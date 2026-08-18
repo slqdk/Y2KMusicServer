@@ -205,17 +205,23 @@
 
 /* Search row: the box grows, the player + theme controls sit beside it */
 .lz-searchrow { display: flex; align-items: center; gap: 10px; }
-.lz-searchrow .lz-searchbox { flex: 1; min-width: 0; position: relative; display: flex; }
-.lz-searchrow .lz-input-search { flex: 1; min-width: 0; padding-right: 44px; }
-.lz-searchclear {
-  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
-  width: 32px; height: 32px; border-radius: 50%;
+.lz-searchrow .lz-input-search { flex: 1; min-width: 0; }
+.lz-theme-corner { min-height: 0; }
+
+/* Round transport button in the bottom bar. Its slot is always present, so the
+   now-playing and next-up lines never jump when skipping locks or unlocks. */
+.lz-nextslot { width: 56px; flex: 0 0 56px; display: flex; justify-content: center; }
+.lz-roundbtn {
+  width: 52px; height: 52px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  border: 1px solid var(--lz-line); background: var(--lz-panel); color: var(--lz-muted);
-  font: inherit; font-size: .85rem; cursor: pointer;
+  font-size: 1.25rem; line-height: 1;
+  background: var(--lz-btn-bg); color: var(--lz-btn-fg);
+  border: var(--lz-btn-border, 1px solid var(--lz-line));
+  box-shadow: var(--lz-btn-shadow, none);
+  cursor: pointer;
 }
-.lz-searchclear:hover { color: var(--lz-text); }
-.lz-searchclear, .lz-theme-corner { min-height: 0; }
+.lz-roundbtn:hover:not(:disabled) { background: var(--lz-btn-bg-hover, var(--lz-btn-bg)); }
+.lz-roundbtn:disabled { visibility: hidden; }   /* keeps the space, hides the control */
 .lz-topctrls { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 /* Playlist rail: the page grid's first column, hard against the left edge and
    running the full height, so the list is reachable however far you scroll. */
@@ -251,13 +257,7 @@
   box-shadow: 0 0 0 2px var(--lz-line);
 }
 .lz-plcol .lz-chip.is-on.is-live::before { content: "✔"; }
-.lz-plcol-foot {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: 6px 4px 2px; border-top: 1px solid var(--lz-line-soft, var(--lz-line));
-  margin-top: 2px;
-}
-.lz-muted-sm { font-size: .74rem; color: var(--lz-muted); }
-.lz-clearsel { padding: 3px 10px; font-size: .74rem; }
+
 @media (max-width: 700px) {
   .lz-main:has(> .lz-plcol) { grid-template-columns: minmax(0, 1fr); }
   .lz-plcol { position: static; max-height: none; flex-direction: row; flex-wrap: wrap; }

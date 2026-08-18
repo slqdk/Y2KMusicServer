@@ -499,16 +499,6 @@ export default function App() {
                   <span className="lz-chip-name">{p.name}</span><span className="lz-chip-count">{p.count}</span>
                 </button>
               ))}
-              {pls.canChoose && (
-                <div className="lz-plcol-foot">
-                  {djSel.length === 0
-                    ? <span className="lz-muted-sm">Tap to choose what plays</span>
-                    : <>
-                        <span className="lz-muted-sm">Playing from {djSel.length}</span>
-                        <button className="lz-btn lz-clearsel" onClick={() => setLiveSelection([])}>Clear</button>
-                      </>}
-                </div>
-              )}
             </aside>
         )}
 
@@ -516,22 +506,19 @@ export default function App() {
           {/* Search box and the player/theme controls share one row: laid out
               side by side rather than floating over each other. */}
           <div className="lz-searchrow">
-            <div className="lz-searchbox">
-              <input
-                className="lz-input lz-input-search lz-search-top"
-                type="search"
-                value={q}
-                onChange={e => onQueryChange(e.target.value)}
-                disabled={!nameOk}
-                placeholder={nameOk ? 'Search songs or artists…' : 'Enter your name first (min. 3 letters)…'}
-                title={nameOk ? 'Search songs' : 'Type at least 3 letters of your name to unlock the search'}
-              />
-              {q.length > 0 && (
-                <button className="lz-searchclear" title="Clear the search"
-                  onClick={() => { onQueryChange(''); setAlbumView(null) }}>✕</button>
-              )}
-            </div>
+            <input
+              className="lz-input lz-input-search lz-search-top"
+              type="search"
+              value={q}
+              onChange={e => onQueryChange(e.target.value)}
+              disabled={!nameOk}
+              placeholder={nameOk ? 'Search songs or artists…' : 'Enter your name first (min. 3 letters)…'}
+              title={nameOk ? 'Search songs' : 'Type at least 3 letters of your name to unlock the search'}
+            />
             <div className="lz-topctrls">
+              <button className="lz-btn" title="Clear the search"
+                disabled={q.length === 0 && !albumView}
+                onClick={() => { onQueryChange(''); setAlbumView(null) }}>Clear</button>
               {stream?.showListenLive && (
                 <button
                   className={`lz-btn${live ? ' is-live' : ''}`}
@@ -675,11 +662,19 @@ export default function App() {
               )}
             </div>
           )}
-          {np?.allowNext && np?.trackId != null && (
-            <button className="lz-btn" onClick={skip} title="Skip to the next track">
-              Next ⏭
+          {/* The slot is always here so the now-playing and next-up lines never
+              shift when skipping unlocks or locks again. */}
+          <div className="lz-nextslot">
+            <button
+              className="lz-roundbtn"
+              onClick={skip}
+              disabled={!np?.allowNext || np?.trackId == null}
+              aria-hidden={!np?.allowNext || np?.trackId == null}
+              title={np?.allowNext ? 'Skip to the next track' : 'Skipping is not unlocked yet'}
+            >
+              {np?.trackId && !np.playing ? '▶' : '⏭'}
             </button>
-          )}
+          </div>
         </div>
         {/* On air — the loud card. */}
         <div className="lz-np lz-barcard lz-barcard-now">
