@@ -180,15 +180,10 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
               <fieldset className="w-group">
                 <legend>Next transition</legend>
                 <div className="w-formrow">
-                  <label>Start next at:</label>
-                  <input type="number" min={5} max={95} value={s.nextTriggerPct}
-                    onChange={e => patch({ nextTriggerPct: Number(e.target.value) })} style={{ width: 64 }} /> %
-                </div>
-                <div className="w-formrow">
                   <label>Normal crossfade:</label>
                   <input type="number" min={0} max={30} value={s.nextFadeSeconds}
                     onChange={e => patch({ nextFadeSeconds: Number(e.target.value) })} style={{ width: 64 }} /> sec
-                  <span className="w-muted">caps a Normal (un-aligned) crossfade</span>
+                  <span className="w-muted">how long Deck A takes to fade 100% → 0%</span>
                 </div>
                 <div className="w-formrow">
                   <label>Deck B starts at:</label>
@@ -204,7 +199,7 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
                     value={Math.round((mix?.normalEntryAtA ?? 1) * 100)} disabled={!mix || busy}
                     onChange={e => applyMix({ normalEntryAtA: Math.max(0, Math.min(100, Number(e.target.value))) / 100 })}
                     style={{ width: 64 }} /> %
-                  <span className="w-muted">Deck B stays silent until Deck A has faded to this level (100 = B enters straight away)</span>
+                  <span className="w-muted">Deck B stays silent until Deck A has fallen to this level, then enters; A keeps fading to 0 on the same clock</span>
                 </div>
                 <div className="w-formrow">
                   <label>Beat-matched (same tempo):</label>
