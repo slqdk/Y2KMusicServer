@@ -87,7 +87,7 @@ export default function Admin() {
     : 'w-conn'
 
   return (
-    <div className={theme}>
+    <div className={`${theme} w-shell`}>
       <div className="w-titlebar">
         <span className="w-app">Y2K Music Server — Admin</span>
         <span className="w-spacer" style={{ flex: 1 }} />
@@ -126,7 +126,13 @@ export default function Admin() {
         </div>
       </div>
 
-      {logOpen && <LogPanel live={live} onClose={() => setLogOpen(false)} />}
+      {/* The log docks over the bottom of the workspace rather than taking
+          space from the library and the queue. */}
+      {logOpen && (
+        <div className="w-logdock">
+          <LogPanel live={live} onClose={() => setLogOpen(false)} />
+        </div>
+      )}
 
       {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); refreshMixRules() }} />}
 

@@ -422,13 +422,40 @@ button.w-btn.w-tilefeed-sched { background: #F4E4B0; }
 /* =====================================================================
    SHARED LAYOUT  (era-agnostic structure — unchanged across themes)
    ===================================================================== */
+/* The window IS the app: title bar + menu bar are fixed height, the two
+   columns take whatever is left, and each panel scrolls inside itself. The
+   1023 px row was a guess that forced a page scrollbar on every screen that
+   wasn't exactly that tall. */
+/* Admin owns the viewport: no page scrollbar, panels scroll internally.
+   100dvh so a mobile browser's collapsing toolbar can't clip the bottom. */
+.w-shell { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+.w-shell > .w-titlebar, .w-shell > .w-menubar { flex: 0 0 auto; }
 .w-cols {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-  grid-template-rows: 1023px;
-  gap: 4px; padding: 0 4px; align-items: stretch;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 4px; padding: 0 4px 4px; align-items: stretch;
+  flex: 1 1 0; min-height: 0;
 }
-@media (max-width: 920px) { .w-cols { grid-template-columns: 1fr; grid-template-rows: auto; } }
+/* Panels manage their own overflow so the page itself never scrolls. */
+.w-cols > * { min-height: 0; }
+@media (max-width: 920px) {
+  /* Too narrow for two columns: stack them and let the page scroll again. */
+  .w-shell { height: auto; overflow: visible; }
+  .w-cols { grid-template-columns: 1fr; grid-template-rows: auto; }
+}
+
+/* The log slides in over the bottom of the workspace instead of pushing the
+   panels around — it's a temporary look at what's happening, not a section. */
+.w-logdock {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 55;
+  height: min(46vh, 460px);
+  display: flex; flex-direction: column;
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, .28);
+}
+.w-logdock > .w-panel { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; margin: 0; }
+.w-logdock .w-logview { height: auto; flex: 1 1 0; min-height: 0; }
+.w-logdock .w-panelhead, .w-logdock .w-toolbar { flex: 0 0 auto; }
 
 .w-cats { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
 @media (max-width: 760px) { .w-cats { grid-template-columns: repeat(4, 1fr); } }
@@ -436,7 +463,10 @@ button.w-btn.w-tilefeed-sched { background: #F4E4B0; }
 .w-cat-count { font-size: 10px; margin: 1px 0 4px; }
 .w-cat button.w-btn { width: 100%; padding: 2px 4px; min-height: 19px; }
 
-.w-libpanel { display: flex; flex-direction: column; height: 1023px; min-height: 0; overflow: hidden; }
+/* Fills its grid cell — the cell is what's left of the window, so the library
+   grows and shrinks with the browser instead of forcing a page scrollbar. */
+.w-libpanel { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; }
+@media (max-width: 920px) { .w-libpanel { height: 70vh; } }
 .w-listwrap { background: #fff; overflow: auto; }
 .w-table { width: 100%; border-collapse: collapse; background: #fff; }
 .w-table td { padding: 1px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -558,6 +588,7 @@ button.w-btn.w-tilefeed-sched { background: #F4E4B0; }
 
 .w-logview {
   height: 230px; overflow: auto; margin-top: 6px; padding: 4px 6px;
+  /* In the bottom dock it stretches to whatever height the dock has. */
   background: #06121d; color: #9fd9c0;
   font-family: "Lucida Console", Consolas, monospace; font-size: 11px; line-height: 1.4;
   box-shadow: inset 1px 1px #0a0a0a, inset -1px -1px #fff, inset 2px 2px #000, inset -2px -2px #dfdfdf;
