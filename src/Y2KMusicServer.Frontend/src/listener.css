@@ -63,13 +63,18 @@
   border-radius: var(--lz-radius, 6px);
 }
 .lz-barcard-now {
-  flex: 1 1 34%;
+  flex: 2 1 40%; min-width: 320px;
+  padding: 10px 16px;
   background: var(--lz-panel);
   border-color: var(--lz-green, var(--lz-line));
+  border-width: 2px;
   box-shadow: var(--lz-raised, 0 1px 6px rgba(0, 0, 0, .18));
 }
+.lz-barcard-now .lz-np-art { width: 64px; height: 64px; }
+.lz-barcard-now .lz-np-artist { font-size: 1.15rem; }
+.lz-barcard-now .lz-np-title { font-size: 1rem; }
 .lz-barcard-next {
-  flex: 1 1 22%;
+  flex: 1 1 18%; min-width: 200px;
   opacity: .62;
   background: transparent;
   border-style: dashed;
@@ -380,19 +385,21 @@
 
 /* Results list */
 /* Song rows flow into as many columns as the screen has room for — one on a
-   phone, two on a laptop, three or more on a wide monitor. The wide column gap
-   plus a per-row frame keeps the columns visually apart, so nobody taps the
-   Request button belonging to the row next door. */
+   phone, two on a laptop, three or more on a wide monitor.
+   Columns are divided by a full-height rule: every row carries a left border,
+   and the wrapper clips the leftmost column's, so only the DIVIDERS between
+   columns show. Nobody has to guess which column a Request button belongs to. */
+.lz-results-wrap { overflow: hidden; }
 .lz-results-list {
-  list-style: none; padding: 0; margin: 0;
+  list-style: none; padding: 0; margin: 0 0 0 -1px;
   display: grid; grid-template-columns: repeat(auto-fill, minmax(430px, 1fr));
-  column-gap: 26px; row-gap: 4px;
+  column-gap: 0; row-gap: 0;
 }
 .lz-result {
   display: grid; grid-template-columns: 1fr auto auto; gap: 4px 12px; align-items: center;
-  padding: 6px 10px;
-  border: 1px solid var(--lz-line-soft, var(--lz-line));
-  border-radius: var(--lz-radius-sm, 6px);
+  padding: 7px 16px;
+  border-left: 1px solid var(--lz-line);
+  border-bottom: 1px solid var(--lz-line-soft, var(--lz-line));
 }
 .lz-result:hover { background: var(--lz-rowhover); }
 .lz-result.is-selected { background: var(--lz-sel-row); }

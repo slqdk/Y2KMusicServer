@@ -51,6 +51,20 @@ const fmt = (s: number) => {
 const readTheme = (): string => {
   try { return localStorage.getItem('y2k-listener-theme') || 'dark' } catch { return 'dark' }
 }
+/**
+ * Display-only split for untagged files: many rips have an empty Artist tag and
+ * "Kim Larsen - Bell'star" sitting in the title. Nothing is written back — this
+ * only decides what the row shows, so search and the queue are unaffected.
+ */
+const splitArtistTitle = (artist: string | null | undefined, title: string | null | undefined)
+  : { artist: string | null; title: string } => {
+  const a = (artist ?? '').trim()
+  const t = (title ?? '').trim()
+  if (a) return { artist: a, title: t || '(untitled)' }
+  const m = /^(.{2,60}?)\s+[-–—]\s+(.+)$/.exec(t)
+  return m ? { artist: m[1].trim(), title: m[2].trim() } : { artist: null, title: t || '(untitled)' }
+}
+
 const readName = (): string => {
   try { return localStorage.getItem('y2k-listener-name') || '' } catch { return '' }
 }
@@ -508,8 +522,13 @@ export default function App() {
                               <div key={t.id} className="lz-tile">
                                 <img className="lz-tile-art" src={`/api/albumart?trackId=${t.id}`} alt=""
                                   loading="lazy" onError={() => failArt(t.id)} />
-                                {t.artist && <div className="lz-tile-artist">{t.artist}</div>}
-                                <div className="lz-tile-title">{t.title ?? '(untitled)'}</div>
+                                {(() => {
+                                  const d = splitArtistTitle(t.artist, t.title)
+                                  return <>
+                                    {d.artist && <div className="lz-tile-artist">{d.artist}</div>}
+                                    <div className="lz-tile-title">{d.title}</div>
+                                  </>
+                                })()}
                                 <div className="lz-tile-foot">
                                   <span className="lz-tile-dur">{fmt(t.durationSec)}</span>
                                   {!cd && <button className="lz-btn lz-req-btn" onClick={() => requestTrack(t)} title="Request this song">Request</button>}
@@ -522,22 +541,29 @@ export default function App() {
                       {plain.length > 0 && (
                         <div className="lz-sect">
                           <div className="lz-sect-label">More songs</div>
+                          <div className="lz-results-wrap">
                           <ul className="lz-results-list">
                             {plain.map(t => (
                               <li key={t.id} className="lz-result lz-result-icon">
                                 <span className="lz-mini-icon" aria-hidden="true">♪</span>
                                 <div className="lz-result-main">
-                                  {t.artist && <>
-                                    <span className="lz-result-artist">{t.artist}</span>
-                                    <span className="lz-result-sep">–</span>
-                                  </>}
-                                  <span className="lz-result-title">{t.title ?? '(untitled)'}</span>
+                                  {(() => {
+                                    const d = splitArtistTitle(t.artist, t.title)
+                                    return <>
+                                      {d.artist && <>
+                                        <span className="lz-result-artist">{d.artist}</span>
+                                        <span className="lz-result-sep">–</span>
+                                      </>}
+                                      <span className="lz-result-title">{d.title}</span>
+                                    </>
+                                  })()}
                                 </div>
                                 <span className="lz-result-dur">{fmt(t.durationSec)}</span>
                                 {!cd && <button className="lz-btn lz-req-btn" onClick={() => requestTrack(t)} title="Request this song">Request</button>}
                               </li>
                             ))}
                           </ul>
+                          </div>
                         </div>
                       )}
                     </>
@@ -588,8 +614,13 @@ export default function App() {
             : <div className="lz-np-art lz-np-art-empty">♪</div>}
           <div className="lz-np-body">
             <div className="lz-np-state">● {stateLabel}</div>
-            {np?.artist && <div className="lz-np-artist">{np.artist}</div>}
-            <div className="lz-np-title">{np?.title ?? '—'}</div>
+            {(() => {
+              const d = splitArtistTitle(np?.artist, np?.title)
+              return <>
+                {d.artist && <div className="lz-np-artist">{d.artist}</div>}
+                <div className="lz-np-title">{np?.trackId ? d.title : '—'}</div>
+              </>
+            })()}
           </div>
         </div>
 
@@ -602,8 +633,13 @@ export default function App() {
                 <QueueArt trackId={r.trackId} />
                 <div className="lz-np-body">
                   <div className="lz-np-state lz-next-label">{i === 0 ? 'Next up' : `In ${i + 1}`}</div>
-                  {r.artist && <div className="lz-np-artist">{r.artist}</div>}
-                  <div className="lz-np-title">{r.title ?? '(untitled)'}</div>
+                  {(() => {
+                    const d = splitArtistTitle(r.artist, r.title)
+                    return <>
+                      {d.artist && <div className="lz-np-artist">{d.artist}</div>}
+                      <div className="lz-np-title">{d.title}</div>
+                    </>
+                  })()}
                 </div>
                 <span className="lz-nextup-dur">{fmt(r.durationSec)}</span>
               </div>
