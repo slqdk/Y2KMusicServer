@@ -77,14 +77,11 @@ public sealed class AdminLibraryController : ControllerBase
                 : query.Where(t => t.Type == f.ToUpper());
         }
 
+        // Every word must appear somewhere on the row (title / artist / album),
+        // in any order and across fields: "metallica puppets" finds
+        // Metallica — Master of Puppets. See TrackSearch.
         if (!string.IsNullOrWhiteSpace(q))
-        {
-            var term = q.Trim();
-            query = query.Where(t =>
-                (t.Title != null && EF.Functions.Like(t.Title, $"%{term}%")) ||
-                (t.Artist != null && EF.Functions.Like(t.Artist, $"%{term}%")) ||
-                (t.Album != null && EF.Functions.Like(t.Album, $"%{term}%")));
-        }
+            query = query.WhereAllTokens(q);
 
         var rows = await query
             .OrderBy(t => t.Artist).ThenBy(t => t.Title)

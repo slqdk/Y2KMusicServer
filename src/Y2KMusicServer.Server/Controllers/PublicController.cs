@@ -148,11 +148,10 @@ public sealed class PublicController : ControllerBase
                 .ToListAsync(ct);
             if (hasText)
             {
-                var t2 = q!.Trim();
-                plRows = plRows.Where(t =>
-                    (t.Title ?? "").Contains(t2, StringComparison.OrdinalIgnoreCase) ||
-                    (t.Artist ?? "").Contains(t2, StringComparison.OrdinalIgnoreCase) ||
-                    (t.Album ?? "").Contains(t2, StringComparison.OrdinalIgnoreCase)).ToList();
+                // Same word-AND rule as the main search, so narrowing inside a
+                // playlist behaves identically to searching the whole library.
+                var toks = TrackSearch.Tokens(q);
+                plRows = plRows.Where(t => TrackSearch.MatchesAllTokens(t, toks)).ToList();
             }
             return new { items = ToItems(PreferFlac(plRows).Take(take)) };
         }
@@ -168,26 +167,23 @@ public sealed class PublicController : ControllerBase
             return new { items = Array.Empty<object>(), albums = Array.Empty<object>() };
 
         var query = db.Tracks.AsNoTracking().AsQueryable();
-        if (hasText)
-        {
-            var term = q!.Trim();
-            query = query.Where(t =>
-                (t.Title != null && EF.Functions.Like(t.Title, $"%{term}%")) ||
-                (t.Artist != null && EF.Functions.Like(t.Artist, $"%{term}%")) ||
-                (t.Album != null && EF.Functions.Like(t.Album, $"%{term}%")));
-        }
+        // Word-by-word: every word typed must hit title, artist or album, in any
+        // order and across fields, so "metallica puppets" finds Master of
+        // Puppets. The fallback below still catches queries where a word is
+        // simply wrong (e.g. "metallica the black").
+        if (hasText) query = query.WhereAllTokens(q);
 
         var rows = await query
             .OrderBy(t => t.Artist).ThenBy(t => t.Title)
             .ToListAsync(ct);
         rows = ApplyFolderVisibility(rows);
 
-        // ── Fallback: nothing matched the literal phrase ─────────────────
-        // "metallica the black" finds nothing (the album is titled just
-        // "Metallica"), so loosen: first every meaningful word anywhere on the
-        // row, then the single word with the broadest hit (usually the artist
-        // or album) — and tell the page what was actually searched so it can
-        // say so. Only for plain text searches (no legacy facets).
+        // ── Fallback: not every word matched ─────────────────────────────
+        // "metallica the black" still finds nothing (no album word "black"), so
+        // loosen further: drop the stopwords and retry the word-AND, then fall
+        // back to the single word with the broadest hit (usually the artist or
+        // album) — and tell the page what was actually searched so it can say
+        // so. Only for plain text searches (no legacy facets).
         string? fallbackQuery = null;
         if (hasText && rows.Count == 0 && genres.Count == 0 && decades.Count == 0)
         {
@@ -231,12 +227,12 @@ public sealed class PublicController : ControllerBase
         { "the", "a", "an", "of", "and", "in", "on", "to", "og", "med", "feat", "ft" };
 
     /// <summary>
-    /// Loose matching for a phrase that found nothing. Stage 1: every
-    /// meaningful (non-stopword) token appears somewhere on the row — any
-    /// field. Stage 2: the single token with the most hits, longer tokens
-    /// winning ties, which surfaces the artist or album the listener probably
-    /// meant. Returns the matched rows plus the query actually used, or an
-    /// empty set when even single tokens hit nothing.
+    /// Loose matching for a query where the word-AND rule found nothing.
+    /// Stage 1: the same rule with stopwords dropped ("metallica the black" →
+    /// "metallica black"). Stage 2: the single token with the most hits, longer
+    /// tokens winning ties, which surfaces the artist or album the listener
+    /// probably meant. Returns the matched rows plus the query actually used,
+    /// or an empty set when even single tokens hit nothing.
     /// </summary>
     private static (List<Track> rows, string? usedQuery) FallbackSearch(List<Track> all, string term)
     {
@@ -245,14 +241,15 @@ public sealed class PublicController : ControllerBase
             (t.Artist ?? "").Contains(tok, StringComparison.OrdinalIgnoreCase) ||
             (t.Album ?? "").Contains(tok, StringComparison.OrdinalIgnoreCase);
 
-        var tokens = term.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var tokens = TrackSearch.Tokens(term);
         var core = tokens.Where(t => !StopTokens.Contains(t)).ToList();
         if (core.Count == 0) core = tokens;
 
-        if (core.Count > 1)
+        // Only worth retrying when dropping stopwords actually changed the query
+        // — the full word-AND has already been tried by the caller.
+        if (core.Count > 1 && core.Count < tokens.Count)
         {
-            var hit = all.Where(t => core.All(tok => Hit(t, tok))).ToList();
+            var hit = all.Where(t => TrackSearch.MatchesAllTokens(t, core)).ToList();
             if (hit.Count > 0) return (hit, string.Join(' ', core));
         }
 
