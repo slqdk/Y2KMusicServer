@@ -437,10 +437,12 @@ public sealed class AudioEngine
     {
         Track? track;
         Settings settings;
+        bool isJingle;
         await using (var db = await _dbf.CreateDbContextAsync(ct))
         {
             track = await db.Tracks.AsNoTracking().FirstOrDefaultAsync(t => t.Id == trackId, ct);
             settings = db.Settings.AsNoTracking().FirstOrDefault() ?? new Settings { Volume = 80 };
+            isJingle = track != null && await IsJingleTrackAsync(db, trackId, ct);
         }
 
         if (track == null) return LoadResult.NotFound;
@@ -453,7 +455,8 @@ public sealed class AudioEngine
         Deck deck;
         try
         {
-            deck = BuildDeck(track, NormalizedVolume(track, settings), leadIn, "A");
+            deck = BuildDeck(track, NormalizedVolume(track, settings, isJingle), leadIn, "A");
+            deck.IsJingle = isJingle;
         }
         catch (Exception ex)
         {
@@ -632,6 +635,7 @@ public sealed class AudioEngine
         Settings settings;
         MixCache? cached;
         double fromPhase;
+        bool nextIsJingle;
         await using (var db = await _dbf.CreateDbContextAsync(ct))
         {
             next = await db.Tracks.AsNoTracking().FirstOrDefaultAsync(t => t.Id == trackId, ct);
@@ -644,6 +648,7 @@ public sealed class AudioEngine
                 .Where(t => t.Id == fromId)
                 .Select(t => t.BeatPhaseOffsetSec ?? 0.0)
                 .FirstOrDefaultAsync(ct);
+            nextIsJingle = next != null && await IsJingleTrackAsync(db, trackId, ct);
         }
 
         if (next == null) return QueueResult.NotFound;
@@ -754,7 +759,7 @@ public sealed class AudioEngine
                 plan.StrategyName, plan.Reason);
         }
 
-        float targetVol = NormalizedVolume(next, settings);
+        float targetVol = NormalizedVolume(next, settings, nextIsJingle);
 
         Deck deckB;
         try
@@ -762,6 +767,7 @@ public sealed class AudioEngine
             deckB = BuildDeck(next, 0f, inPoint, "B");
             deckB.BaseVolume = targetVol;
             deckB.InPointSec = inPoint;
+            deckB.IsJingle = nextIsJingle;
         }
         catch (Exception ex)
         {
@@ -1411,6 +1417,17 @@ public sealed class AudioEngine
             plan = BuildForcedPlan_Locked(armed, p);
             _armed = null;
         }
+        else if (_deckA?.IsJingle == true || p.DeckB.IsJingle)
+        {
+            // A jingle is a deliberate interruption, not a mix, so BOTH sides of
+            // it are a plain Normal crossfade: into it and out of it. Beat-matching
+            // a sing-along, or dropping its bass out, fights what the jingle was
+            // for, and jingle clips are short and structurally odd enough that the
+            // planner's picks aren't trustworthy on them either way. Firing by
+            // hand already arms Normal; this is what makes a QUEUED jingle behave
+            // the same when auto-advance reaches it.
+            plan = BuildForcedPlan_Locked(Transition.NormalCrossfade, p);
+        }
         else
         {
             plan = p.Plan;
@@ -1844,8 +1861,45 @@ public sealed class AudioEngine
         return deck;
     }
 
-    private float NormalizedVolume(Track t, Settings s)
+    /// <summary>
+    /// Whether a track belongs to the designated jingle playlist. Asked while a
+    /// context is already open, so it costs one extra indexed lookup per deck
+    /// build and nothing at all when no playlist is designated.
+    /// </summary>
+    private async Task<bool> IsJingleTrackAsync(Y2KDbContext db, int trackId, CancellationToken ct)
     {
+        if (JingleStore.PlaylistId(_cfg) is not int playlistId) return false;
+        try
+        {
+            return await db.SavedPlaylistTracks.AsNoTracking()
+                .AnyAsync(pt => pt.SavedPlaylistId == playlistId && pt.TrackId == trackId, ct);
+        }
+        catch (Exception ex)
+        {
+            // A lookup failure must not stop a track loading; it just plays as
+            // an ordinary one.
+            _log.LogDebug(ex, "Jingle membership lookup failed for track {TrackId}", trackId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The deck's base volume: the master volume, adjusted by loudness
+    /// normalisation so every track sits at the same perceived level.
+    ///
+    /// A jingle deliberately breaks both rules and plays at full scale. The
+    /// point of a jingle is that the room notices it, and the master sits around
+    /// 80% precisely so there is headroom to jump into — normalising a jingle
+    /// back down to the target LUFS would undo the effect, and pulling a hot
+    /// jingle file below the master volume would make it QUIETER than the music
+    /// it interrupts. Consequence worth knowing: a quietly-mastered jingle file
+    /// plays quietly, since nothing lifts it. Loudness of the file is now the
+    /// operator's business.
+    /// </summary>
+    private float NormalizedVolume(Track t, Settings s, bool jingle = false)
+    {
+        if (jingle) return 1f;
+
         float baseVol = Math.Clamp(s.Volume / 100f, 0f, 1f);
         if (!s.NormalizeEnabled || t.LufsIntegrated is null or 0) return baseVol;
 
@@ -2037,6 +2091,12 @@ public sealed class AudioEngine
 
         public string Label { get; set; } = "A";
         public float BaseVolume { get; set; } = 1f;
+        /// <summary>This deck is playing a jingle: it runs at full output rather
+        /// than the master volume, and whatever follows it is a plain Normal
+        /// crossfade. Set when the deck is built, from the designated jingle
+        /// playlist's membership — so a jingle behaves the same whether it was
+        /// fired by hand or queued and reached normally.</summary>
+        public bool IsJingle { get; set; }
         public bool SilentPreroll { get; set; } // auto warm-up pump running; suppress its UI events
         public double InPointSec { get; set; } // musical in-point (Deck B crossfade marker)
 
