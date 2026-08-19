@@ -627,8 +627,10 @@ export interface YouTubeSettings {
   enabled: boolean
   cacheMaxMB: number
   cacheMaxAgeDays: number
-  /** Where pasted-link downloads are filed (resolved: blank server-side = the default). */
+  /** What downloads will actually use — stored path, or the ProgramData default. */
   downloadFolder: string
+  /** The raw stored value; blank means nothing is set and the default applies. */
+  downloadFolderStored: string
   /** Non-null when the folder is unusable (e.g. it overlaps a Music folder). */
   folderWarning: string | null
   /** Netscape cookies.txt path; blank = none. Gets past most media-URL 403s. */

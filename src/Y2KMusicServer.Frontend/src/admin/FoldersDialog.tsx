@@ -20,7 +20,12 @@ export default function FoldersDialog({ onClose, onChanged }:
   // The YouTube download destination. Server-resolved, so a blank stored value
   // still shows the default path it will actually use; ytNote carries the
   // advisory when the folder sits inside (or around) a Music folder.
+  // ytFolder is the STORED value (blank = the default applies), so the box being
+  // empty is honest rather than pre-filled with a default that Set would then
+  // write back verbatim. ytEffective is what downloads use right now, shown as
+  // the placeholder and after a save.
   const [ytFolder, setYtFolder] = useState('')
+  const [ytEffective, setYtEffective] = useState('')
   const [ytNote, setYtNote] = useState<string | null>(null)
   const [ytSaving, setYtSaving] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -32,20 +37,33 @@ export default function FoldersDialog({ onClose, onChanged }:
 
   useEffect(() => {
     api.getYouTubeSettings()
-      .then(s => { setYtFolder(s.downloadFolder); setYtNote(s.folderWarning) })
+      .then(s => {
+        setYtFolder(s.downloadFolderStored)
+        setYtEffective(s.downloadFolder)
+        setYtNote(s.folderWarning)
+      })
       .catch(() => {})
   }, [])
 
   // Saved explicitly rather than on blur: this one moves where files land, so a
   // stray click shouldn't commit it. Already-downloaded files stay where they are.
   const saveYtFolder = async () => {
-    setYtSaving(true)
+    setYtSaving(true); setErr(null); setMsg(null)
     try {
       const s = await api.setYouTubeSettings({ downloadFolder: ytFolder.trim() })
-      setYtFolder(s.downloadFolder); setYtNote(s.folderWarning)
-      setMsg('YouTube downloads will land in ' + s.downloadFolder)
-    } catch {
-      setErr('Could not save the YouTube folder.')
+      setYtFolder(s.downloadFolderStored)
+      setYtEffective(s.downloadFolder)
+      setYtNote(s.folderWarning)
+      // Report what the SERVER came back with, not what was typed — if the two
+      // differ, the save didn't take and the message says so instead of implying
+      // success.
+      setMsg(s.downloadFolder === ytFolder.trim() || ytFolder.trim().length === 0
+        ? `YouTube downloads will land in ${s.downloadFolder}`
+        : `The server kept ${s.downloadFolder} — the new folder was not stored.`)
+    } catch (e) {
+      setErr(e instanceof api.ApiError
+        ? `Could not save the YouTube folder (${e.message})`
+        : 'Could not save the YouTube folder — no reply from the server.')
     } finally { setYtSaving(false) }
   }
 
@@ -162,11 +180,17 @@ export default function FoldersDialog({ onClose, onChanged }:
                 disabled={ytSaving}
                 onChange={e => setYtFolder(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') saveYtFolder() }}
-                placeholder="C:\ProgramData\Y2KMusicServer\youtube" />
+                placeholder={ytEffective || 'C:\\ProgramData\\Y2KMusicServer\\youtube'} />
               <button className="w-btn" disabled={ytSaving} onClick={() => setBrowsing('youtube')}>Browse…</button>
-              <button className="w-btn" disabled={ytSaving || !ytFolder.trim()} onClick={saveYtFolder}>Set</button>
+              <button className="w-btn" disabled={ytSaving} onClick={saveYtFolder}>
+                {ytSaving ? 'Saving…' : 'Set'}
+              </button>
             </div>
-            {ytNote && <div className="w-muted" style={{ marginTop: 4 }}>{ytNote}</div>}
+            <div className="w-muted" style={{ marginTop: 4 }}>
+              Currently downloading to <code>{ytEffective || '…'}</code>
+              {ytFolder.trim().length === 0 && ytEffective ? ' (default — nothing set)' : ''}
+            </div>
+            {ytNote && <div className="w-muted" style={{ marginTop: 2 }}>{ytNote}</div>}
           </fieldset>
 
           {msg && <div className="w-muted" style={{ marginTop: 4 }}>{msg}</div>}

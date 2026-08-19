@@ -24,16 +24,19 @@ public sealed class AdminIntegrationsController : ControllerBase
     private readonly YouTubeFetchService _youtube;
     private readonly WebCacheHousekeeper _cache;
     private readonly YouTubeDownloadService _downloads;
+    private readonly ILogger<AdminIntegrationsController> _log;
 
     public AdminIntegrationsController(IConfiguration cfg, YouTubeProbe probe,
                                        YouTubeFetchService youtube, WebCacheHousekeeper cache,
-                                       YouTubeDownloadService downloads)
+                                       YouTubeDownloadService downloads,
+                                       ILogger<AdminIntegrationsController> log)
     {
         _cfg = cfg;
         _probe = probe;
         _youtube = youtube;
         _cache = cache;
         _downloads = downloads;
+        _log = log;
     }
 
     // ── Preflight (always available — you test before enabling) ────────────
@@ -49,8 +52,17 @@ public sealed class AdminIntegrationsController : ControllerBase
 
     // ── On/off + cache caps (JSON store; no-migrations rule) ───────────────
 
+    /// <summary>
+    /// <paramref name="DownloadFolder"/> is what downloads will actually use —
+    /// the stored path, or the ProgramData default when nothing is stored.
+    /// <paramref name="DownloadFolderStored"/> is the raw stored value, blank when
+    /// the default is in play; the folder box binds to THAT, so a blank field
+    /// honestly means "nothing set" instead of pre-filling the default and making
+    /// every Set look like a no-op.
+    /// </summary>
     public sealed record YouTubeSettings(bool Enabled, int CacheMaxMB, int CacheMaxAgeDays,
-                                        string DownloadFolder, string? FolderWarning,
+                                        string DownloadFolder, string DownloadFolderStored,
+                                        string? FolderWarning,
                                         string CookiesFile, string PlayerClientFallbacks,
                                         string ExtraYtDlpArgs);
 
@@ -64,10 +76,9 @@ public sealed class AdminIntegrationsController : ControllerBase
     public IActionResult GetSettings() => Ok(CurrentSettings());
 
     /// <summary>
-    /// Saves the gate / caps / download folder. A download folder that overlaps a
-    /// Music folder is rejected outright rather than stored: the folder-scoped
-    /// library clear owns tracks by path prefix, so a nested YouTube folder would
-    /// be pruned along with the collection it sits in.
+    /// Saves the gate / caps / download folder / blocking workarounds. Every
+    /// stored change is logged with the file it was written to, because a setting
+    /// that silently fails to stick is otherwise invisible from the admin page.
     /// </summary>
     [HttpPut("youtube/settings")]
     public IActionResult PutSettings([FromBody] YouTubeSettingsUpdate body)
@@ -78,8 +89,25 @@ public sealed class AdminIntegrationsController : ControllerBase
         if (body?.CacheMaxAgeDays is int age) c.WebCacheMaxAgeDays = System.Math.Max(0, age);
 
         // Any folder is accepted, including one inside a Music folder: that's the
-        // operator's call, and CurrentSettings reports what it means.
-        if (body?.DownloadFolder is string folder) c.DownloadFolder = folder.Trim();
+        // operator's call, and CurrentSettings reports what it means. It is created
+        // now rather than at download time so a path that can't be made (bad drive,
+        // no rights as LocalSystem) is reported while the operator is still looking
+        // at the dialog.
+        string? folderProblem = null;
+        if (body?.DownloadFolder is string folder)
+        {
+            c.DownloadFolder = folder.Trim();
+            if (c.DownloadFolder.Length > 0)
+            {
+                try { Directory.CreateDirectory(c.DownloadFolder); }
+                catch (Exception ex)
+                {
+                    folderProblem = $"Saved, but the folder could not be created: {ex.Message}";
+                    _log.LogWarning(ex, "YouTube download folder {Folder} could not be created",
+                        c.DownloadFolder);
+                }
+            }
+        }
 
         // Blocking workarounds. Stored as typed; a blank client list restores the
         // built-in fallback order rather than disabling retries.
@@ -88,14 +116,23 @@ public sealed class AdminIntegrationsController : ControllerBase
         if (body?.ExtraYtDlpArgs is string extra) c.ExtraYtDlpArgs = extra.Trim();
 
         IntegrationsStore.Save(_cfg, c);
-        return Ok(CurrentSettings());
+
+        var stored = IntegrationsStore.Load(_cfg);
+        _log.LogInformation(
+            "YouTube settings saved to {Path}: folder=\"{Folder}\" cookies=\"{Cookies}\" clients=\"{Clients}\"",
+            Y2KMusicServer.Server.Data.DataPaths.IntegrationsConfigPath(_cfg),
+            stored.DownloadFolder, stored.CookiesFile, stored.PlayerClientFallbacks);
+
+        var result = CurrentSettings();
+        return Ok(folderProblem == null ? result : (result with { FolderWarning = folderProblem }));
     }
 
     private YouTubeSettings CurrentSettings()
     {
         var c = IntegrationsStore.Load(_cfg);
         return new YouTubeSettings(c.YouTubeEnabled, c.WebCacheMaxMB, c.WebCacheMaxAgeDays,
-            _downloads.TargetFolder(), _downloads.ValidateFolder() ?? _downloads.FolderNote(),
+            _downloads.TargetFolder(), c.DownloadFolder,
+            _downloads.ValidateFolder() ?? _downloads.FolderNote(),
             c.CookiesFile, c.PlayerClientFallbacks, c.ExtraYtDlpArgs);
     }
 
