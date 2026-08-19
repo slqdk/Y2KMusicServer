@@ -11,6 +11,31 @@ using Y2KMusicServer.Server.Network;
 
 namespace Y2KMusicServer.Server.Integrations;
 
+/// <summary>
+/// One job as it is written to <c>youtube-queue.json</c>. A public, plain type
+/// rather than the internal job object: the queue file outlives the process, so
+/// its shape is a contract and must not drift with an internal refactor.
+/// Percentage is deliberately absent — a resumed job restarts from zero.
+/// </summary>
+public sealed class YouTubeDownloadRecord
+{
+    public int Id { get; set; }
+    public string VideoId { get; set; } = "";
+    public string Title { get; set; } = "";
+    public string? Artist { get; set; }
+    public string State { get; set; } = "queued";
+    public string? Message { get; set; }
+    public int? TrackId { get; set; }
+    public string? FilePath { get; set; }
+    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>The queue file itself: every job, pending and historical.</summary>
+public sealed class YouTubeQueueFile
+{
+    public List<YouTubeDownloadRecord> Jobs { get; set; } = new();
+}
+
 /// <summary>One queued / running / finished download, as the admin and DJ
 /// consoles see it.</summary>
 public sealed record YouTubeDownloadDto(
@@ -94,6 +119,21 @@ public sealed class YouTubeDownloadService : BackgroundService
 
         public YouTubeDownloadDto ToDto()
             => new(Id, VideoId, Title, Artist, State, Percent, Message, TrackId, FilePath);
+
+        public YouTubeDownloadRecord ToRecord() => new()
+        {
+            Id = Id, VideoId = VideoId, Title = Title, Artist = Artist,
+            State = State, Message = Message, TrackId = TrackId,
+            FilePath = FilePath, CreatedUtc = CreatedUtc
+        };
+
+        public static Job FromRecord(YouTubeDownloadRecord r) => new()
+        {
+            Id = r.Id, VideoId = r.VideoId, Title = r.Title, Artist = r.Artist,
+            State = r.State, Message = r.Message, TrackId = r.TrackId,
+            FilePath = r.FilePath, CreatedUtc = r.CreatedUtc,
+            Percent = r.State == "done" ? 100 : 0
+        };
     }
 
     // ── Public surface ─────────────────────────────────────────────────────
@@ -177,6 +217,7 @@ public sealed class YouTubeDownloadService : BackgroundService
                 Trim();
             }
             _queue.Writer.TryWrite(job);
+            SaveQueue();
         }
     }
 
@@ -194,19 +235,23 @@ public sealed class YouTubeDownloadService : BackgroundService
             if (job == null || job.State != "queued") return false;
             job.State = "cancelled";
             job.Message = "Cancelled before it started.";
-            return true;
         }
+        SaveQueue();
+        return true;
     }
 
     /// <summary>Drops finished / failed / cancelled jobs from the list.</summary>
     public int ClearFinished()
     {
+        int removed;
         lock (_gate)
         {
             int before = _jobs.Count;
             _jobs.RemoveAll(j => j.State is "done" or "failed" or "cancelled");
-            return before - _jobs.Count;
+            removed = before - _jobs.Count;
         }
+        SaveQueue();
+        return removed;
     }
 
     /// <summary>The configured target folder, or the default under the data
@@ -252,10 +297,90 @@ public sealed class YouTubeDownloadService : BackgroundService
         return null;
     }
 
+    // ── Surviving a restart ────────────────────────────────────────────────
+
+    /// <summary>
+    /// Reloads the queue written by the last run. Anything that was mid-flight
+    /// when the service stopped (a restart, a crash, a reboot) goes back to
+    /// "queued" and is downloaded again from the start — a half-written file in
+    /// the scratch folder is deleted before the retry, so a resumed job can't
+    /// produce a truncated track. Finished rows are kept as history so the
+    /// console still shows what happened before the restart.
+    /// </summary>
+    private void RestoreQueue()
+    {
+        List<Job> resume = new();
+        try
+        {
+            var path = DataPaths.YouTubeQueuePath(_cfg);
+            if (!File.Exists(path)) return;
+
+            var file = JsonSerializer.Deserialize<YouTubeQueueFile>(File.ReadAllText(path));
+            var records = file?.Jobs ?? new List<YouTubeDownloadRecord>();
+            if (records.Count == 0) return;
+
+            lock (_gate)
+            {
+                foreach (var r in records.OrderBy(r => r.Id))
+                {
+                    var job = Job.FromRecord(r);
+                    if (job.State is "queued" or "downloading" or "indexing")
+                    {
+                        job.State = "queued";
+                        job.Percent = 0;
+                        job.Message = "Queued again after a restart.";
+                        resume.Add(job);
+                    }
+                    _jobs.Add(job);
+                    if (job.Id > _nextId) _nextId = job.Id;
+                }
+                Trim();
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Could not restore the YouTube download queue");
+            return;
+        }
+
+        foreach (var job in resume) _queue.Writer.TryWrite(job);
+        if (resume.Count > 0)
+            _log.LogInformation("YouTube downloads: resumed {Count} unfinished job(s) after restart",
+                resume.Count);
+        SaveQueue();
+    }
+
+    /// <summary>
+    /// Writes the queue to disk. Called on every state change EXCEPT percentage
+    /// ticks — those move several times a second and would hammer the disk for
+    /// nothing, since a resumed job restarts from zero anyway.
+    /// </summary>
+    private void SaveQueue()
+    {
+        try
+        {
+            List<YouTubeDownloadRecord> records;
+            lock (_gate) records = _jobs.OrderBy(j => j.Id).Select(j => j.ToRecord()).ToList();
+
+            var path = DataPaths.YouTubeQueuePath(_cfg);
+            var dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            File.WriteAllText(path,
+                JsonSerializer.Serialize(new YouTubeQueueFile { Jobs = records },
+                    new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex, "Could not persist the YouTube download queue");
+        }
+    }
+
     // ── Worker ─────────────────────────────────────────────────────────────
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        RestoreQueue();
+
         await foreach (var job in _queue.Reader.ReadAllAsync(stoppingToken))
         {
             lock (_gate) { if (job.State == "cancelled") continue; }
@@ -643,12 +768,16 @@ public sealed class YouTubeDownloadService : BackgroundService
 
     private void Set(Job job, string state, double? pct = null, string? msg = null)
     {
+        bool stateChanged;
         lock (_gate)
         {
+            stateChanged = job.State != state;
             job.State = state;
             if (pct is double p) job.Percent = p;
             if (msg != null) job.Message = msg;
         }
+        // Only a state change is worth a disk write; percentage ticks are not.
+        if (stateChanged) SaveQueue();
     }
 
     private void Trim()

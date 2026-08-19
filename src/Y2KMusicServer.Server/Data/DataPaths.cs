@@ -213,4 +213,13 @@ public static class DataPaths
     /// </summary>
     public static string YouTubeDownloadsIndexPath(IConfiguration cfg)
         => Path.Combine(DataDir(cfg), "youtube-downloads.json");
+
+    /// <summary>
+    /// The download queue itself, at <c>&lt;DataPath&gt;\youtube-queue.json</c> —
+    /// pending jobs plus a short history. Written on every state change so a
+    /// restart, a service crash or a reboot resumes what was still owed instead
+    /// of losing it silently. JSON, not the database (no-migrations rule).
+    /// </summary>
+    public static string YouTubeQueuePath(IConfiguration cfg)
+        => Path.Combine(DataDir(cfg), "youtube-queue.json");
 }

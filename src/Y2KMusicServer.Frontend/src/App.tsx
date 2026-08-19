@@ -271,7 +271,9 @@ export default function App() {
     debounce.current = window.setTimeout(() => {
       setShowResults(true)
       const qs = new URLSearchParams()
-      if (newestOnly) qs.set('newest', '1')
+      // 'true', not '1': the endpoint takes a bool, and [ApiController] turns a
+      // value the bool binder can't parse into a 400 before the action runs.
+      if (newestOnly) qs.set('newest', 'true')
       else if (albumView) qs.set('albumName', albumView.album)
       else {
         if (term) qs.set('q', term)
