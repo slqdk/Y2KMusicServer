@@ -101,6 +101,14 @@ public static class DataPaths
         => Path.Combine(DataDir(cfg), "autodj-feeds.json");
 
     /// <summary>
+    /// The Auto DJ's rotation memory (fed bags, recently played, last-played
+    /// times), at <c>&lt;DataPath&gt;\shuffle-state.json</c>. Persisted so a
+    /// restart doesn't deal a fresh deck mid-party. JSON, not the database.
+    /// </summary>
+    public static string ShuffleStatePath(IConfiguration cfg)
+        => Path.Combine(DataDir(cfg), "shuffle-state.json");
+
+    /// <summary>
     /// Which saved playlist is the jingle playlist, at
     /// <c>&lt;DataPath&gt;\jingles.json</c>. A designation, not a list of
     /// tracks — the playlist itself is an ordinary saved playlist. JSON, not the

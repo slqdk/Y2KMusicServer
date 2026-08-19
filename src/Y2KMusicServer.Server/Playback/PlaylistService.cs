@@ -28,7 +28,11 @@ public sealed class PlaylistService
     private const int ArtistCooldownTracks = 8;
 
     /// <summary>How many of each history ring we keep (legacy kept the last 20).</summary>
-    private const int HistoryCap = 20;
+    // The recently-played ring. Kept deep (the exclusion window drawn from it is
+    // scaled to the pool at pick time — see the top-up), because a 20-deep ring
+    // was the whole memory: on a 300-track pool a song could return after twenty
+    // others and nothing remembered it had.
+    private const int HistoryCap = 150;
 
     private readonly IDbContextFactory<Y2KDbContext> _dbf;
     private readonly ILogger<PlaylistService> _log;
@@ -43,11 +47,51 @@ public sealed class PlaylistService
     private readonly List<string> _recentlyPlayedArtists = new();
     private double _refBpm; // BPM of the last human/seed pick; 0 = unset.
 
+    // When each track last played (UTC). Drives the least-recently-played bias:
+    // a shuffle bag alone treats "heard an hour ago" and "never heard" the same.
+    private readonly Dictionary<int, DateTime> _lastPlayedUtc = new();
+
     public PlaylistService(IDbContextFactory<Y2KDbContext> dbf, ILogger<PlaylistService> log, IConfiguration cfg)
     {
         _dbf = dbf;
         _log = log;
         _cfg = cfg;
+
+        // Pick the rotation up where the last run left it. Without this, every
+        // restart deals a fresh deck and the same openers come round again.
+        var state = ShuffleStateStore.Load(_cfg);
+        lock (_historyLock)
+        {
+            foreach (var (plId, ids) in state.FedByPlaylist)
+                _fedFromPlaylist[plId] = new HashSet<int>(ids);
+            _recentlyPlayed.AddRange(state.RecentlyPlayed);
+            _recentlyPlayedArtists.AddRange(state.RecentlyPlayedArtists);
+            foreach (var (id, when) in state.LastPlayedUtc) _lastPlayedUtc[id] = when;
+            _refBpm = state.RefBpm;
+        }
+        if (state.RecentlyPlayed.Count > 0 || state.FedByPlaylist.Count > 0)
+            _log.LogInformation(
+                "Auto DJ rotation restored: {Recent} recent play(s), {Bags} playlist bag(s) part-dealt.",
+                state.RecentlyPlayed.Count, state.FedByPlaylist.Count);
+    }
+
+    /// <summary>Writes the rotation memory out. Called after a play is noted and
+    /// after a top-up batch — both minutes apart, so the cost is nil.</summary>
+    private void SaveShuffleState()
+    {
+        ShuffleState snapshot;
+        lock (_historyLock)
+        {
+            snapshot = new ShuffleState
+            {
+                FedByPlaylist = _fedFromPlaylist.ToDictionary(kv => kv.Key, kv => kv.Value.ToList()),
+                RecentlyPlayed = _recentlyPlayed.ToList(),
+                RecentlyPlayedArtists = _recentlyPlayedArtists.ToList(),
+                LastPlayedUtc = new Dictionary<int, DateTime>(_lastPlayedUtc),
+                RefBpm = _refBpm
+            };
+        }
+        ShuffleStateStore.Save(_cfg, snapshot);
     }
 
     // ── History (called by the scheduler on each promotion) ───────────────────
@@ -61,6 +105,7 @@ public sealed class PlaylistService
     {
         string? artist = null;
         double? bpm = null;
+        List<int> memberOf = new();
         try
         {
             await using var db = await _dbf.CreateDbContextAsync(ct);
@@ -69,6 +114,15 @@ public sealed class PlaylistService
                 .Select(x => new { x.Artist, x.Bpm })
                 .FirstOrDefaultAsync(ct);
             if (t != null) { artist = t.Artist; bpm = t.Bpm; }
+
+            // Which playlists hold this track — so a REQUESTED or hand-queued
+            // song also counts as dealt from its playlist's bag. Otherwise a
+            // request could be re-served by Auto DJ half an hour later, which is
+            // the repeat guests notice most.
+            memberOf = await db.SavedPlaylistTracks.AsNoTracking()
+                .Where(pt => pt.TrackId == trackId)
+                .Select(pt => pt.SavedPlaylistId)
+                .ToListAsync(ct);
         }
         catch (Exception ex)
         {
@@ -88,7 +142,18 @@ public sealed class PlaylistService
             }
 
             if (bpm is > 30) _refBpm = bpm.Value;
+
+            _lastPlayedUtc[trackId] = DateTime.UtcNow;
+
+            foreach (var plId in memberOf)
+            {
+                if (!_fedFromPlaylist.TryGetValue(plId, out var bag))
+                    _fedFromPlaylist[plId] = bag = new HashSet<int>();
+                bag.Add(trackId);
+            }
         }
+
+        SaveShuffleState();
     }
 
     private static void TrimTail<T>(List<T> list)
@@ -676,11 +741,23 @@ public sealed class PlaylistService
                 recentSnapshot = _recentlyPlayed.ToArray();
                 recentArtistsSnapshot = _recentlyPlayedArtists.ToArray();
             }
+            // How far back "recently played" reaches is scaled to the pool: with
+            // 300 eligible tracks a 20-deep window lets a song return after
+            // twenty songs, which on a five-hour night is three or four airings.
+            // Half the pool, capped, means a track only comes back once the
+            // rotation has genuinely moved on — and with a small pool (a 5-track
+            // playlist) it stays short so Auto DJ never runs dry.
+            int poolSize = tracksByPl.Values.SelectMany(v => v).Select(t => t.Id).Distinct().Count();
+            int window = Math.Clamp(poolSize / 2, 10, HistoryCap);
+            var recentWindow = recentSnapshot.Length <= window
+                ? recentSnapshot
+                : recentSnapshot[^window..];
+
             var excluded = new HashSet<int>(entries.Select(e => e.TrackId));
-            foreach (var id in recentSnapshot) excluded.Add(id);
+            foreach (var id in recentWindow) excluded.Add(id);
 
             // Similarity window: recently played + upcoming, resolved to tags.
-            var simWindow = BuildSimilarityWindow(entries, recentSnapshot, trackById);
+            var simWindow = BuildSimilarityWindow(entries, recentWindow, trackById);
 
             // Upcoming artists (ordered) for the cooldown's look-ahead.
             var upcomingArtists = entries
@@ -733,7 +810,9 @@ public sealed class PlaylistService
                     }
 
                     double Score(Track t, double bpmScore) =>
-                        bpmScore * ArtistCooldownPenalty(t.Artist, upcomingArtists, recentArtistsSnapshot);
+                        bpmScore
+                        * ArtistCooldownPenalty(t.Artist, upcomingArtists, recentArtistsSnapshot)
+                        * FreshnessFactor(t.Id);
 
                     var scored = new List<(Track t, double s)>();
                     foreach (var t in members)
@@ -810,6 +889,8 @@ public sealed class PlaylistService
                 });
             await db.SaveChangesAsync(ct);
 
+            SaveShuffleState();
+
             _log.LogInformation("Auto DJ added {Count} track(s) from {Playlists}{Mode}.",
                 picks.Count,
                 string.Join(", ", picks.Select(p => p.PlaylistName).Distinct()),
@@ -817,6 +898,27 @@ public sealed class PlaylistService
             return picks.Count;
         }
         finally { _mutateGate.Release(); }
+    }
+
+    /// <summary>
+    /// How much a track's own play history should count against it, as a
+    /// multiplier on its score. Never played (or not since the memory was last
+    /// cleared) is the most attractive; something aired in the last hour is
+    /// pushed well down without being ruled out. This is what a shuffle bag
+    /// alone can't express: inside one pass every unfed track looks identical,
+    /// even the one that played 40 minutes ago on the previous pass.
+    /// </summary>
+    private double FreshnessFactor(int trackId)
+    {
+        DateTime last;
+        lock (_historyLock)
+        {
+            if (!_lastPlayedUtc.TryGetValue(trackId, out last)) return 1.4;
+        }
+
+        double hours = (DateTime.UtcNow - last).TotalHours;
+        if (hours < 0) return 1.0;                   // clock moved; don't punish
+        return Math.Clamp(0.25 + hours * 0.35, 0.25, 1.3);
     }
 
     /// <summary>Priority-weighted random draw: priority 1–5 is the weight, so a
