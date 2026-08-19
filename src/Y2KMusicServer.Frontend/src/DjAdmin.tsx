@@ -30,6 +30,12 @@ type YtJob = {
 }
 type YtDownloads = { folder: string; busy: boolean; jobs: YtJob[] }
 
+type JingleRow = { id: number; title: string | null; artist: string | null; durationSec: number }
+type Jingles = { designated: boolean; name: string | null; items: JingleRow[] }
+
+/** The three screens. Control is what you need mid-song; the rest is planning. */
+type Tab = 'control' | 'playlist' | 'jingles'
+
 type DjState = {
   playing: boolean
   trackId: number | null
@@ -110,6 +116,13 @@ export default function DjAdmin() {
   // job started on the phone shows up on the desktop and vice versa.
   const [ytUrl, setYtUrl] = useState('')
   const [yt, setYt] = useState<YtDownloads | null>(null)
+  const [jingles, setJingles] = useState<Jingles | null>(null)
+  // The open screen survives a reload — a DJ who refreshes mid-set shouldn't
+  // land back on a tab they weren't using.
+  const [tab, setTab] = useState<Tab>(() => {
+    try { return (localStorage.getItem('y2k-dj-tab') as Tab) || 'control' } catch { return 'control' }
+  })
+  useEffect(() => { try { localStorage.setItem('y2k-dj-tab', tab) } catch { /* ignore */ } }, [tab])
 
   const post = useCallback(async (url: string, body?: unknown) => {
     try {
@@ -138,6 +151,10 @@ export default function DjAdmin() {
       const y = await fetch('/api/admin/integrations/youtube/downloads')
       if (y.ok) setYt(await y.json())
     } catch { /* the console still works without the download list */ }
+    try {
+      const g = await fetch('/api/dj/jingles')
+      if (g.ok) setJingles(await g.json())
+    } catch { /* keep the last good list */ }
   }, [])
 
   // Queue whatever is in the box: a pasted link, an album link, or just words
@@ -162,6 +179,18 @@ export default function DjAdmin() {
     return () => window.clearTimeout(t)
   }, [msg])
 
+  const fireJingle = useCallback(async (j: JingleRow) => {
+    const ok = await post(`/api/dj/jingles/${j.id}`)
+    if (ok) setMsg(`Firing “${j.title ?? 'jingle'}”…`)
+    void refresh()
+  }, [post, refresh])
+
+  const queueJingle = useCallback(async (j: JingleRow) => {
+    const ok = await post(`/api/dj/jingles/${j.id}/queue`)
+    if (ok) setMsg(`“${j.title ?? 'Jingle'}” is next.`)
+    void refresh()
+  }, [post, refresh])
+
   const np = split(st?.artist ?? null, st?.title ?? null)
   const gainPct = Math.round((st?.duckGain ?? 1) * 100)
 
@@ -172,6 +201,17 @@ export default function DjAdmin() {
         <span className={`dj-gain${gainPct < 100 ? ' is-down' : ''}`}>{gainPct}%</span>
       </header>
 
+      <nav className="dj-tabs" role="tablist">
+        {([['control', '🎛 Control'], ['playlist', '♫ Playlist'], ['jingles', '🔔 Jingles']] as [Tab, string][])
+          .map(([id, label]) => (
+            <button key={id} role="tab" aria-selected={tab === id}
+              className={`dj-tab${tab === id ? ' is-on' : ''}`}
+              onClick={() => setTab(id)}>{label}</button>
+          ))}
+      </nav>
+
+      {/* Now playing stays above the tabs' content on every screen: it is the
+          one thing a DJ glances at regardless of what they came here to do. */}
       <section className="dj-now">
         <div className="dj-now-state">
           {st?.fadePaused ? '❚❚ PAUSED' : st?.playing ? (st.crossfading ? '⇄ MIXING' : '● ON AIR') : '■ STOPPED'}
@@ -183,6 +223,7 @@ export default function DjAdmin() {
         </div>
       </section>
 
+      {tab === 'control' && (<>
       {/* Talk-over latches: hold to duck, hold again to bring the music back —
           so the DJ can put the phone in a pocket while talking. */}
       <HoldButton
@@ -210,6 +251,9 @@ export default function DjAdmin() {
         />
       </div>
 
+      </>)}
+
+      {tab === 'playlist' && (<>
       <section className="dj-sect">
         <h2 className="dj-sect-head">Auto DJ playlists</h2>
         <div className="dj-feeds">
@@ -294,6 +338,54 @@ export default function DjAdmin() {
           {(yt?.jobs.length ?? 0) === 0 && <li className="dj-empty">No downloads yet.</li>}
         </ul>
       </section>
+
+      </>)}
+
+      {tab === 'jingles' && (
+        <section className="dj-sect">
+          <h2 className="dj-sect-head">
+            {jingles?.designated ? (jingles.name ?? 'Jingles') : 'Jingles'}
+          </h2>
+
+          {jingles && !jingles.designated && (
+            <div className="dj-empty">
+              No jingle playlist yet. On the admin page, open a playlist&apos;s ▾ menu
+              and choose “Use as the jingle playlist”.
+            </div>
+          )}
+
+          {jingles?.designated && jingles.items.length === 0 && (
+            <div className="dj-empty">“{jingles.name}” is empty — add tracks to it from the admin page.</div>
+          )}
+
+          {/* Two actions per jingle, both held like everything else here: FIRE
+              crossfades into it straight away, NEXT parks it after the current
+              song. Fire is the wider, louder one — it is what this screen is for. */}
+          <ul className="dj-jingles">
+            {(jingles?.items ?? []).map(j => {
+              const d = split(j.artist, j.title)
+              return (
+                <li key={j.id} className="dj-jrow">
+                  <div className="dj-qmain">
+                    <span className="dj-qartist">{d.title}</span>
+                    <span className="dj-qtitle">{d.artist ?? '—'} · {fmt(j.durationSec)}</span>
+                  </div>
+                  <HoldButton
+                    className="dj-jqueue"
+                    label="＋"
+                    onFire={() => { void queueJingle(j) }}
+                  />
+                  <HoldButton
+                    className="dj-jfire"
+                    label="▶ FIRE"
+                    onFire={() => { void fireJingle(j) }}
+                  />
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
 
       {msg && <div className="dj-toast">{msg}</div>}
     </div>

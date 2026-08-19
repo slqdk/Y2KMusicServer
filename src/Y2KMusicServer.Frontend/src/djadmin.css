@@ -122,3 +122,36 @@
   .dj { padding: 18px calc(50% - 320px) 40px; }
   .dj-feeds { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
+
+/* Tabs: Control / Playlist / Jingles. Full-width targets, since this is the one
+   control on the page that is tapped rather than held. */
+.dj-tabs {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
+  margin: 12px 0 4px;
+}
+.dj-tab {
+  background: #141821; color: #aab6c6;
+  border: 1px solid #232a36; border-radius: 12px;
+  padding: 12px 6px; font: inherit; font-size: .88rem; font-weight: 700;
+}
+.dj-tab.is-on { background: #1b2a3a; color: #e8eef7; border-color: #3f7fb8; }
+
+/* Jingles: a row per track, with a narrow "queue it next" button and a wide
+   FIRE. Both are hold buttons — nothing here goes off on a brush. */
+.dj-jingles { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.dj-jrow {
+  display: flex; align-items: center; gap: 8px;
+  background: #141821; border: 1px solid #232a36; border-radius: 12px;
+  padding: 8px 10px;
+}
+.dj-jqueue {
+  width: 58px; min-height: 52px; flex: 0 0 auto; margin-bottom: 0;
+  background: #17212c; border-color: #2c3a4a;
+}
+.dj-jqueue .dj-btn-label { font-size: 1.3rem; }
+.dj-jfire {
+  width: 116px; min-height: 52px; flex: 0 0 auto; margin-bottom: 0;
+  background: #2c2116; border-color: #b9834a;
+}
+.dj-jfire .dj-btn-label { font-size: .95rem; font-weight: 800; }
+.dj-jfire .dj-btn-fill { background: linear-gradient(90deg, #7a4a1f, #d08a3c); }

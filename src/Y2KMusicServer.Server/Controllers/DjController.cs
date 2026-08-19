@@ -213,6 +213,23 @@ public sealed class DjController : ControllerBase
         return Ok(new { ok = true, started = false });
     }
 
+    /// <summary>
+    /// Queues a jingle instead of firing it: it lands where a hand-picked track
+    /// lands — just before the next Auto DJ entry, so it plays after the current
+    /// song rather than interrupting it. Nothing about the current track changes.
+    /// </summary>
+    [HttpPost("jingles/{trackId:int}/queue")]
+    public async Task<IActionResult> QueueJingle(int trackId, CancellationToken ct)
+    {
+        var current = _engine.GetStatus().TrackId;
+        var r = await _playlist.AddAsync(trackId, PlaylistSource.Manual, "Jingle", current, ct);
+        if (r != PlaylistAddResult.Ok)
+            return UnprocessableEntity(new { ok = false, error = r.ToString() });
+
+        _log.LogInformation("DJ page queued jingle track {TrackId}.", trackId);
+        return Ok(new { ok = true });
+    }
+
     public sealed record DuckSettingsBody(int? LevelPercent, double? FadeSeconds);
 
     /// <summary>Adjusts the talk-over level and the ramp length.</summary>
