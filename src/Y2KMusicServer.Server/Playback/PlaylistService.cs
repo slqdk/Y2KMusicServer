@@ -197,12 +197,43 @@ public sealed class PlaylistService
         await using var db = await _dbf.CreateDbContextAsync(ct);
         var entries = await db.PlaylistEntries.AsNoTracking()
             .OrderBy(e => e.Position).ToListAsync(ct);
+
         int curPos = CurrentPosition(entries, currentTrackId);
+        bool currentInQueue = curPos >= 0;
+
+        // What plays now isn't always a queue entry: a fired jingle, or a track
+        // loaded by hand, is on the deck without a row in the queue. Resuming
+        // from curPos = -1 would arm entry ZERO — the queue would restart from
+        // its head and replay everything the playhead had already passed, which
+        // is exactly the "it jumps three songs back after a jingle" symptom.
+        //
+        // The playhead still remembers the last entry that genuinely played
+        // (CurrentPosition leaves it alone when it can't resolve a track), so
+        // carry on from THERE instead.
+        if (!currentInQueue)
+        {
+            int head = Volatile.Read(ref _playheadEntryId);
+            var prev = head != 0 ? entries.FirstOrDefault(e => e.Id == head) : null;
+
+            // The remembered entry may have been pruned or renumbered away; fall
+            // back to the last track id we know played, then to the head.
+            if (prev == null)
+            {
+                int lastTrack = Volatile.Read(ref _playheadTrackId);
+                if (lastTrack != 0)
+                    prev = entries.LastOrDefault(e => e.TrackId == lastTrack);
+            }
+            curPos = prev?.Position ?? -1;
+        }
+
         var next = entries.Where(e => e.Position > curPos)
             .OrderBy(e => e.Position)
             .Select(e => (int?)e.TrackId)
             .FirstOrDefault();
-        return (next, curPos >= 0);
+
+        // CurrentInQueue keeps its own meaning — "the playing track IS a queue
+        // entry" — because the re-arm rule above the caller depends on it.
+        return (next, currentInQueue);
     }
 
     // ── Live playlist selection (listener chips / DJ page) ────────────────────
