@@ -166,21 +166,20 @@ public sealed class PublicController : ControllerBase
             return new { items = ToItems(PreferFlac(albumRows).Take(take)) };
         }
 
-        // ── Saved-playlist browse (playlist order; optional text narrow) ──
-        if (playlist is int plId)
+        // ── Saved-playlist browse (playlist order) ────────────────────────
+        // Browsing only. Typing SEARCHES THE WHOLE LIBRARY, even with a playlist
+        // chip lit: a guest who types a song title wants that song, not silence
+        // because it happens to sit outside the playlist they last tapped. The
+        // only thing that ever limits a text search is folder visibility — an Off
+        // folder stays hidden, an On folder is always searchable.
+        if (playlist is int plId && !hasText)
         {
             var plRows = await db.SavedPlaylistTracks.AsNoTracking()
                 .Where(pt => pt.SavedPlaylistId == plId && pt.Track != null)
                 .OrderBy(pt => pt.Position)
                 .Select(pt => pt.Track!)
                 .ToListAsync(ct);
-            if (hasText)
-            {
-                // Same word-AND rule as the main search, so narrowing inside a
-                // playlist behaves identically to searching the whole library.
-                var toks = TrackSearch.Tokens(q);
-                plRows = plRows.Where(t => TrackSearch.MatchesAllTokens(t, toks)).ToList();
-            }
+            plRows = ApplyFolderVisibility(plRows);
             return new { items = ToItems(PreferFlac(plRows).Take(take)) };
         }
 

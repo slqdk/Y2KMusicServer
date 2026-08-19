@@ -361,7 +361,16 @@ export default function App() {
   }
   const openAlbum = (a: AlbumHit) => setAlbumView(a)
   const backToSearch = () => setAlbumView(null)
-  const onQueryChange = (v: string) => { setAlbumView(null); setNewestOnly(false); setQ(v) }
+  // Typing leaves any browse mode: album, new arrivals, and the playlist chip.
+  // Dropping the chip here is a BROWSE change only — the live selection (which
+  // playlists Auto DJ is drawing from) is separate state and is left alone, so
+  // a guest searching can't disturb what the DJ has playing.
+  const onQueryChange = (v: string) => {
+    setAlbumView(null)
+    setNewestOnly(false)
+    if (v.trim().length > 0) setSelPl(null)
+    setQ(v)
+  }
 
   // The New songs chip is its own browse: it clears the text, the album and the
   // playlist so the list shows exactly the new arrivals and nothing else.
