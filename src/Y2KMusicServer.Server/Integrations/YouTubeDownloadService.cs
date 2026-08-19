@@ -219,21 +219,35 @@ public sealed class YouTubeDownloadService : BackgroundService
             : configured.Trim();
     }
 
-    /// <summary>Refuses a target that a Music folder owns — a folder Clear there
-    /// would prune these tracks, which is exactly what this folder exists to
-    /// avoid.</summary>
+    /// <summary>The reason downloads can't run at all, or null. Only a folder that
+    /// can't be resolved stops a job — where the operator puts it is their call.</summary>
     public string? ValidateFolder()
     {
         var folder = TargetFolder();
-        if (folder.Length == 0) return "No YouTube folder is set (Settings → YouTube integration).";
+        if (folder.Length == 0) return "No YouTube folder is set (Music folders → YouTube downloads).";
+        return null;
+    }
+
+    /// <summary>
+    /// An advisory note about the chosen folder, or null. Putting the YouTube
+    /// folder inside a Music folder is allowed and sometimes wanted — the
+    /// downloads then get rescanned and cleared along with that collection — but
+    /// it does mean that folder's Clear button prunes them, so the console says
+    /// so rather than deciding for the operator.
+    /// </summary>
+    public string? FolderNote()
+    {
+        var folder = TargetFolder();
+        if (folder.Length == 0) return null;
 
         var self = FolderScope.Prefix(folder);
         foreach (var scan in ScanFolderStore.AllPaths(_cfg))
         {
             var pre = FolderScope.Prefix(scan);
-            if (self.StartsWith(pre, StringComparison.OrdinalIgnoreCase)
-                || pre.StartsWith(self, StringComparison.OrdinalIgnoreCase))
-                return $"The YouTube folder must sit outside the Music folders — \"{scan}\" overlaps it.";
+            if (self.StartsWith(pre, StringComparison.OrdinalIgnoreCase))
+                return $"Inside the Music folder \"{scan}\" — its Clear button will prune these downloads too.";
+            if (pre.StartsWith(self, StringComparison.OrdinalIgnoreCase))
+                return $"The Music folder \"{scan}\" sits inside this one, so scans will cover the downloads as well.";
         }
         return null;
     }
@@ -315,58 +329,101 @@ public sealed class YouTubeDownloadService : BackgroundService
         var ytDlp = _cfg["Integrations:YouTube:YtDlpPath"] ?? "yt-dlp";
         var ffmpeg = _cfg["Integrations:YouTube:FfmpegPath"] ?? "ffmpeg";
 
-        var args = new List<string>
-        {
-            "-x", "--audio-format", "mp3", "--audio-quality", "0",
-            "--embed-metadata",                  // title / artist / album / date into ID3
-            "--embed-thumbnail",                 // cover art into ID3 (APIC)
-            "--convert-thumbnails", "jpg",       // WebP art is not universally readable
-            "--no-playlist", "--no-warnings", "--newline",
-            "--progress-template", "download:Y2KPCT %(progress._percent_str)s",
-            "-o", Path.Combine(tmpDir, "%(id)s.%(ext)s")
-        };
-        // yt-dlp finds ffmpeg on PATH, which for a LocalSystem service is the
-        // machine PATH — point it at the configured binary when we have one.
-        if (ffmpeg.IndexOfAny(new[] { '\\', '/' }) >= 0)
-        {
-            args.Add("--ffmpeg-location");
-            args.Add(ffmpeg);
-        }
-        args.Add($"https://www.youtube.com/watch?v={job.VideoId}");
-
-        var stderr = new List<string>();
-        using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
-        {
-            timeout.CancelAfter(TimeSpan.FromMinutes(15));
-            try
-            {
-            await RunStreamedAsync(ytDlp, args, line =>
-            {
-                var m = PercentLine.Match(line);
-                if (m.Success && double.TryParse(m.Groups[1].Value,
-                        System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out var pct))
-                {
-                    Set(job, "downloading", pct: Math.Clamp(pct, 0, 100), msg: "Downloading…");
-                }
-                else if (line.Contains("[ExtractAudio]", StringComparison.Ordinal))
-                    Set(job, "downloading", pct: 100, msg: "Converting to MP3…");
-                else if (line.Contains("[ThumbnailsConvertor]", StringComparison.Ordinal)
-                      || line.Contains("[EmbedThumbnail]", StringComparison.Ordinal))
-                    Set(job, "downloading", pct: 100, msg: "Adding cover art…");
-            }, stderr, timeout.Token);
-            }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-            {
-                Set(job, "failed", msg: "Download timed out after 15 minutes.");
-                return;
-            }
-        }
-
         var tmpFile = Path.Combine(tmpDir, job.VideoId + ".mp3");
+        var stderr = new List<string>();
+
+        // YouTube refuses some player clients' media URLs while still handing out
+        // metadata — a clean resolve followed by "HTTP Error 403: Forbidden". The
+        // escape is to ask a different client for the URLs, so the default attempt
+        // is followed by each configured fallback until one delivers a file. A
+        // failure that doesn't look like a block (missing binary, video removed)
+        // stops the loop immediately rather than burning four attempts on it.
+        var attempts = YouTubeToolArgs.ClientAttempts(_cfg);
+        for (int i = 0; i < attempts.Count; i++)
+        {
+            var client = attempts[i];
+            stderr.Clear();
+
+            var args = new List<string>
+            {
+                "-x", "--audio-format", "mp3", "--audio-quality", "0",
+                "--embed-metadata",                  // title / artist / album / date into ID3
+                "--embed-thumbnail",                 // cover art into ID3 (APIC)
+                "--convert-thumbnails", "jpg",       // WebP art is not universally readable
+                "--no-playlist", "--no-warnings", "--newline",
+                "--progress-template", "download:Y2KPCT %(progress._percent_str)s",
+                "-o", Path.Combine(tmpDir, "%(id)s.%(ext)s")
+            };
+            // yt-dlp finds ffmpeg on PATH, which for a LocalSystem service is the
+            // machine PATH — point it at the configured binary when we have one.
+            if (ffmpeg.IndexOfAny(new[] { '\\', '/' }) >= 0)
+            {
+                args.Add("--ffmpeg-location");
+                args.Add(ffmpeg);
+            }
+            args.AddRange(YouTubeToolArgs.Common(_cfg));          // cookies + operator args
+            args.AddRange(YouTubeToolArgs.ClientArg(client));     // blank on the first pass
+            // A stale cached player/signature can itself cause a 403, so retries
+            // ignore the cache rather than replay whatever failed the first time.
+            if (i > 0) args.Add("--no-cache-dir");
+            args.Add($"https://www.youtube.com/watch?v={job.VideoId}");
+
+            var label = client.Length == 0 ? "" : $" ({client})";
+            Set(job, "downloading", pct: 0, msg: $"Downloading…{label}");
+
+            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                timeout.CancelAfter(TimeSpan.FromMinutes(15));
+                try
+                {
+                    await RunStreamedAsync(ytDlp, args, line =>
+                    {
+                        var m = PercentLine.Match(line);
+                        if (m.Success && double.TryParse(m.Groups[1].Value,
+                                System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out var pct))
+                        {
+                            Set(job, "downloading", pct: Math.Clamp(pct, 0, 100), msg: $"Downloading…{label}");
+                        }
+                        else if (line.Contains("[ExtractAudio]", StringComparison.Ordinal))
+                            Set(job, "downloading", pct: 100, msg: "Converting to MP3…");
+                        else if (line.Contains("[ThumbnailsConvertor]", StringComparison.Ordinal)
+                              || line.Contains("[EmbedThumbnail]", StringComparison.Ordinal))
+                            Set(job, "downloading", pct: 100, msg: "Adding cover art…");
+                    }, stderr, timeout.Token);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    Set(job, "failed", msg: "Download timed out after 15 minutes.");
+                    return;
+                }
+            }
+
+            if (File.Exists(tmpFile))
+            {
+                if (i > 0)
+                    _log.LogInformation("YouTube download: {VideoId} needed player client \"{Client}\"",
+                        job.VideoId, client);
+                break;
+            }
+
+            List<string> snapshot;
+            lock (stderr) snapshot = stderr.ToList();
+            if (!YouTubeToolArgs.LooksBlocked(snapshot)) break;   // not a block — retrying won't help
+
+            // Leave nothing half-written behind before the next client tries.
+            foreach (var partial in Directory.EnumerateFiles(tmpDir, job.VideoId + ".*"))
+                try { File.Delete(partial); } catch { }
+        }
+
         if (!File.Exists(tmpFile))
         {
-            var why = stderr.FirstOrDefault(l => l.Trim().Length > 0)?.Trim();
+            List<string> snapshot;
+            lock (stderr) snapshot = stderr.ToList();
+            var why = snapshot.FirstOrDefault(l => l.Trim().Length > 0)?.Trim();
+            if (YouTubeToolArgs.LooksBlocked(snapshot))
+                why = "YouTube refused the download (403). Update yt-dlp, or add a cookies file "
+                    + "in Settings → YouTube integration.";
             Set(job, "failed", msg: string.IsNullOrEmpty(why) ? "Download produced no file." : why);
             return;
         }

@@ -14,13 +14,40 @@ export default function FoldersDialog({ onClose, onChanged }:
   const [folders, setFolders] = useState<api.ScanFolderDto[]>([])
   const [newPath, setNewPath] = useState('')
   const [busy, setBusy] = useState(false)
-  const [browsing, setBrowsing] = useState(false)
+  // Which field the folder browser is filling: the Add box, or the YouTube
+  // download destination below the list.
+  const [browsing, setBrowsing] = useState<'add' | 'youtube' | null>(null)
+  // The YouTube download destination. Server-resolved, so a blank stored value
+  // still shows the default path it will actually use; ytNote carries the
+  // advisory when the folder sits inside (or around) a Music folder.
+  const [ytFolder, setYtFolder] = useState('')
+  const [ytNote, setYtNote] = useState<string | null>(null)
+  const [ytSaving, setYtSaving] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<{ folder: api.ScanFolderDto; kind: 'clear' | 'remove' } | null>(null)
 
   const refresh = () => api.getScanFolders().then(r => setFolders(r.folders)).catch(() => {})
   useEffect(() => { refresh() }, [])
+
+  useEffect(() => {
+    api.getYouTubeSettings()
+      .then(s => { setYtFolder(s.downloadFolder); setYtNote(s.folderWarning) })
+      .catch(() => {})
+  }, [])
+
+  // Saved explicitly rather than on blur: this one moves where files land, so a
+  // stray click shouldn't commit it. Already-downloaded files stay where they are.
+  const saveYtFolder = async () => {
+    setYtSaving(true)
+    try {
+      const s = await api.setYouTubeSettings({ downloadFolder: ytFolder.trim() })
+      setYtFolder(s.downloadFolder); setYtNote(s.folderWarning)
+      setMsg('YouTube downloads will land in ' + s.downloadFolder)
+    } catch {
+      setErr('Could not save the YouTube folder.')
+    } finally { setYtSaving(false) }
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -76,7 +103,7 @@ export default function FoldersDialog({ onClose, onChanged }:
               onChange={e => setNewPath(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') add() }}
               placeholder="C:\Music or \\server\share\Music" />
-            <button className="w-btn" disabled={busy} onClick={() => setBrowsing(true)}>Browse…</button>
+            <button className="w-btn" disabled={busy} onClick={() => setBrowsing('add')}>Browse…</button>
             <button className="w-btn" disabled={busy || !newPath.trim()} onClick={add}>Add</button>
           </div>
 
@@ -118,6 +145,30 @@ export default function FoldersDialog({ onClose, onChanged }:
             </table>
           </div>
 
+          {/* The YouTube destination is a folder choice, so it lives here with the
+              other folder choices rather than in Settings. It is NOT a scan
+              folder: it is not in the list above, gets no Rescan / Clear buttons,
+              and its tracks are indexed as they are downloaded. Putting it inside
+              one of the folders above is allowed — the note says what that means. */}
+          <fieldset className="w-group" style={{ marginTop: 10 }}>
+            <legend>YouTube downloads</legend>
+            <div className="w-muted" style={{ marginBottom: 6 }}>
+              Where tracks pasted into the YouTube dialog are downloaded to, with tags and
+              cover art, then added to the library. This folder is not scanned — downloads
+              index themselves as they arrive.
+            </div>
+            <div className="w-toolbar">
+              <input type="text" value={ytFolder} style={{ flex: 1 }} spellCheck={false}
+                disabled={ytSaving}
+                onChange={e => setYtFolder(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') saveYtFolder() }}
+                placeholder="C:\ProgramData\Y2KMusicServer\youtube" />
+              <button className="w-btn" disabled={ytSaving} onClick={() => setBrowsing('youtube')}>Browse…</button>
+              <button className="w-btn" disabled={ytSaving || !ytFolder.trim()} onClick={saveYtFolder}>Set</button>
+            </div>
+            {ytNote && <div className="w-muted" style={{ marginTop: 4 }}>{ytNote}</div>}
+          </fieldset>
+
           {msg && <div className="w-muted" style={{ marginTop: 4 }}>{msg}</div>}
           {err && <div className="w-err" style={{ marginTop: 4 }}>{err}</div>}
         </div>
@@ -154,8 +205,11 @@ export default function FoldersDialog({ onClose, onChanged }:
 
         {browsing && (
           <FolderBrowser
-            onSelect={p => { setNewPath(p); setBrowsing(false) }}
-            onClose={() => setBrowsing(false)} />
+            onSelect={p => {
+              if (browsing === 'youtube') setYtFolder(p); else setNewPath(p)
+              setBrowsing(null)
+            }}
+            onClose={() => setBrowsing(null)} />
         )}
       </div>
     </div>

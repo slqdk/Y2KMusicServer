@@ -631,6 +631,12 @@ export interface YouTubeSettings {
   downloadFolder: string
   /** Non-null when the folder is unusable (e.g. it overlaps a Music folder). */
   folderWarning: string | null
+  /** Netscape cookies.txt path; blank = none. Gets past most media-URL 403s. */
+  cookiesFile: string
+  /** Comma-separated player clients tried after a 403; blank = built-in list. */
+  playerClientFallbacks: string
+  /** Extra arguments appended to every yt-dlp call. */
+  extraYtDlpArgs: string
 }
 
 export interface YouTubeSearchItem {
@@ -654,7 +660,10 @@ export const getYouTubeSettings = () =>
   req<YouTubeSettings>('/api/admin/integrations/youtube/settings')
 
 export const setYouTubeSettings = (
-  patch: { enabled?: boolean; cacheMaxMB?: number; cacheMaxAgeDays?: number; downloadFolder?: string }) =>
+  patch: {
+    enabled?: boolean; cacheMaxMB?: number; cacheMaxAgeDays?: number; downloadFolder?: string
+    cookiesFile?: string; playerClientFallbacks?: string; extraYtDlpArgs?: string
+  }) =>
   req<YouTubeSettings>('/api/admin/integrations/youtube/settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

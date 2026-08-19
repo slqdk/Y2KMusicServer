@@ -50,12 +50,15 @@ public sealed class AdminIntegrationsController : ControllerBase
     // ── On/off + cache caps (JSON store; no-migrations rule) ───────────────
 
     public sealed record YouTubeSettings(bool Enabled, int CacheMaxMB, int CacheMaxAgeDays,
-                                        string DownloadFolder, string? FolderWarning);
+                                        string DownloadFolder, string? FolderWarning,
+                                        string CookiesFile, string PlayerClientFallbacks,
+                                        string ExtraYtDlpArgs);
 
     // Partial update: only the fields provided are changed, so a caller that
     // sends just { enabled } leaves the caps untouched (and vice versa).
     public sealed record YouTubeSettingsUpdate(bool? Enabled, int? CacheMaxMB, int? CacheMaxAgeDays,
-                                              string? DownloadFolder);
+                                              string? DownloadFolder, string? CookiesFile,
+                                              string? PlayerClientFallbacks, string? ExtraYtDlpArgs);
 
     [HttpGet("youtube/settings")]
     public IActionResult GetSettings() => Ok(CurrentSettings());
@@ -74,14 +77,15 @@ public sealed class AdminIntegrationsController : ControllerBase
         if (body?.CacheMaxMB is int mb) c.WebCacheMaxMB = System.Math.Max(0, mb);
         if (body?.CacheMaxAgeDays is int age) c.WebCacheMaxAgeDays = System.Math.Max(0, age);
 
-        if (body?.DownloadFolder is string folder)
-        {
-            var trimmed = folder.Trim();
-            var clash = Overlap(trimmed);
-            if (clash != null)
-                return BadRequest(new { error = clash });
-            c.DownloadFolder = trimmed;
-        }
+        // Any folder is accepted, including one inside a Music folder: that's the
+        // operator's call, and CurrentSettings reports what it means.
+        if (body?.DownloadFolder is string folder) c.DownloadFolder = folder.Trim();
+
+        // Blocking workarounds. Stored as typed; a blank client list restores the
+        // built-in fallback order rather than disabling retries.
+        if (body?.CookiesFile is string cookies) c.CookiesFile = cookies.Trim();
+        if (body?.PlayerClientFallbacks is string clients) c.PlayerClientFallbacks = clients.Trim();
+        if (body?.ExtraYtDlpArgs is string extra) c.ExtraYtDlpArgs = extra.Trim();
 
         IntegrationsStore.Save(_cfg, c);
         return Ok(CurrentSettings());
@@ -91,23 +95,8 @@ public sealed class AdminIntegrationsController : ControllerBase
     {
         var c = IntegrationsStore.Load(_cfg);
         return new YouTubeSettings(c.YouTubeEnabled, c.WebCacheMaxMB, c.WebCacheMaxAgeDays,
-            _downloads.TargetFolder(), _downloads.ValidateFolder());
-    }
-
-    // A blank folder means "use the default under ProgramData", which is always
-    // outside the Music folders, so only a typed path is checked.
-    private string? Overlap(string folder)
-    {
-        if (folder.Length == 0) return null;
-        var self = Y2KMusicServer.Server.Data.FolderScope.Prefix(folder);
-        foreach (var scan in Y2KMusicServer.Server.Data.ScanFolderStore.AllPaths(_cfg))
-        {
-            var pre = Y2KMusicServer.Server.Data.FolderScope.Prefix(scan);
-            if (self.StartsWith(pre, System.StringComparison.OrdinalIgnoreCase)
-                || pre.StartsWith(self, System.StringComparison.OrdinalIgnoreCase))
-                return $"That folder overlaps the Music folder \"{scan}\". Pick a folder outside your music library.";
-        }
-        return null;
+            _downloads.TargetFolder(), _downloads.ValidateFolder() ?? _downloads.FolderNote(),
+            c.CookiesFile, c.PlayerClientFallbacks, c.ExtraYtDlpArgs);
     }
 
     // ── Downloads (paste a link, get the song in the library) ──────────────

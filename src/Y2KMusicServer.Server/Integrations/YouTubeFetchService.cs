@@ -124,6 +124,7 @@ public sealed class YouTubeFetchService
         // Flat: fast, metadata only, no per-result media extraction.
         var args = new List<string> { "--flat-playlist", "-J", "--no-warnings" };
         if (noPlaylist) args.Add("--no-playlist");   // a watch link inside a playlist
+        args.AddRange(YouTubeToolArgs.Common(_cfg));  // cookies + operator args
         args.Add(target);
 
         var r = await RunAsync(_ytDlp, args.ToArray(), TimeSpan.FromSeconds(45), ct);
@@ -229,13 +230,16 @@ public sealed class YouTubeFetchService
         // Download bestaudio → MP3 (guaranteed engine decode), tags embedded so
         // the same TagLib read the scanner uses fills Title/Artist/duration.
         // yt-dlp skips the download if the final file is already present.
-        var r = await RunAsync(_ytDlp, new[]
+        var fetchArgs = new List<string>
         {
             "-x", "--audio-format", "mp3", "--audio-quality", "0",
             "--embed-metadata", "--no-playlist", "--no-warnings",
-            "-o", Path.Combine(dir, "%(id)s.%(ext)s"),
-            $"https://www.youtube.com/watch?v={videoId}"
-        }, TimeSpan.FromSeconds(180), ct);
+            "-o", Path.Combine(dir, "%(id)s.%(ext)s")
+        };
+        fetchArgs.AddRange(YouTubeToolArgs.Common(_cfg));
+        fetchArgs.Add($"https://www.youtube.com/watch?v={videoId}");
+
+        var r = await RunAsync(_ytDlp, fetchArgs.ToArray(), TimeSpan.FromSeconds(180), ct);
 
         if (!File.Exists(path))
         {

@@ -34,6 +34,28 @@ public static class IntegrationsStore
         /// that overlaps a Music folder.
         /// </summary>
         public string DownloadFolder { get; set; } = "";
+
+        /// <summary>
+        /// Path to a Netscape-format cookies.txt exported from a signed-in
+        /// browser. Blank = no cookies. Cookies are one of the few things that
+        /// get past a media-URL 403, and the LocalSystem service has no browser
+        /// profile of its own to read them from.
+        /// </summary>
+        public string CookiesFile { get; set; } = "";
+
+        /// <summary>
+        /// Player clients tried, in order, after yt-dlp's default is refused
+        /// (comma-separated). Blank = the built-in list. Which clients work
+        /// changes as YouTube changes, which is why this is a setting.
+        /// </summary>
+        public string PlayerClientFallbacks { get; set; } = "";
+
+        /// <summary>
+        /// Extra arguments passed to every yt-dlp call, space-separated with
+        /// double quotes for values containing spaces. The escape hatch for a
+        /// workaround that lands before the next build does.
+        /// </summary>
+        public string ExtraYtDlpArgs { get; set; } = "";
     }
 
     private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
