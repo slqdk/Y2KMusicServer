@@ -171,6 +171,17 @@
   border-radius: 999px; padding: 1px 7px; min-width: 20px; text-align: center;
 }
 
+/* "Just added" — a rail chip that browses new arrivals rather than a playlist.
+   Set apart by a rule above it and its own marker, so it doesn't read as one
+   more playlist in the list. */
+.lz-chip-new { margin-top: 14px; position: relative; }
+.lz-plcol .lz-chip-new::after {
+  content: ""; position: absolute; left: 6%; right: 6%; top: -8px;
+  border-top: 1px solid var(--lz-line); opacity: .8;
+}
+.lz-chip-new::before { content: "✦"; opacity: .8; }
+.lz-chip-new.is-on::before { content: "✦"; opacity: 1; }
+
 /* ── Main area: sidebar + centered results, clearing the fixed bar ───── */
 .lz-main {
   --lz-nowbar-h: 96px;              /* kept in sync by the media queries */

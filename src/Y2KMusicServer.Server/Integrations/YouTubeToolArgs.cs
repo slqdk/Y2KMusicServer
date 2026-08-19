@@ -79,7 +79,15 @@ public static class YouTubeToolArgs
                 || line.Contains("Forbidden", StringComparison.OrdinalIgnoreCase)
                 || line.Contains("Requested format is not available", StringComparison.OrdinalIgnoreCase)
                 || line.Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase)
-                || line.Contains("player response", StringComparison.OrdinalIgnoreCase))
+                || line.Contains("player response", StringComparison.OrdinalIgnoreCase)
+                // "The page needs to be reloaded." / "UNPLAYABLE": the client
+                // yt-dlp chose came back without usable formats. It is
+                // intermittent per client, so another client is exactly the
+                // right response — the same URL often works on the next one.
+                || line.Contains("page needs to be reloaded", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("UNPLAYABLE", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("No video formats found", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("nsig extraction failed", StringComparison.OrdinalIgnoreCase))
                 return true;
         }
         return false;

@@ -116,16 +116,43 @@ public sealed class PublicController : ControllerBase
     /// Every mode dedupes same-song format twins: FLAC is preferred, the MP3
     /// shows only when no FLAC matches. Take is clamped 1..30.
     /// </summary>
+    /// <summary>How many recently-added tracks the "New songs" browse shows.</summary>
+    private const int NewestLimit = 50;
+
     [HttpGet("search")]
     public async Task<object> Search(
         [FromQuery] string? q, [FromQuery] string? genre, [FromQuery] string? decade,
         [FromQuery] int? playlist, [FromQuery] string? albumName,
+        [FromQuery] bool newest = false,
         [FromQuery] int take = 6, CancellationToken ct = default)
     {
-        take = Math.Clamp(take, 1, 30);
+        // The newest browse is a fixed short list rather than a search, so it is
+        // allowed a longer take than the 30 the search page uses.
+        take = Math.Clamp(take, 1, newest ? NewestLimit : 30);
         bool hasText = !string.IsNullOrWhiteSpace(q);
 
         await using var db = await _dbf.CreateDbContextAsync(ct);
+
+        // ── Newest additions ──────────────────────────────────────────────
+        // "What's new" for guests: the most recently indexed tracks, whatever
+        // put them there — a folder scan, or a YouTube download landing in the
+        // library. Ordered by when the library learned about the file, newest
+        // first, and deliberately NOT deduplicated against older FLAC twins:
+        // a guest asking for new songs wants the row that just appeared.
+        if (newest)
+        {
+            var newRows = await db.Tracks.AsNoTracking()
+                .OrderByDescending(t => t.ScannedAt).ThenByDescending(t => t.Id)
+                .Take(NewestLimit * 2)     // headroom for the visibility filter
+                .ToListAsync(ct);
+            newRows = ApplyFolderVisibility(newRows);
+            return new
+            {
+                items = ToItems(newRows.Take(take)),
+                albums = Array.Empty<object>(),
+                browsing = true
+            };
+        }
 
         // ── Album drill-down ──────────────────────────────────────────────
         if (!string.IsNullOrWhiteSpace(albumName))

@@ -132,6 +132,11 @@ export default function App() {
   const [albums, setAlbums] = useState<AlbumHit[]>([])
   const [albumView, setAlbumView] = useState<AlbumHit | null>(null)
   const [artFail, setArtFail] = useState<Set<number>>(new Set())
+  // "New songs" browse: the last 50 tracks the library learned about, from a
+  // scan or a YouTube download alike. A mode of its own — it ignores the search
+  // box and any playlist selection while it is on.
+  const [newestOnly, setNewestOnly] = useState(false)
+
   const [playlist, setPlaylist] = useState<PlaylistRow[]>([])
   const [q, setQ] = useState('')
   const [results, setResults] = useState<SearchItem[]>([])
@@ -266,12 +271,13 @@ export default function App() {
     debounce.current = window.setTimeout(() => {
       setShowResults(true)
       const qs = new URLSearchParams()
-      if (albumView) qs.set('albumName', albumView.album)
+      if (newestOnly) qs.set('newest', '1')
+      else if (albumView) qs.set('albumName', albumView.album)
       else {
         if (term) qs.set('q', term)
         if (selPl != null) qs.set('playlist', String(selPl))
       }
-      qs.set('take', '30')
+      qs.set('take', newestOnly ? '50' : '30')
       j<SearchResp>(`/api/search?${qs.toString()}`)
         .then(d => {
           setResults(d.items)
@@ -283,7 +289,7 @@ export default function App() {
     }, 500)
     return () => window.clearTimeout(debounce.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, selPl, albumView, nameOk])
+  }, [q, selPl, albumView, nameOk, newestOnly])
 
   // If the broadcast drops while we're listening, stop the player.
   useEffect(() => { if (stream && !stream.enabled && live) stopStream() // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -346,13 +352,24 @@ export default function App() {
   // allowed it — add or remove it from what Auto DJ plays from.
   const togglePlaylist = (id: number) => {
     setAlbumView(null)
+    setNewestOnly(false)
     setSelPl(prev => prev === id ? null : id)
     if (pls?.canChoose)
       setLiveSelection(djSel.includes(id) ? djSel.filter(x => x !== id) : [...djSel, id])
   }
   const openAlbum = (a: AlbumHit) => setAlbumView(a)
   const backToSearch = () => setAlbumView(null)
-  const onQueryChange = (v: string) => { setAlbumView(null); setQ(v) }
+  const onQueryChange = (v: string) => { setAlbumView(null); setNewestOnly(false); setQ(v) }
+
+  // The New songs chip is its own browse: it clears the text, the album and the
+  // playlist so the list shows exactly the new arrivals and nothing else.
+  const toggleNewest = () => {
+    setNewestOnly(on => {
+      const next = !on
+      if (next) { setQ(''); setAlbumView(null); setSelPl(null) }
+      return next
+    })
+  }
 
   const stateLabel = np?.playing ? 'NOW PLAYING' : np?.trackId ? 'PAUSED' : 'OFF AIR'
 
@@ -445,6 +462,12 @@ export default function App() {
             <input className="lz-input" type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Enter your name…" maxLength={40} />
             <div className="lz-field-label" style={{ marginTop: 14 }}>Theme</div>
             {themeSelect('lz-theme-drawer')}
+            <button
+              className={`lz-chip lz-chip-new${newestOnly ? ' is-on' : ''}`}
+              style={{ marginTop: 14, width: '100%' }}
+              onClick={() => { toggleNewest(); setDrawerOpen(false) }}>
+              <span className="lz-chip-name">✨ Just added</span>
+            </button>
             {pls?.showSelector && pls.playlists.length > 0 && (
               <>
                 <div className="lz-field-label" style={{ marginTop: 14 }}>♫ Playlists</div>
@@ -486,10 +509,13 @@ export default function App() {
         </aside>
         )}
 
-        {/* Playlist rail: first column of the page grid, hard against the left */}
-        {!requireName && pls?.showSelector && pls.playlists.length > 0 && (
+        {/* Playlist rail: first column of the page grid, hard against the left.
+            The rail also carries the New songs chip, which is not a playlist —
+            so the rail renders whenever the name gate is open, even for a
+            library with no playlists or with the selector switched off. */}
+        {!requireName && (
             <aside className="lz-plcol">
-              {pls.playlists.map(p => (
+              {pls?.showSelector && pls.playlists.map(p => (
                 <button key={p.id}
                   className={`lz-chip${selPl === p.id ? ' is-on' : ''}${djSel.includes(p.id) ? ' is-live' : ''}`}
                   title={pls.canChoose
@@ -499,6 +525,12 @@ export default function App() {
                   <span className="lz-chip-name">{p.name}</span><span className="lz-chip-count">{p.count}</span>
                 </button>
               ))}
+              <button
+                className={`lz-chip lz-chip-new${newestOnly ? ' is-on' : ''}`}
+                title="The 50 songs most recently added to the library"
+                onClick={toggleNewest}>
+                <span className="lz-chip-name">✨ Just added</span>
+              </button>
             </aside>
         )}
 
@@ -517,8 +549,8 @@ export default function App() {
             />
             <div className="lz-topctrls">
               <button className="lz-btn" title="Clear the search"
-                disabled={q.length === 0 && !albumView}
-                onClick={() => { onQueryChange(''); setAlbumView(null) }}>Clear</button>
+                disabled={q.length === 0 && !albumView && !newestOnly}
+                onClick={() => { onQueryChange(''); setAlbumView(null); setNewestOnly(false) }}>Clear</button>
               {stream?.showListenLive && (
                 <button
                   className={`lz-btn${live ? ' is-live' : ''}`}
