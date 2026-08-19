@@ -53,6 +53,52 @@ public static class TrackSearch
         return query;
     }
 
+    /// <summary>
+    /// The fields a search may look at. The listener's Artist / Album / Song
+    /// toggles map straight onto this: all three (or none selected) is the
+    /// normal any-field rule, a subset means every token must land inside one of
+    /// the chosen fields.
+    /// </summary>
+    [Flags]
+    public enum Fields { None = 0, Title = 1, Artist = 2, Album = 4, All = Title | Artist | Album }
+
+    /// <summary>Parses a csv like "artist,album" into flags. Unknown or empty
+    /// input means All, so a malformed parameter can never hide the library.</summary>
+    public static Fields ParseFields(string? csv)
+    {
+        if (string.IsNullOrWhiteSpace(csv)) return Fields.All;
+        var f = Fields.None;
+        foreach (var part in csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (part.Equals("title", StringComparison.OrdinalIgnoreCase)
+                || part.Equals("song", StringComparison.OrdinalIgnoreCase)) f |= Fields.Title;
+            else if (part.Equals("artist", StringComparison.OrdinalIgnoreCase)) f |= Fields.Artist;
+            else if (part.Equals("album", StringComparison.OrdinalIgnoreCase)) f |= Fields.Album;
+        }
+        return f == Fields.None ? Fields.All : f;
+    }
+
+    /// <summary>
+    /// In-memory twin of the rule restricted to certain fields. Used AFTER the
+    /// SQL any-field query, which is a superset of any scoped result — so the
+    /// database still does the heavy narrowing and this only sifts what it
+    /// returned.
+    /// </summary>
+    public static bool MatchesAllTokens(Track t, IReadOnlyList<string> tokens, Fields fields)
+    {
+        if (fields == Fields.All) return MatchesAllTokens(t, tokens);
+
+        foreach (var tok in tokens)
+        {
+            bool hit =
+                (fields.HasFlag(Fields.Title) && (t.Title ?? "").Contains(tok, StringComparison.OrdinalIgnoreCase))
+                || (fields.HasFlag(Fields.Artist) && (t.Artist ?? "").Contains(tok, StringComparison.OrdinalIgnoreCase))
+                || (fields.HasFlag(Fields.Album) && (t.Album ?? "").Contains(tok, StringComparison.OrdinalIgnoreCase));
+            if (!hit) return false;
+        }
+        return true;
+    }
+
     /// <summary>In-memory twin of the rule, for lists already loaded.</summary>
     public static bool MatchesAllTokens(Track t, IReadOnlyList<string> tokens)
     {

@@ -555,6 +555,17 @@ public sealed class PlaylistService
         finally { _mutateGate.Release(); }
     }
 
+    /// <summary>The track behind a queue entry, or null if it's already gone.
+    /// Read BEFORE a delete, so the caller can drop a matching armed cue.</summary>
+    public async Task<int?> TrackIdOfEntryAsync(int entryId, CancellationToken ct = default)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        return await db.PlaylistEntries.AsNoTracking()
+            .Where(e => e.Id == entryId)
+            .Select(e => (int?)e.TrackId)
+            .FirstOrDefaultAsync(ct);
+    }
+
     public async Task<bool> RemoveAsync(int entryId, CancellationToken ct = default)
     {
         await _mutateGate.WaitAsync(ct);

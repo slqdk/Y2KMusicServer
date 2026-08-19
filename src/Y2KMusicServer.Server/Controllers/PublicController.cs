@@ -119,16 +119,31 @@ public sealed class PublicController : ControllerBase
     /// <summary>How many recently-added tracks the "New songs" browse shows.</summary>
     private const int NewestLimit = 50;
 
+    /// <summary>
+    /// Ceiling on rows returned to the listener page in one response. Not a
+    /// search limit in spirit — it is the point past which a phone would choke
+    /// on the DOM long before the guest found anything useful. The response
+    /// reports the true match count either way, so the page can say how many
+    /// were left out.
+    /// </summary>
+    private const int SearchHardCap = 2000;
+
     [HttpGet("search")]
     public async Task<object> Search(
         [FromQuery] string? q, [FromQuery] string? genre, [FromQuery] string? decade,
         [FromQuery] int? playlist, [FromQuery] string? albumName,
-        [FromQuery] bool newest = false,
+        [FromQuery] bool newest = false, [FromQuery] string? fields = null,
         [FromQuery] int take = 6, CancellationToken ct = default)
     {
-        // The newest browse is a fixed short list rather than a search, so it is
-        // allowed a longer take than the 30 the search page uses.
-        take = Math.Clamp(take, 1, newest ? NewestLimit : 30);
+        // take = 0 means "everything that matched". A text search is capped only
+        // by SearchHardCap, which exists to protect the wire and the phone's
+        // renderer, not to trim the answer — a guest looking for a song should
+        // never be told "no matches" because their song sat at position 31.
+        // The browse paths (playlist, album, feed, newest) keep a real take.
+        bool unlimited = take <= 0;
+        if (!unlimited)
+            take = Math.Clamp(take, 1, newest ? NewestLimit : SearchHardCap);
+        int effTake = unlimited ? SearchHardCap : take;
         bool hasText = !string.IsNullOrWhiteSpace(q);
 
         await using var db = await _dbf.CreateDbContextAsync(ct);
@@ -163,7 +178,8 @@ public sealed class PublicController : ControllerBase
                 .OrderBy(t => t.Artist).ThenBy(t => t.Title)
                 .ToListAsync(ct);
             albumRows = ApplyFolderVisibility(albumRows);
-            return new { items = ToItems(PreferFlac(albumRows).Take(take)) };
+            // An album drill-down is a complete track list, never a page of one.
+            return new { items = ToItems(PreferFlac(albumRows)), albumList = true };
         }
 
         // ── Saved-playlist browse (playlist order) ────────────────────────
@@ -232,6 +248,15 @@ public sealed class PublicController : ControllerBase
             .ToListAsync(ct);
         rows = ApplyFolderVisibility(rows);
 
+        // Artist / Album / Song toggles. The SQL above matched any field, which
+        // is a superset of any scoped result, so this only sifts what came back.
+        var scope = TrackSearch.ParseFields(fields);
+        if (hasText && scope != TrackSearch.Fields.All)
+        {
+            var scopeTokens = TrackSearch.Tokens(q);
+            rows = rows.Where(t => TrackSearch.MatchesAllTokens(t, scopeTokens, scope)).ToList();
+        }
+
         // ── Fallback: not every word matched ─────────────────────────────
         // "metallica the black" still finds nothing (no album word "black"), so
         // loosen further: drop the stopwords and retry the word-AND, then fall
@@ -245,6 +270,11 @@ public sealed class PublicController : ControllerBase
                 .OrderBy(t => t.Artist).ThenBy(t => t.Title)
                 .ToListAsync(ct));
             (rows, fallbackQuery) = FallbackSearch(all, q!.Trim());
+            if (scope != TrackSearch.Fields.All && rows.Count > 0)
+            {
+                var fbTokens = TrackSearch.Tokens(fallbackQuery ?? q);
+                rows = rows.Where(t => TrackSearch.MatchesAllTokens(t, fbTokens, scope)).ToList();
+            }
         }
 
         var map = GenreMapStore.Load(_cfg);
@@ -274,7 +304,17 @@ public sealed class PublicController : ControllerBase
             .Take(12)
             .ToList();
 
-        return new { items = ToItems(deduped.Take(take)), albums, fallbackQuery };
+        // total tells the page how many actually matched, so it can say "showing
+        // 80 of 340" while it renders in chunks — and admit when the hard cap
+        // trimmed the tail.
+        return new
+        {
+            items = ToItems(deduped.Take(effTake)),
+            total = deduped.Count,
+            capped = deduped.Count > effTake,
+            albums,
+            fallbackQuery
+        };
     }
 
     /// <summary>

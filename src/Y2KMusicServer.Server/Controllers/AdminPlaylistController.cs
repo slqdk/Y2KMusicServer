@@ -72,18 +72,31 @@ public sealed class AdminPlaylistController : ControllerBase
         };
     }
 
+    /// <summary>
+    /// Removes one queue entry. If that entry was the one already cued on Deck B
+    /// its cue is dropped too — an armed deck holds its own open reader and would
+    /// otherwise still crossfade in on the trigger, making the delete look
+    /// ignored. The scheduler re-arms from the queue on its next tick.
+    /// </summary>
     [HttpDelete("playlist/{id:int}")]
     public async Task<IActionResult> Remove(int id, CancellationToken ct)
-        => await _playlist.RemoveAsync(id, ct)
-            ? Ok(await _playlist.GetAsync(ct))
-            : NotFound(new { error = "playlist entry not found", id });
+    {
+        var trackId = await _playlist.TrackIdOfEntryAsync(id, ct);
+        if (!await _playlist.RemoveAsync(id, ct))
+            return NotFound(new { error = "playlist entry not found", id });
 
-    /// <summary>Clears upcoming entries, keeping the currently playing track.</summary>
+        if (trackId is int tid) _engine.CancelPreparedIfTrack(tid);
+        return Ok(await _playlist.GetAsync(ct));
+    }
+
+    /// <summary>Clears upcoming entries, keeping the currently playing track.
+    /// The armed Deck B belongs to an upcoming entry, so its cue goes too.</summary>
     [HttpPost("playlist/clear")]
     public async Task<IActionResult> Clear(CancellationToken ct)
     {
-        int? current = _engine.GetStatus().TrackId;
-        int removed = await _playlist.ClearUpcomingAsync(current, ct);
+        var status = _engine.GetStatus();
+        int removed = await _playlist.ClearUpcomingAsync(status.TrackId, ct);
+        if (status.NextTrackId is int armed) _engine.CancelPreparedIfTrack(armed);
         return Ok(new { removed, playlist = await _playlist.GetAsync(ct) });
     }
 

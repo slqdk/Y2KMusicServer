@@ -126,12 +126,24 @@ public sealed class DjController : ControllerBase
             : UnprocessableEntity(new { ok = false, error = r.ToString() });
     }
 
-    /// <summary>Drops one upcoming entry from the queue.</summary>
+    /// <summary>
+    /// Drops one upcoming entry from the queue. The FIRST upcoming entry is
+    /// normally the one already cued on Deck B, so the cue is dropped with it —
+    /// otherwise the deleted song still crossfades in on the trigger and the
+    /// delete looks ignored. The scheduler re-arms from the queue on its next
+    /// tick.
+    /// </summary>
     [HttpDelete("queue/{entryId:int}")]
     public async Task<IActionResult> RemoveEntry(int entryId, CancellationToken ct)
     {
+        var trackId = await _playlist.TrackIdOfEntryAsync(entryId, ct);
         var ok = await _playlist.RemoveAsync(entryId, ct);
-        return ok ? Ok(new { removed = entryId }) : NotFound();
+        if (!ok) return NotFound();
+
+        bool uncued = trackId is int tid && _engine.CancelPreparedIfTrack(tid);
+        _log.LogInformation("DJ page removed queue entry {EntryId}{Uncued}.",
+            entryId, uncued ? " (and cleared the cue)" : "");
+        return Ok(new { removed = entryId, uncued });
     }
 
     /// <summary>Turns Auto DJ feeding on/off for one playlist.</summary>

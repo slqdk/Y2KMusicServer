@@ -518,17 +518,20 @@
   display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px;
   scrollbar-width: thin;
 }
-.lz-album { flex: 0 0 116px; width: 116px; cursor: pointer; }
+/* Album cards. Bigger than the song tiles on purpose: the cover IS the
+   affordance here — a guest recognises a record long before they read its
+   title — and these are tap targets on a phone held at arm's length. */
+.lz-album { flex: 0 0 168px; width: 168px; cursor: pointer; }
 .lz-album-art {
-  width: 116px; height: 116px; object-fit: cover; display: block;
+  width: 168px; height: 168px; object-fit: cover; display: block;
   border-radius: var(--lz-radius-sm, 6px);
   background: var(--lz-art-bg, var(--lz-panel));
   border: 1px solid var(--lz-line-soft, var(--lz-line));
 }
 .lz-album-art-empty { display: flex; align-items: center; justify-content: center; font-size: 1.6rem; color: var(--lz-faint); }
 .lz-album:hover .lz-album-art { border-color: var(--lz-accent, var(--lz-line)); }
-.lz-album-name { margin-top: 5px; font-size: .8rem; color: var(--lz-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lz-album-artist { font-size: .72rem; color: var(--lz-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lz-album-name { margin-top: 6px; font-size: .92rem; font-weight: 600; color: var(--lz-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lz-album-artist { font-size: .8rem; color: var(--lz-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Songs grid — artwork tiles */
 .lz-grid {
@@ -802,3 +805,24 @@
   .lz-np-art { width: 48px; height: 48px; }
   .lz-np-title { font-size: 1rem; }
 }
+
+
+/* Field filters (Artist / Album / Song) — shown only while searching. */
+.lz-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 2px 0 10px; }
+.lz-filters-label { font-size: .78rem; color: var(--lz-muted); }
+.lz-filter {
+  font: inherit; font-size: .82rem; cursor: pointer;
+  padding: 6px 14px; border-radius: 999px;
+  background: var(--lz-panel); color: var(--lz-muted);
+  border: 1px solid var(--lz-line);
+}
+.lz-filter.is-on {
+  background: var(--lz-accent-soft, var(--lz-panel));
+  color: var(--lz-text); border-color: var(--lz-accent, var(--lz-line));
+  font-weight: 600;
+}
+
+/* Progressive rendering: the server sent everything, the page grows on demand. */
+.lz-more { display: flex; justify-content: center; padding: 14px 0 22px; }
+.lz-more-btn { padding: 12px 26px; font-size: .95rem; }
+.lz-more-note { font-size: .82rem; color: var(--lz-muted); text-align: center; }

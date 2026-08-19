@@ -120,6 +120,13 @@ public sealed class AudioEngine
     private bool _fadeBHeld;     // true while B is still waiting for that point
     private double _fadeBStartPos;  // A's fade progress at the moment B entered
     private bool _bManualStarted;   // operator started the silent Deck B preview (pump running)
+
+    // Jingle hand-back: a jingle is played out in full, the deck stops, and the
+    // next song starts clean after a short silence. No fade in either direction —
+    // the silence is the point, it's what makes the room look up.
+    private bool _gapWaiting;
+    private int _gapTicksLeft;
+    private const double JingleGapSec = 1.0;
     private double _crossFadePos;
     private double _crossFadeStep;
     private float _fadeStartVolA;
@@ -618,6 +625,37 @@ public sealed class AudioEngine
 
     // ── Transitions ───────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Drops the armed Deck B if it holds this track — used when its queue entry
+    /// is deleted.
+    ///
+    /// Arming and the queue are two different things: once a track is cued, Deck B
+    /// owns an open reader for it and will crossfade in on the trigger whatever
+    /// the database now says. Deleting the entry alone therefore does NOT stop
+    /// it playing — the scheduler only re-arms when some OTHER entry takes its
+    /// place, so with an empty (or Auto-DJ-off) queue the deleted song still
+    /// arrives, which looks exactly like the queue ignoring a delete.
+    ///
+    /// Refuses while crossfading: at that point the track is already on air and
+    /// pulling the deck out from under it would cut the music.
+    /// </summary>
+    public bool CancelPreparedIfTrack(int trackId)
+    {
+        Deck? doomed = null;
+        lock (_gate)
+        {
+            if (_crossfading) return false;
+            if (_prepared?.DeckB is not Deck b || b.TrackId != trackId) return false;
+            doomed = b;
+            _prepared = null;
+            _bManualStarted = false;
+        }
+
+        DisposeOffThread(doomed);
+        _log.LogInformation("Cue cleared: armed track {TrackId} was removed from the queue.", trackId);
+        return true;
+    }
+
     public async Task<QueueResult> QueueNextAsync(int trackId, CancellationToken ct = default, bool manual = false)
     {
         int fromId;
@@ -800,6 +838,17 @@ public sealed class AudioEngine
             double trigger = outPoint > 0
                 ? Math.Clamp(outPoint, 0, durA)
                 : endA * Math.Clamp(settings.NextTriggerPct / 100.0, 0.05, 0.99);
+
+            // Coming OUT of a jingle there is no mix at all: the jingle runs to
+            // its last audible moment, stops, and the next song starts after a
+            // beat of silence. So the trigger sits at A's end instead of a fade
+            // length before it, and the fade is zeroed — StartCrossfade turns
+            // this into the gap rather than a ramp.
+            if (_deckA.IsJingle && !deckB.IsJingle)
+            {
+                trigger = Math.Max(0, endA - 0.05);
+                fadeSec = 0;
+            }
 
             oldPrepared = _prepared?.DeckB;
             _prepared = new PreparedNext
@@ -1006,6 +1055,36 @@ public sealed class AudioEngine
                     // (drop B in, cut A short) or the window expires and this
                     // becomes a Normal crossfade with the configured entry level.
                     bool frozen = false;
+
+                    // Jingle hand-back gap: both decks silent, nothing ramping,
+                    // until the count runs out. Then B starts at full and the
+                    // transition completes on this same tick — no ramp is ever
+                    // applied, so the song enters at its proper level.
+                    if (_gapWaiting && _deckB != null)
+                    {
+                        _gapTicksLeft--;
+                        if (_gapTicksLeft > 0)
+                        {
+                            _deckA.Vol.Volume = 0f;
+                            frozen = true;
+                        }
+                        else
+                        {
+                            _gapWaiting = false;
+                            try { _deckB.Reader.CurrentTime = TimeSpan.FromSeconds(_deckB.InPointSec); } catch { }
+                            _deckB.Tap.Reset();
+                            _deckB.Vol.Volume = _deckBTargetVol;
+                            _deckBFading = false;
+                            if (_state == PlaybackEngineState.Playing) _deckB.Out.Play();
+
+                            _fadeStartVolA = 0f;
+                            _crossFadePos = 0;
+                            _crossFadeStep = 1f;   // completes below, this tick
+                            _log.LogDebug("Jingle hand-back: silence over — \"{To}\" in at full.",
+                                TrackLabel(_deckB.Title, _deckB.Artist));
+                        }
+                    }
+
                     if (_beatWaiting && _deckB != null)
                     {
                         _beatWaitTicksLeft--;
@@ -1513,6 +1592,34 @@ public sealed class AudioEngine
             }
         }
 
+        // ── Jingle hand-back: stop, silence, start ───────────────────────────
+        // Not a crossfade at all. Deck A is cut and paused here; Deck B stays
+        // paused and silent for JingleGapSec, then starts at full and the
+        // transition completes on that tick. Every other special mode is stood
+        // down so nothing can rewrite the volumes underneath it.
+        _gapWaiting = false;
+        _gapTicksLeft = 0;
+        if (_deckA.IsJingle && !_deckB.IsJingle)
+        {
+            _gapWaiting = true;
+            _gapTicksLeft = Math.Max(1, (int)Math.Round(JingleGapSec * 1000.0 / TickMs));
+
+            _deckA.Vol.Volume = 0f;
+            try { _deckA.Out.Pause(); } catch { /* already stopping */ }
+            _fadeStartVolA = 0f;
+
+            _deckB.Vol.Volume = 0f;
+            _deckBFading = false;
+            _fadeBHeld = false;
+            _beatWaiting = false;
+            _smartBeatActive = false;
+            _activePlan = null;
+            _planOwnsB = false;
+
+            _log.LogInformation("Transition: jingle hand-back — stop, {Gap:F1}s silence, then \"{To}\" starts clean.",
+                JingleGapSec, TrackLabel(_deckB.Title, _deckB.Artist));
+        }
+
         // Apply a move's fade-start steps (isolators + any B start volume). Then
         // log exactly what's running — for every transition, so it's always in the
         // log next to the planned line.
@@ -1524,7 +1631,7 @@ public sealed class AudioEngine
         // A held-out B stays PAUSED until it is let in. Starting it here would
         // let it play its opening bars silently and enter mid-phrase — the
         // listener hears the song "missing its first seconds".
-        if (_state == PlaybackEngineState.Playing && !_fadeBHeld) _deckB.Out.Play();
+        if (_state == PlaybackEngineState.Playing && !_fadeBHeld && !_gapWaiting) _deckB.Out.Play();
         _crossfading = true;
         _bManualStarted = false;
 
@@ -1572,6 +1679,12 @@ public sealed class AudioEngine
         // Auto-mix plan: any fade-end steps run on the current decks before B is
         // promoted (the promotion then resets B's isolator to None).
         ApplyPlanSteps_Locked("fadeEnd");
+
+        // The hand-back gap belongs to the transition that just ended; clearing it
+        // here means a stopped or skipped jingle can never leave the next
+        // transition frozen waiting on a count that will not run.
+        _gapWaiting = false;
+        _gapTicksLeft = 0;
 
         var old = _deckA;
         _deckA = _deckB;

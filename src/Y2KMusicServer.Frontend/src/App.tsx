@@ -29,7 +29,23 @@ interface PlaylistsInfo {
   playlists: PublicPlaylist[]
 }
 interface AlbumHit { album: string; artist: string | null; trackId: number; count: number }
-interface SearchResp { items: SearchItem[]; albums?: AlbumHit[]; fallbackQuery?: string | null }
+const PAGE = 80
+
+interface SearchResp {
+  items: SearchItem[]
+  albums?: AlbumHit[]
+  fallbackQuery?: string | null
+  /** How many rows matched in total (the response itself is capped). */
+  total?: number
+  /** True when the server's hard cap trimmed the tail. */
+  capped?: boolean
+  /** Album drill-down: a complete track list, shown plain rather than as tiles. */
+  albumList?: boolean
+}
+
+/** Which fields the text search looks at. All three on = the normal any-field
+ *  rule; a subset scopes every word to those fields. */
+type Field = 'artist' | 'album' | 'title'
 interface PlaylistRow { position: number; trackId: number; title: string | null; artist: string | null; durationSec: number; source: string | null }
 
 const THEMES: [string, string][] = [
@@ -130,6 +146,13 @@ export default function App() {
     }).catch(() => {})
   }
   const [albums, setAlbums] = useState<AlbumHit[]>([])
+  const [fields, setFields] = useState<Field[]>(['artist', 'album', 'title'])
+  const [total, setTotal] = useState(0)
+  const [capped, setCapped] = useState(false)
+  // Rows rendered so far. The server sends everything that matched; the page
+  // grows the DOM in chunks, because a phone hangs long before a guest scrolls
+  // past a few hundred rows.
+  const [shown, setShown] = useState(PAGE)
   const [albumView, setAlbumView] = useState<AlbumHit | null>(null)
   const [artFail, setArtFail] = useState<Set<number>>(new Set())
   // "New songs" browse: the last 50 tracks the library learned about, from a
@@ -279,19 +302,24 @@ export default function App() {
         if (term) qs.set('q', term)
         if (selPl != null) qs.set('playlist', String(selPl))
       }
-      qs.set('take', newestOnly ? '50' : '30')
+      // take=0 = everything that matched; the browse modes keep a real page.
+      qs.set('take', newestOnly ? '50' : (term ? '0' : '30'))
+      if (term && fields.length > 0 && fields.length < 3) qs.set('fields', fields.join(','))
       j<SearchResp>(`/api/search?${qs.toString()}`)
         .then(d => {
           setResults(d.items)
           setAlbums(albumView ? [] : (d.albums ?? []))
           setFallbackQ(albumView ? null : (d.fallbackQuery ?? null))
+          setTotal(d.total ?? d.items.length)
+          setCapped(d.capped ?? false)
+          setShown(PAGE)   // every new search starts from the top chunk
           setArtFail(new Set())
         })
         .catch(() => { setResults([]); setAlbums([]); setFallbackQ(null) })
     }, 500)
     return () => window.clearTimeout(debounce.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, selPl, albumView, nameOk, newestOnly])
+  }, [q, selPl, albumView, nameOk, newestOnly, fields])
 
   // If the broadcast drops while we're listening, stop the player.
   useEffect(() => { if (stream && !stream.enabled && live) stopStream() // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -371,6 +399,13 @@ export default function App() {
     if (v.trim().length > 0) setSelPl(null)
     setQ(v)
   }
+
+  // Toggling a field off narrows the search; turning the last one off would
+  // leave nothing searchable, so the last active field can't be switched off.
+  const toggleField = (f: Field) =>
+    setFields(prev => prev.includes(f)
+      ? (prev.length === 1 ? prev : prev.filter(x => x !== f))
+      : [...prev, f])
 
   // The New songs chip is its own browse: it clears the text, the album and the
   // playlist so the list shows exactly the new arrivals and nothing else.
@@ -581,6 +616,21 @@ export default function App() {
 
           {showResults && (
           <section className="lz-panel lz-results lz-results-bare">
+          {/* Field filters. Only meaningful while searching, so they appear with
+              the text — three toggles, at least one always on. */}
+          {q.trim().length > 0 && (
+            <div className="lz-filters">
+              <span className="lz-filters-label">Search in</span>
+              {([['artist', 'Artist'], ['album', 'Album'], ['title', 'Song']] as [Field, string][])
+                .map(([f, label]) => (
+                  <button key={f}
+                    className={`lz-filter${fields.includes(f) ? ' is-on' : ''}`}
+                    title={`Match the words against the ${label.toLowerCase()}`}
+                    onClick={() => toggleField(f)}>{label}</button>
+                ))}
+            </div>
+          )}
+
           {albumView && (
             <div className="lz-panel-head">
               <span className="lz-albhead">
@@ -594,8 +644,13 @@ export default function App() {
             {results.length === 0 && albums.length === 0
               ? <div className="lz-empty">No matches.</div>
               : (() => {
-                    const tiles = results.filter(t => !artFail.has(t.id))
-                    const plain = results.filter(t => artFail.has(t.id))
+                    // Inside an album, every row is a plain line: the cover is
+                    // already at the top of the page, so repeating it on each of
+                    // its own tracks is noise. Elsewhere a song shows as a tile
+                    // until its art fails to load.
+                    const visible = results.slice(0, shown)
+                    const tiles = albumView ? [] : visible.filter(t => !artFail.has(t.id))
+                    const plain = albumView ? visible : visible.filter(t => artFail.has(t.id))
                     const failArt = (id: number) =>
                       setArtFail(prev => { const n = new Set(prev); n.add(id); return n })
                     return <>
@@ -644,7 +699,7 @@ export default function App() {
                       )}
                       {plain.length > 0 && (
                         <div className="lz-sect">
-                          <div className="lz-sect-label">More songs</div>
+                          {!albumView && <div className="lz-sect-label">More songs</div>}
                           <div className="lz-results-wrap">
                           <ul className="lz-results-list">
                             {plain.map(t => (
@@ -668,6 +723,20 @@ export default function App() {
                             ))}
                           </ul>
                           </div>
+                        </div>
+                      )}
+                      {results.length > shown && (
+                        <div className="lz-more">
+                          <button className="lz-btn lz-more-btn"
+                            onClick={() => setShown(n => n + PAGE)}>
+                            Show more — {results.length - shown} to go
+                          </button>
+                        </div>
+                      )}
+                      {capped && results.length <= shown && (
+                        <div className="lz-more lz-more-note">
+                          {total} matches — showing the first {results.length}. Try a more
+                          specific search.
                         </div>
                       )}
                     </>
