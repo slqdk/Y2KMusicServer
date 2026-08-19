@@ -101,6 +101,15 @@ public static class DataPaths
         => Path.Combine(DataDir(cfg), "autodj-feeds.json");
 
     /// <summary>
+    /// Which saved playlist is the jingle playlist, at
+    /// <c>&lt;DataPath&gt;\jingles.json</c>. A designation, not a list of
+    /// tracks — the playlist itself is an ordinary saved playlist. JSON, not the
+    /// database (no-migrations rule).
+    /// </summary>
+    public static string JinglesPath(IConfiguration cfg)
+        => Path.Combine(DataDir(cfg), "jingles.json");
+
+    /// <summary>
     /// Google Cast settings + the remembered speaker allow-list, at
     /// <c>&lt;DataPath&gt;\cast-config.json</c>. JSON, not the database
     /// (no-migrations rule).

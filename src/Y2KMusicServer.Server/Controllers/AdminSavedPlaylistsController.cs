@@ -67,6 +67,11 @@ public sealed class AdminSavedPlaylistsController : ControllerBase
             .Select(p => p.Id)
             .ToHashSet();
 
+        // The jingle playlist is excluded from Auto DJ entirely (AutoDjFeedStore
+        // folds it into the OFF set), so its Feed / Scheduled flags are reported
+        // as false rather than as whatever its own toggles happen to say.
+        var jingleId = JingleStore.PlaylistId(_cfg);
+
         var items = rows.Select(p => new
         {
             p.Id,
@@ -78,10 +83,11 @@ public sealed class AdminSavedPlaylistsController : ControllerBase
             // Feed = "is it feeding right now"; the two flags below say why.
             Feed = !feeds.Off.Contains(p.Id) && (feeds.On.Contains(p.Id) || scheduled.Contains(p.Id)),
             ForcedOff = feeds.Off.Contains(p.Id),
-            ScheduledNow = scheduled.Contains(p.Id)
+            ScheduledNow = p.Id != jingleId && scheduled.Contains(p.Id),
+            IsJingle = p.Id == jingleId
         }).ToList();
 
-        return new { playlists = items, max = SavedPlaylist.MaxPlaylists };
+        return new { playlists = items, max = SavedPlaylist.MaxPlaylists, jinglePlaylistId = jingleId };
     }
 
     /// <summary>
@@ -96,6 +102,27 @@ public sealed class AdminSavedPlaylistsController : ControllerBase
         if (!await db.SavedPlaylists.AnyAsync(p => p.Id == id, ct)) return NotFound();
         AutoDjFeedStore.Set(_cfg, id, value);
         return Ok(new { id, feed = value });
+    }
+
+    /// <summary>
+    /// Designates this playlist as the jingle playlist (<c>value=true</c>), or
+    /// clears the designation (<c>value=false</c>). Only one playlist holds it:
+    /// designating a second moves the badge. Designating also drops the playlist
+    /// out of Auto DJ — the feed store treats it as explicitly off — so a jingle
+    /// can never arrive on its own.
+    /// </summary>
+    [HttpPost("{id:int}/jingles")]
+    public async Task<IActionResult> SetJingle(int id, [FromQuery] bool value, CancellationToken ct)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        if (!await db.SavedPlaylists.AnyAsync(p => p.Id == id, ct)) return NotFound();
+
+        // Clearing only applies when THIS playlist holds the designation, so a
+        // stale tile can't clear a badge that has since moved elsewhere.
+        if (value) JingleStore.Set(_cfg, id);
+        else if (JingleStore.PlaylistId(_cfg) == id) JingleStore.Set(_cfg, null);
+
+        return Ok(new { id, isJingle = JingleStore.PlaylistId(_cfg) == id });
     }
 
     /// <summary>Creates a playlist (cap 14). 422 when full or the name is

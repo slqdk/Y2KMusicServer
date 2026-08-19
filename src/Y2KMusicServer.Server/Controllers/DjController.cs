@@ -55,7 +55,10 @@ public sealed class DjController : ControllerBase
 
         var feeds = AutoDjFeedStore.LoadState(_cfg);
         var now = DateTime.Now;
+        // The jingle playlist gets its own tab; it is never an Auto DJ toggle.
+        var jingleId = JingleStore.PlaylistId(_cfg);
         var playlists = (await _playlist.SavedPlaylistsWithSlotsAsync(ct))
+            .Where(pl => pl.Id != jingleId)
             .Select(pl => new
             {
                 pl.Id,
@@ -154,6 +157,60 @@ public sealed class DjController : ControllerBase
         var ids = body?.PlaylistIds ?? new List<int>();
         await _playlist.SetLiveSelectionAsync(ids, ct);
         return Ok(new { selected = ids, swapInSec = 5 });
+    }
+
+    /// <summary>
+    /// The jingles the DJ can fire: the designated playlist's tracks, in
+    /// playlist order. Empty when no playlist is designated, so the phone can
+    /// show an explanation rather than an empty grid it can't account for.
+    /// </summary>
+    [HttpGet("jingles")]
+    public async Task<object> Jingles(CancellationToken ct)
+    {
+        var jingleId = JingleStore.PlaylistId(_cfg);
+        if (jingleId is not int id)
+            return new { designated = false, name = (string?)null, items = Array.Empty<object>() };
+
+        var (name, tracks) = await _playlist.JingleTracksAsync(id, ct);
+        return new
+        {
+            designated = true,
+            name,
+            items = tracks.Select(t => new { t.Id, t.Title, t.Artist, t.DurationSec }).ToList()
+        };
+    }
+
+    /// <summary>
+    /// Fires a jingle: cue it on Deck B and crossfade immediately — the same
+    /// path as the desktop's Play now, with a Normal crossfade armed so a
+    /// hand-fired jingle never turns into a beat-drop or a bass swap. What was
+    /// playing is abandoned, exactly as Next does; when the jingle ends the
+    /// queue carries on as usual.
+    /// </summary>
+    [HttpPost("jingles/{trackId:int}")]
+    public async Task<IActionResult> FireJingle(int trackId, CancellationToken ct)
+    {
+        var status = _engine.GetStatus();
+        if (status.State != PlaybackEngineState.Playing || status.TrackId == null)
+        {
+            // Nothing on air to mix out of: load it and start.
+            var loaded = await _engine.LoadAsync(trackId, ct);
+            if (loaded != LoadResult.Ok)
+                return UnprocessableEntity(new { ok = false, error = loaded.ToString() });
+            _engine.Play();
+            _log.LogInformation("DJ page started jingle track {TrackId} from stopped.", trackId);
+            return Ok(new { ok = true, started = true });
+        }
+
+        _engine.ArmTransition(Transition.NormalCrossfade);
+        var cue = await _engine.QueueNextAsync(trackId, ct, manual: true);
+        if (cue != QueueResult.Ok)
+            return UnprocessableEntity(new { ok = false, error = cue.ToString() });
+        if (!_engine.CrossfadeNow())
+            return Conflict(new { ok = false, error = "already crossfading" });
+
+        _log.LogInformation("DJ page fired jingle track {TrackId}.", trackId);
+        return Ok(new { ok = true, started = false });
     }
 
     public sealed record DuckSettingsBody(int? LevelPercent, double? FadeSeconds);

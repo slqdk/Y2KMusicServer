@@ -49,15 +49,26 @@ public static class AutoDjFeedStore
     private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
     private static readonly object Gate = new();
 
+    /// <summary>
+    /// The operator's overrides, with the jingle playlist folded in as an
+    /// explicit OFF. Doing it here rather than at each call site means Auto DJ
+    /// top-up, the DJ page and the listener's feed browse all inherit the rule
+    /// from one place: a jingle playlist can never top up the queue, and no
+    /// timeslot can quietly re-enable it. The OFF is virtual — nothing is
+    /// written to autodj-feeds.json — so un-designating restores whatever the
+    /// playlist's own state was.
+    /// </summary>
     public static FeedState LoadState(IConfiguration cfg)
     {
         lock (Gate)
         {
             var f = ReadFileUnlocked(cfg);
+            var off = f.DisabledIds.ToHashSet();
+            if (JingleStore.PlaylistId(cfg) is int jingleId) off.Add(jingleId);
             return new FeedState
             {
                 On = f.PlaylistIds.ToHashSet(),
-                Off = f.DisabledIds.ToHashSet()
+                Off = off
             };
         }
     }

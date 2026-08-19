@@ -253,6 +253,29 @@ public sealed class PlaylistService
     }
 
     /// <summary>
+    /// One saved playlist's name and its tracks in playlist order — the jingle
+    /// grid's source. Kept here rather than in the controller so both consoles
+    /// read the same list through the same query.
+    /// </summary>
+    public async Task<(string? Name, List<Track> Tracks)> JingleTracksAsync(
+        int playlistId, CancellationToken ct = default)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        var name = await db.SavedPlaylists.AsNoTracking()
+            .Where(pl => pl.Id == playlistId)
+            .Select(pl => pl.Name)
+            .FirstOrDefaultAsync(ct);
+        if (name == null) return (null, new List<Track>());
+
+        var tracks = await db.SavedPlaylistTracks.AsNoTracking()
+            .Where(pt => pt.SavedPlaylistId == playlistId && pt.Track != null)
+            .OrderBy(pt => pt.Position)
+            .Select(pt => pt.Track!)
+            .ToListAsync(ct);
+        return (name, tracks);
+    }
+
+    /// <summary>
     /// The entry id the queue has played up to (0 = none). Survives restarts,
     /// so the admin queue can still grey out what already played when nothing
     /// is on the deck.

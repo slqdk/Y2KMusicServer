@@ -42,7 +42,12 @@ export default function PlaylistPanel(
   // Added by, and the remove button.
   const { colgroup, startResize } = useColumnWidths('y2k.cols.playlist', [5, 25, 22, 8, 9, 7, 8, 11, 5])
   // The saved-playlist view has no Mix-in / Added-by: #, Title, Artist, Type, Dur, BPM, LUFS, ✕.
-  const view = useColumnWidths('y2k.cols.savedlist', [5, 30, 25, 7, 8, 8, 9, 5])
+  // NINE widths for NINE columns: the leading checkbox counts. With
+  // table-layout:fixed every <col> is positional, so a short list silently
+  // shifts each width one column left — which is what made the select column
+  // eat the width meant for "#". The stored array is length-checked against the
+  // defaults, so an old 8-wide entry in localStorage is ignored, not misapplied.
+  const view = useColumnWidths('y2k.cols.savedlist', [3, 5, 29, 24, 7, 8, 8, 9, 5])
 
   const [reqs, setReqs] = useState<api.RequestDto[]>([])
   // The queue plus the persisted playhead: after a restart nothing is playing,
@@ -193,6 +198,26 @@ export default function PlaylistPanel(
     })
   }
 
+  // Designating a playlist as the jingle playlist also takes it out of Auto DJ
+  // and off the guest page — both enforced server-side, so the refresh below is
+  // what makes the tile tell the truth.
+  // Fire a jingle: cue on Deck B and crossfade immediately. Same call the phone
+  // makes, so both consoles behave identically.
+  const fire = (trackId: number, title: string | null) =>
+    guard(async () => {
+      await api.fireJingle(trackId)
+      setNote(`Firing “${title ?? 'jingle'}”…`)
+    })
+
+  const toggleJingles = (pl: api.SavedPlaylistDto) =>
+    guard(async () => {
+      await api.setPlaylistJingles(pl.id, !pl.isJingle)
+      await refreshTiles()
+      setNote(pl.isJingle
+        ? `“${pl.name}” is a normal playlist again.`
+        : `“${pl.name}” is now the jingle playlist — fire its tracks from here or /DJAdmin.`)
+    })
+
   const acceptReq = (id: number) =>
     guard(async () => { await api.acceptRequest(id); await refreshReqs(); await refreshList() })
   const dismissReq = (id: number) =>
@@ -317,9 +342,11 @@ export default function PlaylistPanel(
       {/* Saved-playlist tiles. Click = view; right-click = rename / delete /
           priority / activate; the last free slot is the New-playlist tile. */}
       <div className="w-pltiles">
-        {tiles.map(pl => (
+        {/* The jingle playlist always renders last: it isn't part of the
+            rotation, so it shouldn't sit among the playlists that are. */}
+        {[...tiles].sort((a, b) => Number(a.isJingle) - Number(b.isJingle)).map(pl => (
           <div key={pl.id}
-            className={`w-pltile w-raised ${viewing?.id === pl.id ? 'w-viewing' : ''}`}
+            className={`w-pltile w-raised ${viewing?.id === pl.id ? 'w-viewing' : ''}${pl.isJingle ? ' w-pltile-jingle' : ''}`}
             onClick={() => setViewing(v => v?.id === pl.id ? null : pl)}
             onContextMenu={e => openTileMenu(e, pl)}
             style={{ position: 'relative' }}
@@ -329,6 +356,13 @@ export default function PlaylistPanel(
               onClick={e => { e.stopPropagation(); openTileMenu(e, pl) }}>▾</button>
             <div className="w-cat-name">{pl.name}</div>
             <div className="w-cat-count">{pl.trackCount} tracks</div>
+            {/* The jingle playlist has no Auto DJ button at all: it is excluded
+                server-side, so a button here could only lie about it. */}
+            {pl.isJingle ? (
+              <div className="w-tilejingle" title="Jingles — fired by hand from here or the DJ page. Never Auto DJ, never shown to guests.">
+                🔔 Jingles
+              </div>
+            ) : (
             <button
               className={`w-btn w-tilefeed${pl.feed ? ' w-tilefeed-on' : (pl.forcedOff ? ' w-tilefeed-off' : '')}`}
               disabled={busy}
@@ -342,6 +376,7 @@ export default function PlaylistPanel(
               onClick={e => { e.stopPropagation(); toggleFeed(pl) }}>
               {pl.feed ? (pl.scheduledNow ? 'Auto DJ ⏱' : 'Auto DJ ✓') : (pl.forcedOff ? 'Auto DJ ✕' : 'Auto DJ')}
             </button>
+            )}
           </div>
         ))}
         {tiles.length < maxTiles && !naming && (
@@ -416,17 +451,17 @@ export default function PlaylistPanel(
               {view.colgroup}
               <thead>
                 <tr>
-                  <th style={{ width: 26 }} title="Select tracks to move or copy">
+                  <th className="w-selcol" title="Select tracks to move or copy">
                     <input type="checkbox" checked={sel.size > 0 && sel.size === viewItems.length}
                       onChange={selectAllView} disabled={viewItems.length === 0} />
                   </th>
-                  <th className="w-num">#<ColResizer onMouseDown={view.startResize(0)} /></th>
-                  <th>Title<ColResizer onMouseDown={view.startResize(1)} /></th>
-                  <th>Artist<ColResizer onMouseDown={view.startResize(2)} /></th>
-                  <th>Type<ColResizer onMouseDown={view.startResize(3)} /></th>
-                  <th className="w-num">Dur<ColResizer onMouseDown={view.startResize(4)} /></th>
-                  <th className="w-num">BPM<ColResizer onMouseDown={view.startResize(5)} /></th>
-                  <th className="w-num">LUFS<ColResizer onMouseDown={view.startResize(6)} /></th>
+                  <th className="w-num">#<ColResizer onMouseDown={view.startResize(1)} /></th>
+                  <th>Title<ColResizer onMouseDown={view.startResize(2)} /></th>
+                  <th>Artist<ColResizer onMouseDown={view.startResize(3)} /></th>
+                  <th>Type<ColResizer onMouseDown={view.startResize(4)} /></th>
+                  <th className="w-num">Dur<ColResizer onMouseDown={view.startResize(5)} /></th>
+                  <th className="w-num">BPM<ColResizer onMouseDown={view.startResize(6)} /></th>
+                  <th className="w-num">LUFS<ColResizer onMouseDown={view.startResize(7)} /></th>
                   <th></th>
                 </tr>
               </thead>
@@ -434,7 +469,7 @@ export default function PlaylistPanel(
                 {viewItems.map(t => (
                   <tr key={t.entryId} className={sel.has(t.entryId) ? 'w-rowsel' : ''}
                     onClick={() => toggleSel(t.entryId)}>
-                    <td onClick={e => e.stopPropagation()}>
+                    <td className="w-selcol" onClick={e => e.stopPropagation()}>
                       <input type="checkbox" checked={sel.has(t.entryId)}
                         onChange={() => toggleSel(t.entryId)} />
                     </td>
@@ -446,6 +481,11 @@ export default function PlaylistPanel(
                     <td className="w-num">{t.bpm != null ? Math.round(t.bpm) : '---'}</td>
                     <td className="w-num">{t.lufs != null ? t.lufs.toFixed(1) : '---'}</td>
                     <td className="w-rowbtns">
+                      {viewing?.isJingle && (
+                        <button className="w-btn w-firejingle" disabled={busy}
+                          title="Fire this jingle now — crossfades straight into it"
+                          onClick={e => { e.stopPropagation(); fire(t.trackId, t.title) }}>▶</button>
+                      )}
                       <button className="w-btn" disabled={busy} title="Remove from this playlist"
                         onClick={() => removeViewTrack(t.entryId)}>✕</button>
                     </td>
@@ -578,6 +618,11 @@ export default function PlaylistPanel(
           <li className="w-ctxitem" role="menuitem"
             onClick={() => { toggleFeed(tileMenu.pl); setTileMenu(null) }}>
             {tileMenu.pl.feed ? '✓ Auto DJ uses this playlist' : 'Let Auto DJ use this playlist'}
+          </li>
+          <li className="w-ctxitem" role="menuitem"
+            title="Reserve this playlist for hand-fired jingles: out of Auto DJ, off the guest page, fired from here or /DJAdmin"
+            onClick={() => { toggleJingles(tileMenu.pl); setTileMenu(null) }}>
+            {tileMenu.pl.isJingle ? '✓ Jingle playlist (click to release)' : '🔔 Use as the jingle playlist'}
           </li>
           <li className="w-ctxitem" role="menuitem"
             onClick={() => { activate(tileMenu.pl); setTileMenu(null) }}>▶ Activate (replace queue now)</li>

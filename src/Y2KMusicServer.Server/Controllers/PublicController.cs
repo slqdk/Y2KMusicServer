@@ -372,7 +372,13 @@ public sealed class PublicController : ControllerBase
     {
         await using var db = await _dbf.CreateDbContextAsync(ct);
         var show = (await db.Settings.AsNoTracking().FirstOrDefaultAsync(ct))?.ShowWebCategories ?? false;
+        // The jingle playlist is the DJ's, not the room's: it never appears in
+        // the rail, so a guest can't browse or select it. Its TRACKS stay
+        // ordinary library rows and remain findable by search — only the
+        // playlist is reserved.
+        var jingleId = JingleStore.PlaylistId(_cfg);
         var playlists = await db.SavedPlaylists.AsNoTracking()
+            .Where(p => jingleId == null || p.Id != jingleId)
             .OrderBy(p => p.TileOrder).ThenBy(p => p.Name)
             .Select(p => new { id = p.Id, name = p.Name, count = p.Tracks.Count })
             .ToListAsync(ct);

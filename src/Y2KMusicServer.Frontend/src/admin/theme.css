@@ -712,3 +712,18 @@ button.w-btn.w-tilefeed-off { background: #E8C6C6; }
   box-shadow: var(--w-input-shadow, none);
   padding: 2px 4px;
 }
+
+/* Selection column: the checkbox sits centred in a hairline-narrow cell rather
+   than being padded out to a text column's width. */
+.w-selcol { text-align: center; padding-left: 2px; padding-right: 2px; }
+.w-selcol input[type="checkbox"] { margin: 0; }
+
+/* Jingle playlist: reserved for the DJ, so its tile reads differently from the
+   rotation tiles around it and carries a badge instead of an Auto DJ button. */
+.w-pltile-jingle { background: var(--w-jingle-bg, #FFF3D6); }
+.w-tilejingle {
+  display: block; text-align: center; font-size: 11px; font-weight: bold;
+  padding: 2px 6px; margin-top: 2px;
+  color: #7a5600; background: #FFE7AE; border: 1px solid #D9B15E;
+}
+.w-firejingle { font-weight: bold; }

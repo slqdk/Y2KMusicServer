@@ -25,6 +25,7 @@ export interface SavedPlaylistDto {
   feed: boolean          // feeding right now (toggle or timeslot)
   forcedOff: boolean     // operator switched it off; overrides the timeslot
   scheduledNow: boolean  // a timeslot covers this moment
+  isJingle: boolean      // the DJ's jingle playlist: never Auto DJ, never listed for guests
 }
 
 export interface GenreRule { raw: string; substring: boolean; bucket: string }
@@ -211,7 +212,8 @@ export const setGenreOverride = (trackId: number, value: string | null) =>
 
 // ── Saved playlists (tiles above the live queue) ────────────────────────
 export const getSavedPlaylists = () =>
-  req<{ playlists: SavedPlaylistDto[]; max: number }>('/api/admin/saved-playlists')
+  req<{ playlists: SavedPlaylistDto[]; max: number; jinglePlaylistId: number | null }>(
+    '/api/admin/saved-playlists')
 export const createSavedPlaylist = (name: string) =>
   req<{ id: number; name: string }>('/api/admin/saved-playlists',
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
@@ -278,6 +280,13 @@ export const purgeQueuedFromPlaylist = (id: number) =>
   req<{ removed: number; playlist: string }>(`/api/admin/saved-playlists/${id}/purge-queued`, { method: 'POST' })
 export const setPlaylistFeed = (id: number, value: boolean) =>
   req<{ id: number; feed: boolean }>(`/api/admin/saved-playlists/${id}/feed?value=${value}`, { method: 'POST' })
+// Designate (or release) the jingle playlist. Only one holds it at a time.
+export const setPlaylistJingles = (id: number, value: boolean) =>
+  req<{ id: number; isJingle: boolean }>(
+    `/api/admin/saved-playlists/${id}/jingles?value=${value}`, { method: 'POST' })
+// Fire a jingle: cue on Deck B + crossfade now, Normal transition armed.
+export const fireJingle = (trackId: number) =>
+  req<{ ok: boolean; started: boolean }>(`/api/dj/jingles/${trackId}`, { method: 'POST' })
 export const exportSavedPlaylistUrl = (id: number) =>
   `/api/admin/saved-playlists/${id}/export`
 export const importSavedPlaylist = (payload: unknown) =>
