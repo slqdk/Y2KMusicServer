@@ -154,7 +154,6 @@ export default function App() {
   // past a few hundred rows.
   const [shown, setShown] = useState(PAGE)
   const [albumView, setAlbumView] = useState<AlbumHit | null>(null)
-  const [artFail, setArtFail] = useState<Set<number>>(new Set())
   // "New songs" browse: the last 50 tracks the library learned about, from a
   // scan or a YouTube download alike. A mode of its own — it ignores the search
   // box and any playlist selection while it is on.
@@ -313,7 +312,6 @@ export default function App() {
           setTotal(d.total ?? d.items.length)
           setCapped(d.capped ?? false)
           setShown(PAGE)   // every new search starts from the top chunk
-          setArtFail(new Set())
         })
         .catch(() => { setResults([]); setAlbums([]); setFallbackQ(null) })
     }, 500)
@@ -699,15 +697,12 @@ export default function App() {
             {results.length === 0 && albums.length === 0
               ? <div className="lz-empty">No matches.</div>
               : (() => {
-                    // Inside an album, every row is a plain line: the cover is
-                    // already at the top of the page, so repeating it on each of
-                    // its own tracks is noise. Elsewhere a song shows as a tile
-                    // until its art fails to load.
+                    // Cover art belongs to the ALBUM row at the top and nowhere
+                    // else. A grid of song tiles fits about a dozen tracks on a
+                    // screen and makes every one of them a picture to decode; the
+                    // same space as text rows holds three times as many and reads
+                    // at a glance, which is what a guest hunting for a song wants.
                     const visible = results.slice(0, shown)
-                    const tiles = albumView ? [] : visible.filter(t => !artFail.has(t.id))
-                    const plain = albumView ? visible : visible.filter(t => artFail.has(t.id))
-                    const failArt = (id: number) =>
-                      setArtFail(prev => { const n = new Set(prev); n.add(id); return n })
                     return <>
                       {fallbackQ && (
                         <div className="lz-fallback">
@@ -728,36 +723,12 @@ export default function App() {
                           </div>
                         </div>
                       )}
-                      {tiles.length > 0 && (
+                      {visible.length > 0 && (
                         <div className="lz-sect">
-                          {albums.length > 0 && <div className="lz-sect-label">Songs</div>}
-                          <div className="lz-grid">
-                            {tiles.map(t => (
-                              <div key={t.id} className="lz-tile">
-                                <img className="lz-tile-art" src={`/api/albumart?trackId=${t.id}`} alt=""
-                                  loading="lazy" onError={() => failArt(t.id)} />
-                                {(() => {
-                                  const d = splitArtistTitle(t.artist, t.title)
-                                  return <>
-                                    {d.artist && <div className="lz-tile-artist">{d.artist}</div>}
-                                    <div className="lz-tile-title">{d.title}</div>
-                                  </>
-                                })()}
-                                <div className="lz-tile-foot">
-                                  <span className="lz-tile-dur">{fmt(t.durationSec)}</span>
-                                  {!cd && <button className="lz-btn lz-req-btn" onClick={() => requestTrack(t)} title="Request this song">Request</button>}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {plain.length > 0 && (
-                        <div className="lz-sect">
-                          {!albumView && <div className="lz-sect-label">More songs</div>}
+                          {albums.length > 0 && !albumView && <div className="lz-sect-label">Songs</div>}
                           <div className="lz-results-wrap">
                           <ul className="lz-results-list">
-                            {plain.map(t => (
+                            {visible.map(t => (
                               <li key={t.id} className="lz-result lz-result-icon">
                                 <span className="lz-mini-icon" aria-hidden="true">♪</span>
                                 <div className="lz-result-main">
