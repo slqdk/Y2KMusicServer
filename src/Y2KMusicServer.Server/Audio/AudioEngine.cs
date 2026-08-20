@@ -108,6 +108,11 @@ public sealed class AudioEngine
     // than a click. _pauseAtSilence pauses the transport once the ramp lands on
     // zero (the "fade then pause" button).
     private volatile float _duckGain = 1f;
+
+    // The DJ's live trim (0.1–1.0 of master) and the duck level last asked for.
+    // Both feed TargetGain_Locked; neither touches the Settings row.
+    private double _trim = 1.0;
+    private double _duckLevel = 1.0;
     private float _duckTarget = 1f;
     private float _duckStep = 1f;
     private bool _pauseAtSilence;
@@ -500,10 +505,46 @@ public sealed class AudioEngine
         lock (_gate)
         {
             _duckActive = on;
+            _duckLevel = Math.Clamp(level, 0, 1);
             if (_fadePaused && on) return;          // already silent; nothing to duck
-            RampTo_Locked(on ? (float)Math.Clamp(level, 0, 1) : 1f, fadeSec, pauseAtSilence: false);
+            RampTo_Locked(TargetGain_Locked(), fadeSec, pauseAtSilence: false);
         }
     }
+
+    /// <summary>
+    /// The DJ's live volume trim: a fraction of the master volume, 10–100%,
+    /// applied to the output rather than to the Settings row.
+    ///
+    /// It is deliberately NOT the master setting. Master decides each deck's
+    /// build volume together with loudness normalisation, so changing it only
+    /// reaches the next track — useless for turning the room down mid-song. The
+    /// trim rides the same post-fader gain the talk-over duck uses, so it takes
+    /// effect immediately and ramps instead of stepping.
+    ///
+    /// The floor is 10%: this control is for reading the room, not for muting.
+    /// Silence has its own button (fade-pause) that also stops the transport.
+    /// </summary>
+    public void SetTrim(double trim, double fadeSec = 0.6)
+    {
+        lock (_gate)
+        {
+            _trim = Math.Clamp(trim, 0.1, 1.0);
+            if (_fadePaused) return;                // held silent; applies on release
+            RampTo_Locked(TargetGain_Locked(), fadeSec, pauseAtSilence: false);
+        }
+    }
+
+    /// <summary>The trim as a 0.1–1.0 fraction of master.</summary>
+    public double Trim { get { lock (_gate) return _trim; } }
+
+    /// <summary>
+    /// Where the post-fader gain should sit right now. Duck MULTIPLIES the trim
+    /// rather than replacing it, so talking over a room already turned down to
+    /// 50% ducks from there instead of jumping up to full and back.
+    /// Caller holds <see cref="_gate"/>.
+    /// </summary>
+    private float TargetGain_Locked()
+        => (float)Math.Clamp(_duckActive ? _trim * _duckLevel : _trim, 0.0, 1.0);
 
     /// <summary>
     /// Fading pause: ramp to silence over <paramref name="fadeSec"/> and pause
@@ -522,9 +563,10 @@ public sealed class AudioEngine
             {
                 _pauseAtSilence = false;
                 if (_state == PlaybackEngineState.Paused) Play();
-                // Back to whatever the duck says: still held down if the DJ is
-                // talking, otherwise full level.
-                RampTo_Locked(1f, fadeSec, pauseAtSilence: false);
+                // Back to whatever the duck and the trim say between them: still
+                // held down if the DJ is talking, otherwise the trim level —
+                // never a jump to full, which would undo a turned-down room.
+                RampTo_Locked(TargetGain_Locked(), fadeSec, pauseAtSilence: false);
             }
         }
     }

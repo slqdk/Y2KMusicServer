@@ -727,3 +727,12 @@ button.w-btn.w-tilefeed-off { background: #E8C6C6; }
   color: #7a5600; background: #FFE7AE; border: 1px solid #D9B15E;
 }
 .w-firejingle { font-weight: bold; }
+
+
+/* Auto DJ, third state: following the schedule. Neutral blue so it reads as
+   neither the green "on" nor the pink "off" — and with a ✓ on the label when a
+   timeslot is actually covering right now. */
+.w-tilefeed-sched {
+  background: var(--w-sched-bg, #DCE7F5) !important;
+  border-color: var(--w-sched-edge, #8FAFD4);
+}

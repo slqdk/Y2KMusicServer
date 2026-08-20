@@ -83,6 +83,9 @@ public sealed class AdminSavedPlaylistsController : ControllerBase
             // Feed = "is it feeding right now"; the two flags below say why.
             Feed = !feeds.Off.Contains(p.Id) && (feeds.On.Contains(p.Id) || scheduled.Contains(p.Id)),
             ForcedOff = feeds.Off.Contains(p.Id),
+            // Explicitly on, as opposed to on because a timeslot covers now —
+            // the tile can't cycle correctly without telling those apart.
+            ExplicitOn = feeds.On.Contains(p.Id),
             ScheduledNow = p.Id != jingleId && scheduled.Contains(p.Id),
             IsJingle = p.Id == jingleId
         }).ToList();
@@ -95,13 +98,22 @@ public sealed class AdminSavedPlaylistsController : ControllerBase
     /// Independent of the schedule: Auto DJ uses toggled-on playlists PLUS any
     /// whose timeslot covers the moment.
     /// </summary>
+    /// <summary>
+    /// Sets a playlist's Auto DJ state. THREE states, not two:
+    /// <c>value=true</c> forces it on, <c>value=false</c> forces it off (over any
+    /// timeslot), and OMITTING value clears the override so its schedule decides
+    /// again. Omitting is the neutral state the tile cycles through.
+    /// </summary>
     [HttpPost("{id:int}/feed")]
-    public async Task<IActionResult> SetFeed(int id, [FromQuery] bool value, CancellationToken ct)
+    public async Task<IActionResult> SetFeed(int id, [FromQuery] bool? value, CancellationToken ct)
     {
         await using var db = await _dbf.CreateDbContextAsync(ct);
         if (!await db.SavedPlaylists.AnyAsync(p => p.Id == id, ct)) return NotFound();
-        AutoDjFeedStore.Set(_cfg, id, value);
-        return Ok(new { id, feed = value });
+
+        if (value is bool v) AutoDjFeedStore.Set(_cfg, id, v);
+        else AutoDjFeedStore.ClearOne(_cfg, id);
+
+        return Ok(new { id, feed = value, scheduled = value == null });
     }
 
     /// <summary>

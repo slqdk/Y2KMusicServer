@@ -25,6 +25,7 @@ export interface SavedPlaylistDto {
   feed: boolean          // feeding right now (toggle or timeslot)
   forcedOff: boolean     // operator switched it off; overrides the timeslot
   scheduledNow: boolean  // a timeslot covers this moment
+  explicitOn: boolean    // switched on by hand, as opposed to on via a timeslot
   isJingle: boolean      // the DJ's jingle playlist: never Auto DJ, never listed for guests
 }
 
@@ -295,8 +296,11 @@ export const moveSavedPlaylistTracks = (id: number, entryIds: number[], targetPl
   })
 export const purgeQueuedFromPlaylist = (id: number) =>
   req<{ removed: number; playlist: string }>(`/api/admin/saved-playlists/${id}/purge-queued`, { method: 'POST' })
-export const setPlaylistFeed = (id: number, value: boolean) =>
-  req<{ id: number; feed: boolean }>(`/api/admin/saved-playlists/${id}/feed?value=${value}`, { method: 'POST' })
+// value null = clear the override, so the playlist's timeslots decide again.
+export const setPlaylistFeed = (id: number, value: boolean | null) =>
+  req<{ id: number; feed: boolean | null; scheduled: boolean }>(
+    `/api/admin/saved-playlists/${id}/feed${value === null ? '' : `?value=${value}`}`,
+    { method: 'POST' })
 // Designate (or release) the jingle playlist. Only one holds it at a time.
 export const setPlaylistJingles = (id: number, value: boolean) =>
   req<{ id: number; isJingle: boolean }>(

@@ -95,6 +95,25 @@ public static class AutoDjFeedStore
     }
 
     /// <summary>
+    /// Forgets ONE playlist's override, returning it to the neutral state where
+    /// its timeslots decide. This is the third state the rule has always had —
+    /// <see cref="FeedState.IsActive"/> falls through to the schedule for any id
+    /// in neither list — but which nothing could reach once a playlist had been
+    /// switched on or off by hand, leaving Schedule… with no effect on it.
+    /// </summary>
+    public static FeedState ClearOne(IConfiguration cfg, int playlistId)
+    {
+        lock (Gate)
+        {
+            var f = ReadFileUnlocked(cfg);
+            f.PlaylistIds.Remove(playlistId);
+            f.DisabledIds.Remove(playlistId);
+            WriteUnlocked(cfg, f);
+            return new FeedState { On = f.PlaylistIds.ToHashSet(), Off = f.DisabledIds.ToHashSet() };
+        }
+    }
+
+    /// <summary>
     /// Forgets every override, so the timeslots decide again — what an empty
     /// live selection means.
     /// </summary>

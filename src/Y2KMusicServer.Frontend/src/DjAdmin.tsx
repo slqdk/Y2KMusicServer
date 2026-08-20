@@ -37,6 +37,8 @@ type Jingles = { designated: boolean; name: string | null; items: JingleRow[] }
 type Tab = 'control' | 'playlist' | 'jingles'
 
 type DjState = {
+  /** Live volume trim, 10–100% of the master setting. */
+  trimPercent?: number
   playing: boolean
   trackId: number | null
   title: string | null
@@ -117,6 +119,11 @@ export default function DjAdmin() {
   const [ytUrl, setYtUrl] = useState('')
   const [yt, setYt] = useState<YtDownloads | null>(null)
   const [jingles, setJingles] = useState<Jingles | null>(null)
+  // Volume trim. The slider is a PROPOSAL until Set is held: it snaps back to
+  // the live value after 5 s of no commit, so a slider nudged in a pocket can
+  // never quietly become the room's volume.
+  const [trimSlider, setTrimSlider] = useState<number | null>(null)
+  const trimTimer = useRef<number | undefined>(undefined)
   // The open screen survives a reload — a DJ who refreshes mid-set shouldn't
   // land back on a tab they weren't using.
   const [tab, setTab] = useState<Tab>(() => {
@@ -191,6 +198,28 @@ export default function DjAdmin() {
     void refresh()
   }, [post, refresh])
 
+  const liveTrim = st?.trimPercent ?? 100
+  const proposed = trimSlider ?? liveTrim
+  const trimDirty = trimSlider != null && trimSlider !== liveTrim
+
+  // Any move restarts the 5 s revert countdown.
+  const nudgeTrim = (v: number) => {
+    setTrimSlider(v)
+    window.clearTimeout(trimTimer.current)
+    trimTimer.current = window.setTimeout(() => setTrimSlider(null), 5000)
+  }
+
+  const commitTrim = useCallback(async () => {
+    if (trimSlider == null) return
+    window.clearTimeout(trimTimer.current)
+    const ok = await post('/api/dj/trim', { percent: trimSlider })
+    if (ok) setMsg(`Volume ${trimSlider}% of master.`)
+    setTrimSlider(null)
+    void refresh()
+  }, [trimSlider, post, refresh])
+
+  useEffect(() => () => window.clearTimeout(trimTimer.current), [])
+
   const np = split(st?.artist ?? null, st?.title ?? null)
   const gainPct = Math.round((st?.duckGain ?? 1) * 100)
 
@@ -224,6 +253,29 @@ export default function DjAdmin() {
       </section>
 
       {tab === 'control' && (<>
+      {/* Volume: propose on the slider, commit with the held button. The label
+          always states the LIVE value alongside the proposal, so there is no
+          moment where the screen implies a volume the room isn't at. */}
+      <section className="dj-sect">
+        <h2 className="dj-sect-head">Volume</h2>
+        <div className="dj-volrow">
+          <input
+            className="dj-volslider"
+            type="range" min={10} max={100} step={5}
+            value={proposed}
+            onChange={e => nudgeTrim(Number(e.target.value))}
+          />
+          <span className={`dj-volval${trimDirty ? ' is-dirty' : ''}`}>{proposed}%</span>
+        </div>
+        <HoldButton
+          className="dj-volset"
+          label={trimDirty ? `▲ Set ${proposed}%` : `Volume ${liveTrim}%`}
+          sub={trimDirty ? 'hold ½s · reverts in 5s if not set' : 'of the master setting'}
+          disabled={!trimDirty}
+          onFire={() => { void commitTrim() }}
+        />
+      </section>
+
       {/* Talk-over latches: hold to duck, hold again to bring the music back —
           so the DJ can put the phone in a pocket while talking. */}
       <HoldButton

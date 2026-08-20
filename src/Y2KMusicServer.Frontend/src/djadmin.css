@@ -155,3 +155,15 @@
 }
 .dj-jfire .dj-btn-label { font-size: .95rem; font-weight: 800; }
 .dj-jfire .dj-btn-fill { background: linear-gradient(90deg, #7a4a1f, #d08a3c); }
+
+/* Volume trim: slider proposes, held button commits. The value goes amber while
+   it differs from what the room is actually at. */
+.dj-volrow { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+.dj-volslider { flex: 1; height: 38px; accent-color: #3f7fb8; }
+.dj-volval {
+  min-width: 62px; text-align: right; font-size: 1.15rem; font-weight: 700;
+  color: #e8eef7; font-variant-numeric: tabular-nums;
+}
+.dj-volval.is-dirty { color: #e0a851; }
+.dj-volset { min-height: 62px; }
+.dj-volset:disabled { opacity: .55; }

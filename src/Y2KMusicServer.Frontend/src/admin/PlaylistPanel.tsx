@@ -166,8 +166,19 @@ export default function PlaylistPanel(
       await refreshList()
     })
 
+  // Three states, cycled in the order they're most often wanted:
+  //   on (✓)  →  off (✕)  →  schedule (⏱)  →  on …
+  // The schedule state is the neutral one — no override stored — and it is the
+  // ONLY state in which a playlist's timeslots have any effect. Without it in
+  // the cycle, Schedule… was dead for every playlist ever clicked.
+  const nextFeedState = (pl: api.SavedPlaylistDto): boolean | null =>
+    pl.explicitOn ? false : pl.forcedOff ? null : true
+
   const toggleFeed = (pl: api.SavedPlaylistDto) =>
-    guard(async () => { await api.setPlaylistFeed(pl.id, !pl.feed); await refreshTiles() })
+    guard(async () => { await api.setPlaylistFeed(pl.id, nextFeedState(pl)); await refreshTiles() })
+
+  const setFeedState = (pl: api.SavedPlaylistDto, value: boolean | null) =>
+    guard(async () => { await api.setPlaylistFeed(pl.id, value); await refreshTiles() })
 
   // Multi-select inside a saved playlist, for moving tracks between playlists.
   // Keyed on entryId (a track can sit in several playlists, entries can't).
@@ -364,17 +375,22 @@ export default function PlaylistPanel(
               </div>
             ) : (
             <button
-              className={`w-btn w-tilefeed${pl.feed ? ' w-tilefeed-on' : (pl.forcedOff ? ' w-tilefeed-off' : '')}`}
+              className={'w-btn w-tilefeed'
+                + (pl.explicitOn ? ' w-tilefeed-on'
+                  : pl.forcedOff ? ' w-tilefeed-off'
+                    : pl.feed ? ' w-tilefeed-on w-tilefeed-sched' : ' w-tilefeed-sched')}
               disabled={busy}
-              title={pl.feed
-                ? (pl.scheduledNow
-                  ? 'Feeding Auto DJ (a timeslot covers now) — click to switch it off anyway'
-                  : 'Feeding Auto DJ — click to switch it off')
-                : (pl.forcedOff
-                  ? 'Switched off by you — timeslots are ignored while it is off'
-                  : 'Not feeding right now — click to switch it on')}
+              title={pl.explicitOn
+                ? 'On: feeding Auto DJ whatever the schedule says — click for Off'
+                : pl.forcedOff
+                  ? 'Off: not feeding, and timeslots are ignored — click to follow the schedule'
+                  : pl.feed
+                    ? 'Schedule: a timeslot covers now, so it is feeding — click for On'
+                    : 'Schedule: no timeslot covers now, so it is not feeding — click for On'}
               onClick={e => { e.stopPropagation(); toggleFeed(pl) }}>
-              {pl.feed ? (pl.scheduledNow ? 'Auto DJ ⏱' : 'Auto DJ ✓') : (pl.forcedOff ? 'Auto DJ ✕' : 'Auto DJ')}
+              {pl.explicitOn ? 'Auto DJ ✓'
+                : pl.forcedOff ? 'Auto DJ ✕'
+                  : pl.feed ? 'Auto DJ ⏱ ✓' : 'Auto DJ ⏱'}
             </button>
             )}
           </div>
@@ -615,9 +631,22 @@ export default function PlaylistPanel(
       {tileMenu && (
         <ul className="w-ctxmenu" role="menu" style={{ left: tileMenu.x, top: tileMenu.y, minWidth: MENU_W }}
           onContextMenu={e => e.preventDefault()}>
+          {/* The three Auto DJ states, named rather than cycled — the tile button
+              cycles for speed, the menu is where you go to be sure. */}
           <li className="w-ctxitem" role="menuitem"
-            onClick={() => { toggleFeed(tileMenu.pl); setTileMenu(null) }}>
-            {tileMenu.pl.feed ? '✓ Auto DJ uses this playlist' : 'Let Auto DJ use this playlist'}
+            title="Feed Auto DJ from this playlist regardless of its timeslots"
+            onClick={() => { setFeedState(tileMenu.pl, true); setTileMenu(null) }}>
+            {tileMenu.pl.explicitOn ? '✓ ' : ''}Auto DJ uses this playlist
+          </li>
+          <li className="w-ctxitem" role="menuitem"
+            title="Never feed Auto DJ from this playlist — timeslots are ignored while it is off"
+            onClick={() => { setFeedState(tileMenu.pl, false); setTileMenu(null) }}>
+            {tileMenu.pl.forcedOff ? '✓ ' : ''}Auto DJ never uses this playlist
+          </li>
+          <li className="w-ctxitem" role="menuitem"
+            title="Follow this playlist's timeslots — the only state in which Schedule… has any effect"
+            onClick={() => { setFeedState(tileMenu.pl, null); setTileMenu(null) }}>
+            {!tileMenu.pl.explicitOn && !tileMenu.pl.forcedOff ? '✓ ' : ''}⏱ Auto DJ follows the schedule
           </li>
           <li className="w-ctxitem" role="menuitem"
             title="Reserve this playlist for hand-fired jingles: out of Auto DJ, off the guest page, fired from here or /DJAdmin"

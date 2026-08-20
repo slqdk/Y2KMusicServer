@@ -82,6 +82,7 @@ public sealed class DjController : ControllerBase
             ducked,
             fadePaused,
             duckLevelPercent = audio.DuckLevelPercent,
+            trimPercent = (int)Math.Round(_engine.Trim * 100),
             fadeSeconds = audio.FadeSeconds,
             upcoming,
             playlists
@@ -240,6 +241,23 @@ public sealed class DjController : ControllerBase
 
         _log.LogInformation("DJ page queued jingle track {TrackId}.", trackId);
         return Ok(new { ok = true });
+    }
+
+    public sealed record TrimBody(int Percent);
+
+    /// <summary>
+    /// Sets the live volume trim: 10–100% of the master volume, applied to the
+    /// output immediately (ramped, not stepped). Master itself is untouched, so
+    /// nothing here changes what the next track is built at.
+    /// </summary>
+    [HttpPost("trim")]
+    public IActionResult Trim([FromBody] TrimBody? body)
+    {
+        int pct = Math.Clamp(body?.Percent ?? 100, 10, 100);
+        var audio = AudioConfigStore.Load(_cfg);
+        _engine.SetTrim(pct / 100.0, Math.Max(0.2, audio.FadeSeconds / 2.0));
+        _log.LogInformation("DJ page set volume trim to {Percent}% of master.", pct);
+        return Ok(new { trimPercent = pct });
     }
 
     public sealed record DuckSettingsBody(int? LevelPercent, double? FadeSeconds);
