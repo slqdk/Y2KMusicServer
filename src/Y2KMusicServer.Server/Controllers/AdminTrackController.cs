@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Y2KMusicServer.Server.Audio;
 using Y2KMusicServer.Server.Data;
+using Y2KMusicServer.Server.Data.Entities;   // Settings, for the preview level
 
 namespace Y2KMusicServer.Server.Controllers;
 
@@ -282,10 +283,11 @@ public sealed class AdminTrackController : ControllerBase
                 ?? new Settings { Volume = 80 };
 
         float deckVolume = AudioEngine.DeckVolumeFor(t.LufsIntegrated, s);
-        double? wantedDb = s.NormalizeEnabled && t.LufsIntegrated is double lu && lu != 0
-            ? s.TargetLufs - lu
-            : null;
-        double? appliedDb = wantedDb is double w ? Math.Clamp(w, -12.0, 12.0) : null;
+
+        double lufs = t.LufsIntegrated ?? 0;
+        bool measured = s.NormalizeEnabled && t.LufsIntegrated.HasValue && lufs != 0;
+        double? wantedDb = measured ? s.TargetLufs - lufs : null;
+        double? appliedDb = wantedDb.HasValue ? Math.Clamp(wantedDb.Value, -12.0, 12.0) : null;
 
         return Ok(new
         {
@@ -297,7 +299,7 @@ public sealed class AdminTrackController : ControllerBase
             normalizeEnabled = s.NormalizeEnabled,
             wantedDb,
             appliedDb,
-            clamped = wantedDb is double w2 && Math.Abs(w2) > 12.0,
+            clamped = wantedDb.HasValue && Math.Abs(wantedDb.Value) > 12.0,
             ceilingHit = appliedDb is > 0 && deckVolume >= 0.999f
         });
     }

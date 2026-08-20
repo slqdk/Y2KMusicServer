@@ -844,7 +844,7 @@ public sealed class AudioEngine
             // beat of silence. So the trigger sits at A's end instead of a fade
             // length before it, and the fade is zeroed — StartCrossfade turns
             // this into the gap rather than a ramp.
-            if (_deckA.IsJingle && !deckB.IsJingle)
+            if (_deckA?.IsJingle == true && !deckB.IsJingle)
             {
                 trigger = Math.Max(0, endA - 0.05);
                 fadeSec = 0;
@@ -1065,7 +1065,7 @@ public sealed class AudioEngine
                         _gapTicksLeft--;
                         if (_gapTicksLeft > 0)
                         {
-                            _deckA.Vol.Volume = 0f;
+                            if (_deckA != null) _deckA.Vol.Volume = 0f;
                             frozen = true;
                         }
                         else
@@ -1599,7 +1599,7 @@ public sealed class AudioEngine
         // down so nothing can rewrite the volumes underneath it.
         _gapWaiting = false;
         _gapTicksLeft = 0;
-        if (_deckA.IsJingle && !_deckB.IsJingle)
+        if (_deckA?.IsJingle == true && _deckB?.IsJingle == false)
         {
             _gapWaiting = true;
             _gapTicksLeft = Math.Max(1, (int)Math.Round(JingleGapSec * 1000.0 / TickMs));
