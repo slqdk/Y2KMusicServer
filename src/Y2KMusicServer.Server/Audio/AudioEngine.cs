@@ -1065,7 +1065,12 @@ public sealed class AudioEngine
                         _gapTicksLeft--;
                         if (_gapTicksLeft > 0)
                         {
-                            if (_deckA != null) _deckA.Vol.Volume = 0f;
+                            // Null-forgiving rather than a null CHECK: testing
+                            // _deckA here marks it maybe-null for the rest of the
+                            // block, which lights up every later dereference in
+                            // this tick. The surrounding crossfade code already
+                            // guarantees both decks exist.
+                            _deckA!.Vol.Volume = 0f;
                             frozen = true;
                         }
                         else

@@ -880,8 +880,10 @@ public sealed class PlaylistService
                     // rather than from the whole playlist. The order is what
                     // makes the sequence different every pass; scoring then picks
                     // among these few so tempo and artist spacing still apply.
-                    var window = BagWindowFor(pl, members, rng, Eligible);
-                    var pool = window.Count > 0 ? window : members;
+                    // Named bagWindow, not window: the exclusion window above is
+                    // already called that in this method's outer scope.
+                    var bagWindow = BagWindowFor(pl, members, rng, Eligible);
+                    var pool = bagWindow.Count > 0 ? bagWindow : members;
 
                     var scored = new List<(Track t, double s)>();
                     foreach (var t in pool)
