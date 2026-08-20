@@ -51,6 +51,20 @@ public sealed class PlaylistService
     // a shuffle bag alone treats "heard an hour ago" and "never heard" the same.
     private readonly Dictionary<int, DateTime> _lastPlayedUtc = new();
 
+    // The running order each playlist is being dealt in, and the previous pass's
+    // order kept to check the next shuffle against.
+    private readonly Dictionary<int, List<int>> _bagOrder = new();
+    private readonly Dictionary<int, List<int>> _prevBagOrder = new();
+
+    /// <summary>How many tracks deep into the running order a pick may look.
+    /// The order decides the SEQUENCE; the window is what still lets tempo,
+    /// artist spacing and freshness choose among near neighbours, so mixing
+    /// quality survives without the scoring dictating the order.</summary>
+    private const int BagWindow = 6;
+
+    /// <summary>Attempts to find a shuffle far enough from the previous pass.</summary>
+    private const int ShuffleTries = 12;
+
     public PlaylistService(IDbContextFactory<Y2KDbContext> dbf, ILogger<PlaylistService> log, IConfiguration cfg)
     {
         _dbf = dbf;
@@ -67,6 +81,8 @@ public sealed class PlaylistService
             _recentlyPlayed.AddRange(state.RecentlyPlayed);
             _recentlyPlayedArtists.AddRange(state.RecentlyPlayedArtists);
             foreach (var (id, when) in state.LastPlayedUtc) _lastPlayedUtc[id] = when;
+            foreach (var (plId, order) in state.BagOrderByPlaylist) _bagOrder[plId] = new List<int>(order);
+            foreach (var (plId, order) in state.PrevBagOrderByPlaylist) _prevBagOrder[plId] = new List<int>(order);
             _refBpm = state.RefBpm;
         }
         if (state.RecentlyPlayed.Count > 0 || state.FedByPlaylist.Count > 0)
@@ -88,6 +104,8 @@ public sealed class PlaylistService
                 RecentlyPlayed = _recentlyPlayed.ToList(),
                 RecentlyPlayedArtists = _recentlyPlayedArtists.ToList(),
                 LastPlayedUtc = new Dictionary<int, DateTime>(_lastPlayedUtc),
+                BagOrderByPlaylist = _bagOrder.ToDictionary(kv => kv.Key, kv => kv.Value.ToList()),
+                PrevBagOrderByPlaylist = _prevBagOrder.ToDictionary(kv => kv.Key, kv => kv.Value.ToList()),
                 RefBpm = _refBpm
             };
         }
@@ -834,7 +852,8 @@ public sealed class PlaylistService
                         if (members.All(m => fed.Contains(m.Id)))
                         {
                             fed.Clear();
-                            _log.LogInformation("Auto DJ: playlist \"{Name}\" exhausted — reshuffling.", pl.Name);
+                            ReshuffleBag_Locked(pl, members, rng);
+                            _log.LogInformation("Auto DJ: playlist \"{Name}\" exhausted — dealt a fresh order.", pl.Name);
                         }
                     }
 
@@ -856,8 +875,16 @@ public sealed class PlaylistService
                         * ArtistCooldownPenalty(t.Artist, upcomingArtists, recentArtistsSnapshot)
                         * FreshnessFactor(t.Id);
 
+                    // Candidates come from the head of this playlist's shuffled
+                    // running order — the next few unplayed, eligible tracks —
+                    // rather than from the whole playlist. The order is what
+                    // makes the sequence different every pass; scoring then picks
+                    // among these few so tempo and artist spacing still apply.
+                    var window = BagWindowFor(pl, members, rng, Eligible);
+                    var pool = window.Count > 0 ? window : members;
+
                     var scored = new List<(Track t, double s)>();
-                    foreach (var t in members)
+                    foreach (var t in pool)
                     {
                         if (!Eligible(t)) continue;
                         if (!randomMode && t.Bpm is > 30)
@@ -876,7 +903,7 @@ public sealed class PlaylistService
                     if (scored.Count == 0 && !randomMode && refBpm > 30)
                     {
                         double widened = bpmRange * 2.0;
-                        foreach (var t in members)
+                        foreach (var t in pool)
                         {
                             if (!Eligible(t) || t.Bpm is not > 30) continue;
                             double diff = Math.Abs(t.Bpm.Value - refBpm);
@@ -887,7 +914,7 @@ public sealed class PlaylistService
 
                     // Fallback 2: ignore BPM entirely.
                     if (scored.Count == 0)
-                        foreach (var t in members)
+                        foreach (var t in pool)
                             if (Eligible(t))
                                 scored.Add((t, Score(t, 0.1)));
 
@@ -963,8 +990,97 @@ public sealed class PlaylistService
         return Math.Clamp(0.25 + hours * 0.35, 0.25, 1.3);
     }
 
+    /// <summary>
+    /// The next few candidates from a playlist's shuffled running order: the
+    /// first <see cref="BagWindow"/> entries that are unplayed this pass and
+    /// eligible right now. The order is dealt lazily — a playlist that has never
+    /// been shuffled, or whose membership has changed, gets a fresh deal here.
+    /// </summary>
+    private List<Track> BagWindowFor(SavedPlaylist pl, List<Track> members, Random rng,
+                                     Func<Track, bool> eligible)
+    {
+        var byId = members.ToDictionary(m => m.Id);
+
+        List<int> order;
+        lock (_historyLock)
+        {
+            if (!_bagOrder.TryGetValue(pl.Id, out order!) || order.Count == 0)
+                order = ReshuffleBag_Locked(pl, members, rng);
+
+            // Tracks added to the playlist since the deal are slotted in at
+            // random points rather than tacked on the end, so a newly-added song
+            // isn't condemned to play last this pass.
+            var known = new HashSet<int>(order);
+            var missing = members.Where(m => !known.Contains(m.Id)).Select(m => m.Id).ToList();
+            if (missing.Count > 0)
+            {
+                foreach (var id in missing) order.Insert(rng.Next(order.Count + 1), id);
+                _bagOrder[pl.Id] = order;
+            }
+        }
+
+        var window = new List<Track>();
+        foreach (var id in order)
+        {
+            if (window.Count >= BagWindow) break;
+            if (!byId.TryGetValue(id, out var t)) continue;   // removed from the playlist
+            if (!eligible(t)) continue;                       // fed, queued, too similar…
+            window.Add(t);
+        }
+        return window;
+    }
+
+    /// <summary>
+    /// Deals a playlist a new running order — a Fisher–Yates shuffle that is
+    /// then CHECKED AGAINST THE PREVIOUS PASS and re-dealt if it comes out too
+    /// close to it. Without that check a shuffle is free to hand back nearly the
+    /// same order twice running, which is exactly what "we keep hearing the same
+    /// order" is: not a broken random, just an unlucky one nobody vetoed.
+    ///
+    /// Too close means: the same opening track, or more than a third of the
+    /// tracks in the same position as last pass. On a small playlist (five
+    /// tracks) some overlap is unavoidable, so the attempt count is bounded and
+    /// the best of the tries is taken rather than looping forever.
+    /// </summary>
+    private List<int> ReshuffleBag_Locked(SavedPlaylist pl, List<Track> members, Random rng)
+    {
+        var ids = members.Select(m => m.Id).ToList();
+        _prevBagOrder.TryGetValue(pl.Id, out var prev);
+
+        List<int> best = ids;
+        int bestMatches = int.MaxValue;
+
+        for (int attempt = 0; attempt < ShuffleTries; attempt++)
+        {
+            var candidate = new List<int>(ids);
+            for (int i = candidate.Count - 1; i > 0; i--)      // Fisher–Yates
+            {
+                int j = rng.Next(i + 1);
+                (candidate[i], candidate[j]) = (candidate[j], candidate[i]);
+            }
+
+            if (prev == null || prev.Count == 0) { best = candidate; break; }
+
+            int matches = 0;
+            int n = Math.Min(prev.Count, candidate.Count);
+            for (int i = 0; i < n; i++) if (prev[i] == candidate[i]) matches++;
+            bool sameOpener = candidate.Count > 0 && prev.Count > 0 && candidate[0] == prev[0];
+
+            if (matches < bestMatches && !sameOpener) { best = candidate; bestMatches = matches; }
+            if (!sameOpener && matches * 3 <= n) { best = candidate; break; }   // comfortably different
+        }
+
+        _bagOrder[pl.Id] = best;
+        _prevBagOrder[pl.Id] = new List<int>(best);
+        return best;
+    }
+
     /// <summary>Priority-weighted random draw: priority 1–5 is the weight, so a
-    /// priority-5 playlist is drawn five times as often as a priority-1.</summary>
+    /// priority-5 playlist is drawn five times as often as a priority-1. Every
+    /// pick draws again, so priority shapes HOW OFTEN a playlist contributes
+    /// while the running order above decides WHICH of its tracks comes next —
+    /// the two are independent, which is why raising a priority never makes the
+    /// sequence more predictable.</summary>
     private static SavedPlaylist WeightedPick(IReadOnlyList<SavedPlaylist> pls, Random rng)
     {
         int total = pls.Sum(p => Math.Clamp(p.Priority, 1, 5));

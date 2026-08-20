@@ -35,6 +35,18 @@ public sealed class ShuffleState
     /// days — the thing a plain shuffle bag can't express.</summary>
     public Dictionary<int, DateTime> LastPlayedUtc { get; set; } = new();
 
+    /// <summary>
+    /// The running order each playlist is being dealt in this pass — a genuine
+    /// shuffled permutation of its members, not a scoring artefact. Persisted so
+    /// a restart resumes the same deal rather than starting a new one.
+    /// </summary>
+    public Dictionary<int, List<int>> BagOrderByPlaylist { get; set; } = new();
+
+    /// <summary>The previous pass's running order per playlist. Kept only so the
+    /// next shuffle can be checked against it and rejected if it comes out too
+    /// close — this is what stops the rotation settling into one order.</summary>
+    public Dictionary<int, List<int>> PrevBagOrderByPlaylist { get; set; } = new();
+
     /// <summary>Reference tempo carried over, so the first pick after a restart
     /// isn't a cold random one.</summary>
     public double RefBpm { get; set; }
@@ -65,6 +77,8 @@ public static class ShuffleStateStore
                         s.RecentlyPlayed ??= new List<int>();
                         s.RecentlyPlayedArtists ??= new List<string>();
                         s.LastPlayedUtc ??= new Dictionary<int, DateTime>();
+                        s.BagOrderByPlaylist ??= new Dictionary<int, List<int>>();
+                        s.PrevBagOrderByPlaylist ??= new Dictionary<int, List<int>>();
                         return s;
                     }
                 }
