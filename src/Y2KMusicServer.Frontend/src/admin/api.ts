@@ -205,6 +205,23 @@ export const getRawGenres = () =>
 // Raw audio for the browser-side preview player (never touches the decks or
 // the /stream broadcast). Used as an <audio> src; the server supports seeking.
 export const trackAudioUrl = (trackId: number) => `/api/admin/track/${trackId}/audio`
+
+/** What the engine would play this track at — used to make the preview player
+ *  match the decks instead of playing every file at raw file level. */
+export interface PreviewGain {
+  trackId: number
+  deckVolume: number        // linear 0–1, straight onto <audio>.volume
+  lufs: number | null
+  targetLufs: number
+  masterVolume: number
+  normalizeEnabled: boolean
+  wantedDb: number | null   // correction the measurement asked for
+  appliedDb: number | null  // what survived the ±12 dB clamp
+  clamped: boolean
+  ceilingHit: boolean       // wanted a lift but 1.0 left no room
+}
+export const getPreviewGain = (trackId: number) =>
+  req<PreviewGain>(`/api/admin/track/${trackId}/preview-gain`)
 export const setGenreOverride = (trackId: number, value: string | null) =>
   req<{ id: number; genreOverride: string | null; genreBucket: string }>(
     `/api/admin/track/${trackId}/genre-override`,

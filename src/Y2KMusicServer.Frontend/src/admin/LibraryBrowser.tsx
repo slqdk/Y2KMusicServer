@@ -23,6 +23,20 @@ type RowMenu = { x: number; y: number; track: api.TrackDto }
 
 const decadeLabel = (d: number) => (d === 0 ? 'Unknown' : `${d}s`)
 
+/** One line of truth under the preview player: what the engine does to this
+ *  track and why. "ceiling" is the interesting case — the correction wanted to
+ *  lift the track but 1.0 left no room, so it plays under target. */
+function gainLabel(g: api.PreviewGain, normalised: boolean): string {
+  if (!normalised) return 'raw file level'
+  if (!g.normalizeEnabled) return 'normalisation off'
+  if (g.lufs == null) return 'no LUFS — plays at master level'
+  const db = g.appliedDb ?? 0
+  const sign = db >= 0 ? '+' : ''
+  const pct = Math.round(g.deckVolume * 100)
+  const note = g.ceilingHit ? ' · at ceiling' : g.clamped ? ' · clamped' : ''
+  return `${g.lufs.toFixed(1)} LUFS · ${sign}${db.toFixed(1)} dB · ${pct}%${note}`
+}
+
 export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: ScanInfo | null; analysis: AnalysisInfo | null; onPlayNow: (trackId: number) => Promise<unknown> | void }) {
   const [facets, setFacets] = useState<api.FacetsDto | null>(null)
   const [playlists, setPlaylists] = useState<api.SavedPlaylistDto[]>([])
@@ -39,6 +53,12 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
   const [genreMapOpen, setGenreMapOpen] = useState(false)
   const [note, setNote] = useState<string | null>(null)
   const [preview, setPreview] = useState<api.TrackDto | null>(null)
+  // The engine's deck volume for the previewed track, applied to the <audio>
+  // element so a listen matches what the decks would do. Normalisation ON is the
+  // default, with a toggle to hear the file raw for comparison.
+  const [previewGain, setPreviewGain] = useState<api.PreviewGain | null>(null)
+  const [previewNorm, setPreviewNorm] = useState(true)
+  const previewEl = useRef<HTMLAudioElement | null>(null)
   const debounce = useRef<number | undefined>(undefined)
 
   // Resizable, fixed-width columns:
@@ -61,6 +81,27 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
     debounce.current = window.setTimeout(() => loadTracks(q, format, genre, decade), 250)
     return () => window.clearTimeout(debounce.current)
   }, [q, format, genre, decade])
+
+  // Fetch the engine's level for whatever is being previewed.
+  useEffect(() => {
+    setPreviewGain(null)
+    if (!preview) return
+    let alive = true
+    api.getPreviewGain(preview.id)
+      .then(g => { if (alive) setPreviewGain(g) })
+      .catch(() => { /* preview still plays, just at raw level */ })
+    return () => { alive = false }
+  }, [preview])
+
+  // <audio>.volume is a linear 0–1 scale, the same shape as the deck's, so the
+  // engine's number goes straight on. Re-applied whenever the toggle flips or a
+  // new gain arrives, and on loadedmetadata because a fresh element resets to 1.
+  const applyPreviewGain = () => {
+    const el = previewEl.current
+    if (!el) return
+    el.volume = previewNorm && previewGain ? Math.min(1, Math.max(0, previewGain.deckVolume)) : 1
+  }
+  useEffect(applyPreviewGain, [previewGain, previewNorm])
 
   const refreshAll = () => { refreshFacets(); refreshPlaylists(); loadTracks(q, format, genre, decade) }
 
@@ -194,8 +235,18 @@ export default function LibraryBrowser({ scan, analysis, onPlayNow }: { scan: Sc
             title={`${preview.title ?? ''} — ${preview.artist ?? ''}`}>
             {preview.title ?? '(untitled)'} — {preview.artist ?? '---'}
           </span>
-          <audio key={preview.id} controls autoPlay src={api.trackAudioUrl(preview.id)}
+          <audio key={preview.id} ref={previewEl} controls autoPlay
+            src={api.trackAudioUrl(preview.id)}
+            onLoadedMetadata={applyPreviewGain}
             style={{ flex: 1, minWidth: 160, height: 24 }} />
+          <button className={`w-btn${previewNorm ? ' w-primary' : ''}`}
+            title="Play the preview at the level the engine would use (loudness normalisation), or raw file level"
+            onClick={() => setPreviewNorm(v => !v)}>
+            {previewNorm ? 'Normalised' : 'Raw file'}
+          </button>
+          <span className="w-muted" style={{ whiteSpace: 'nowrap', minWidth: 150 }}>
+            {previewGain ? gainLabel(previewGain, previewNorm) : '…'}
+          </span>
           <button className="w-btn" title="Stop and close the preview"
             onClick={() => setPreview(null)}>✕</button>
         </div>

@@ -256,6 +256,52 @@ public sealed class AdminTrackController : ControllerBase
         return PhysicalFile(path, mime, enableRangeProcessing: true);
     }
 
+    /// <summary>
+    /// What the engine would play this track at, for the preview player: the
+    /// linear 0–1 deck volume, the dB correction behind it, and whether the
+    /// ±12 dB clamp or the 1.0 ceiling bit. The preview sets the &lt;audio&gt;
+    /// element's volume to <c>deckVolume</c>, so two tracks previewed back to
+    /// back sound exactly as they would through the decks — which is the only
+    /// way to judge the normaliser by ear.
+    ///
+    /// <c>ceilingHit</c> is the one to watch: it means the track wanted lifting
+    /// but the master volume left no headroom, so it plays quieter than target
+    /// however good the measurement was.
+    /// </summary>
+    [HttpGet("{id:int}/preview-gain")]
+    public async Task<IActionResult> PreviewGain(int id, CancellationToken ct)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        var t = await db.Tracks.AsNoTracking()
+            .Where(x => x.Id == id)
+            .Select(x => new { x.LufsIntegrated })
+            .FirstOrDefaultAsync(ct);
+        if (t == null) return NotFound(new { error = "track not found", trackId = id });
+
+        var s = await db.Settings.AsNoTracking().FirstOrDefaultAsync(ct)
+                ?? new Settings { Volume = 80 };
+
+        float deckVolume = AudioEngine.DeckVolumeFor(t.LufsIntegrated, s);
+        double? wantedDb = s.NormalizeEnabled && t.LufsIntegrated is double lu && lu != 0
+            ? s.TargetLufs - lu
+            : null;
+        double? appliedDb = wantedDb is double w ? Math.Clamp(w, -12.0, 12.0) : null;
+
+        return Ok(new
+        {
+            trackId = id,
+            deckVolume,
+            lufs = t.LufsIntegrated,
+            targetLufs = s.TargetLufs,
+            masterVolume = s.Volume,
+            normalizeEnabled = s.NormalizeEnabled,
+            wantedDb,
+            appliedDb,
+            clamped = wantedDb is double w2 && Math.Abs(w2) > 12.0,
+            ceilingHit = appliedDb is > 0 && deckVolume >= 0.999f
+        });
+    }
+
     public sealed record GenreOverrideBody(string? Value);
 
     /// <summary>

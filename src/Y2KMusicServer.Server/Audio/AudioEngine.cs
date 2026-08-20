@@ -2010,13 +2010,26 @@ public sealed class AudioEngine
     /// operator's business.
     /// </summary>
     private float NormalizedVolume(Track t, Settings s, bool jingle = false)
+        => jingle ? 1f : DeckVolumeFor(t.LufsIntegrated, s);
+
+    /// <summary>
+    /// The deck volume a track would get, as a linear 0–1 scale. Public and
+    /// static so the admin PREVIEW player can hear exactly what the engine
+    /// would do with a track, rather than an approximation of it — checking the
+    /// normaliser by ear is only meaningful if both paths run the same maths.
+    ///
+    /// The clamps matter and are part of what is being judged: the correction is
+    /// limited to ±12 dB, and the result can never exceed 1.0 — so with the
+    /// master at 100% no track can be lifted at all, and a quiet track stays
+    /// quiet. That ceiling is usually the reason a normaliser "isn't good
+    /// enough".
+    /// </summary>
+    public static float DeckVolumeFor(double? lufsIntegrated, Settings s)
     {
-        if (jingle) return 1f;
-
         float baseVol = Math.Clamp(s.Volume / 100f, 0f, 1f);
-        if (!s.NormalizeEnabled || t.LufsIntegrated is null or 0) return baseVol;
+        if (!s.NormalizeEnabled || lufsIntegrated is null or 0) return baseVol;
 
-        double gainDb = Math.Clamp(s.TargetLufs - t.LufsIntegrated.Value, -12.0, 12.0);
+        double gainDb = Math.Clamp(s.TargetLufs - lufsIntegrated.Value, -12.0, 12.0);
         float gain = (float)Math.Pow(10.0, gainDb / 20.0);
         return Math.Min(1f, baseVol * gain);
     }
