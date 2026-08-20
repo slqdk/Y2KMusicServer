@@ -25,9 +25,11 @@ public sealed class PublicController : ControllerBase
     private readonly IDbContextFactory<Y2KDbContext> _dbf;
     private readonly IConfiguration _cfg;
     private readonly CastService _cast;
+    private readonly ILogger<PublicController> _log;
 
     public PublicController(AudioEngine engine, StreamingEncoder stream, PlaylistService playlist,
-        IDbContextFactory<Y2KDbContext> dbf, IConfiguration cfg, CastService cast)
+        IDbContextFactory<Y2KDbContext> dbf, IConfiguration cfg, CastService cast,
+        ILogger<PublicController> log)
     {
         _engine = engine;
         _stream = stream;
@@ -35,6 +37,7 @@ public sealed class PublicController : ControllerBase
         _dbf = dbf;
         _cfg = cfg;
         _cast = cast;
+        _log = log;
     }
 
     public sealed record RequestBody(int TrackId, string? RequesterName, string? DeviceId);
@@ -451,6 +454,50 @@ public sealed class PublicController : ControllerBase
             durationSec = p.DurationSec,
             source = p.Source
         });
+    }
+
+    /// <summary>
+    /// Starts the music when nothing is playing. START ONLY — it can resume a
+    /// paused or stopped deck and, with an empty deck, pick the queue back up,
+    /// but it can never pause, skip or otherwise take the room off the DJ. A
+    /// call while already playing is a no-op, so a second tap can't do harm.
+    ///
+    /// Deliberately ungated: the case it exists for is the operator (or whoever
+    /// is nearest) looking at a paused player on a phone and needing the music
+    /// back without walking to the desktop.
+    /// </summary>
+    [HttpPost("play")]
+    public async Task<IActionResult> Play(CancellationToken ct)
+    {
+        var status = _engine.GetStatus();
+        if (status.State == PlaybackEngineState.Playing)
+            return Ok(new { ok = true, alreadyPlaying = true });
+
+        if (_engine.Play())
+        {
+            _log.LogInformation("Listener page resumed playback.");
+            return Ok(new { ok = true, resumed = true });
+        }
+
+        // Nothing on the deck: pick the queue up where it left off, topping up
+        // from Auto DJ first if the queue has run dry.
+        var resumeId = await _playlist.ResumeTrackIdAsync(ct);
+        if (resumeId == null && await _playlist.IsAutoDjOnAsync(ct))
+        {
+            await _playlist.TopUpAsync(ct);
+            resumeId = await _playlist.ResumeTrackIdAsync(ct);
+        }
+        if (resumeId is not int trackId)
+            return Conflict(new { ok = false, error = "nothing to play" });
+
+        if (await _engine.LoadAsync(trackId, ct) != LoadResult.Ok)
+            return Conflict(new { ok = false, error = "could not load the track" });
+
+        bool started = _engine.Play();
+        _log.LogInformation("Listener page started playback at track {TrackId}.", trackId);
+        return started
+            ? Ok(new { ok = true, started = true })
+            : Conflict(new { ok = false, error = "could not start playback" });
     }
 
     [HttpPost("request")]

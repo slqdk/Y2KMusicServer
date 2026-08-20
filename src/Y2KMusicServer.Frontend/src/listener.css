@@ -826,3 +826,30 @@
 .lz-more { display: flex; justify-content: center; padding: 14px 0 22px; }
 .lz-more-btn { padding: 12px 26px; font-size: .95rem; }
 .lz-more-note { font-size: .82rem; color: var(--lz-muted); text-align: center; }
+
+
+/* Speakers moved out of the now-playing bar and pinned to the bottom of the
+   playlist rail: it was sitting on the very bottom line of the window, where a
+   phone's gesture bar and the browser chrome both crowd it. margin-top:auto
+   inside the (already flex-column) rail keeps it under the chips however many
+   playlists there are. */
+.lz-railfoot { margin-top: auto; padding: 14px 0 10px; }
+.lz-plcol { min-height: calc(100vh - var(--lz-nowbar-h) - 24px); }
+.lz-spbtn { width: 100%; justify-content: center; }
+/* In the rail the popover has room to open downward from the button. */
+.lz-railfoot .lz-sppop { bottom: auto; top: calc(100% + 8px); }
+
+/* Start button: same round slot as Skip, but it reads as GO. */
+.lz-playbtn {
+  background: var(--lz-accent, #1db954);
+  color: #04120a; border-color: transparent; font-weight: 700;
+}
+.lz-playbtn:disabled { opacity: .6; }
+
+@media (max-width: 640px) {
+  /* The rail becomes a wrapped row on a phone, so the footer stops being a
+     footer — it just follows the chips. */
+  .lz-railfoot { margin-top: 4px; padding: 0; width: 100%; }
+  .lz-plcol { min-height: 0; }
+  .lz-railfoot .lz-sppop { bottom: auto; top: calc(100% + 8px); }
+}

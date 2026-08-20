@@ -425,6 +425,47 @@ export default function App() {
   }
 
   const stateLabel = np?.playing ? 'NOW PLAYING' : np?.trackId ? 'PAUSED' : 'OFF AIR'
+  // Paused with a track loaded, or nothing loaded at all — either way the room
+  // is silent and the page should offer to start it.
+  const stopped = !np?.playing
+  const [playBusy, setPlayBusy] = useState(false)
+
+  const startPlay = async () => {
+    if (playBusy) return
+    setPlayBusy(true)
+    try {
+      await fetch('/api/play', { method: 'POST' })
+      setTimeout(refresh, 400)
+    } catch { /* the poll will catch up */ }
+    finally { setPlayBusy(false) }
+  }
+
+  // Speakers live at the bottom of the rail on desktop and in the drawer on a
+  // phone, so the same markup is rendered in two places.
+  const speakersBlock = speakers.length > 0 ? (
+    <div className="lz-spwrap">
+      <button className={`lz-btn lz-spbtn${speakers.some(s => s.casting) ? ' is-live' : ''}`}
+        onClick={() => setSpOpen(o => !o)}
+        title="Play the music on a speaker in the house">
+        🔊 Speakers
+      </button>
+      {spOpen && (
+        <>
+          <div className="lz-sp-backdrop" onMouseDown={() => setSpOpen(false)} />
+          <div className="lz-sppop">
+            <div className="lz-sppop-head">Play on…</div>
+            {speakers.map(s => (
+              <button key={s.id} className={`lz-sprow${s.casting ? ' is-on' : ''}`}
+                disabled={spBusy} onClick={() => castTo(s)}>
+                <span className="lz-sprow-name">{s.name}</span>
+                <span className="lz-sprow-act">{s.casting ? '■ Stop' : '▶ Play'}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  ) : null
 
   // Playlist rows: the entry matching the on-air track is the "now playing"
   // row. If nothing in the queue matches (operator loaded an off-playlist
@@ -584,6 +625,9 @@ export default function App() {
                 onClick={toggleNewest}>
                 <span className="lz-chip-name">✨ Just added</span>
               </button>
+
+              {/* Pinned to the bottom of the rail, clear of the now-playing bar. */}
+              {speakersBlock && <div className="lz-railfoot">{speakersBlock}</div>}
             </aside>
         )}
 
@@ -761,42 +805,29 @@ export default function App() {
       {/* ── Fixed bottom bar: now playing + the next two songs ─────────── */}
       <div className="lz-nowbar">
         <div className="lz-nowbar-controls">
-          {speakers.length > 0 && (
-            <div className="lz-spwrap">
-              <button className={`lz-btn${speakers.some(s => s.casting) ? ' is-live' : ''}`}
-                onClick={() => setSpOpen(o => !o)}
-                title="Play the music on a speaker in the house">
-                🔊 Speakers
-              </button>
-              {spOpen && (
-                <>
-                  <div className="lz-sp-backdrop" onMouseDown={() => setSpOpen(false)} />
-                  <div className="lz-sppop">
-                    <div className="lz-sppop-head">Play on…</div>
-                    {speakers.map(s => (
-                      <button key={s.id} className={`lz-sprow${s.casting ? ' is-on' : ''}`}
-                        disabled={spBusy} onClick={() => castTo(s)}>
-                        <span className="lz-sprow-name">{s.name}</span>
-                        <span className="lz-sprow-act">{s.casting ? '■ Stop' : '▶ Play'}</span>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
           {/* The slot is always here so the now-playing and next-up lines never
-              shift when skipping unlocks or locks again. */}
+              shift when skipping unlocks or locks again. While the music is
+              stopped or paused this is a PLAY button — always available, because
+              a silent room with a hidden play control is the one state nobody
+              can fix from the page. Once playing it goes back to being Skip,
+              which stays gated by allowNext. */}
           <div className="lz-nextslot">
-            <button
-              className="lz-roundbtn"
-              onClick={skip}
-              disabled={!np?.allowNext || np?.trackId == null}
-              aria-hidden={!np?.allowNext || np?.trackId == null}
-              title={np?.allowNext ? 'Skip to the next track' : 'Skipping is not unlocked yet'}
-            >
-              {np?.trackId && !np.playing ? '▶' : '⏭'}
-            </button>
+            {stopped ? (
+              <button
+                className="lz-roundbtn lz-playbtn"
+                onClick={startPlay}
+                disabled={playBusy}
+                title="Start the music"
+              >▶</button>
+            ) : (
+              <button
+                className="lz-roundbtn"
+                onClick={skip}
+                disabled={!np?.allowNext}
+                aria-hidden={!np?.allowNext}
+                title={np?.allowNext ? 'Skip to the next track' : 'Skipping is not unlocked yet'}
+              >⏭</button>
+            )}
           </div>
         </div>
         {/* On air — the loud card. */}
