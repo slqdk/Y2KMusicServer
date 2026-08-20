@@ -18,6 +18,22 @@ namespace Y2KMusicServer.Server.Audio;
 public sealed class MixRules
 {
     public bool CrossfadeAuto { get; set; } = true;
+
+    /// <summary>
+    /// Whether the Crossfade section's auto-pick may choose the beat-matched
+    /// crossfade. Off means tempo-aligned pairs get a Normal crossfade instead.
+    /// The FORCE button on the deck panel still works — this gates the automatic
+    /// choice only, so a transition you ask for by hand is never refused.
+    /// </summary>
+    public bool AllowBeatmatching { get; set; } = true;
+
+    /// <summary>
+    /// Whether the auto-pick may choose the beat-drop crossfade (B held silent,
+    /// then dropped in on a kick). Off means a punchy intro gets whatever the
+    /// remaining rules allow — beat-matched if that is still on, otherwise
+    /// Normal. Force still works.
+    /// </summary>
+    public bool AllowBeatDrop { get; set; } = true;
     public bool MixingAuto { get; set; } = false;
     public double BpmTolerance { get; set; } = 5.0;
     public bool VocalTease { get; set; } = true;

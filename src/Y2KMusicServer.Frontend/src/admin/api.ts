@@ -530,6 +530,10 @@ export const putSettings = (u: SettingsUpdate) =>
 // ── Auto-mix rules (mixrules.json — a separate store; applies immediately) ──
 export interface MixRulesDto {
   crossfadeAuto: boolean
+  /** Auto-pick may use the beat-matched crossfade (Force always can). */
+  allowBeatmatching: boolean
+  /** Auto-pick may use the beat-drop crossfade (Force always can). */
+  allowBeatDrop: boolean
   mixingAuto: boolean
   bpmTolerance: number
   vocalTease: boolean

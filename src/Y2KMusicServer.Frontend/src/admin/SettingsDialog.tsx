@@ -228,6 +228,26 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
                     style={{ width: 64 }} /> %
                   <span className="w-muted">Deck B stays silent until Deck A has fallen to this level, then enters; A keeps fading to 0 on the same clock</span>
                 </div>
+                <div className="w-mode-label" style={{ margin: '8px 0 4px' }}>Auto-pick may use:</div>
+                <label className="w-check">
+                  <input type="checkbox" checked={mix?.allowBeatmatching ?? true}
+                    disabled={!mix || busy || !mix.crossfadeAuto}
+                    onChange={e => applyMix({ allowBeatmatching: e.target.checked })} />
+                  Beatmatching crossfade — rides the beat grid; runs in bars, so it is the longest of the three
+                </label>
+                <label className="w-check">
+                  <input type="checkbox" checked={mix?.allowBeatDrop ?? true}
+                    disabled={!mix || busy || !mix.crossfadeAuto}
+                    onChange={e => applyMix({ allowBeatDrop: e.target.checked })} />
+                  Beat drop crossfade — holds B silent, then drops it in on a kick
+                </label>
+                <div className="w-muted" style={{ margin: '2px 0 8px' }}>
+                  Unticked means the auto-pick never chooses it: it falls through to the next
+                  allowed option, and with both off every automatic transition is a Normal
+                  crossfade. The deck panel&apos;s Force buttons are unaffected — a transition you
+                  ask for by hand always runs.
+                </div>
+
                 <div className="w-formrow">
                   <label>Beat-matched (same tempo):</label>
                   <input type="number" min={1} max={16} step={1} value={mix?.sameTempoBars ?? 4}

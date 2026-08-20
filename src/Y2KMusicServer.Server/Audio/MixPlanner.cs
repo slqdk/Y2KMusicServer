@@ -117,7 +117,7 @@ public static class MixPlanner
         // 2) Crossfade section: the best-fitting crossfade for the pair's beats.
         if (rules.CrossfadeAuto)
         {
-            var cf = SelectCrossfade(beatmatch, inSec, bBpm, bStruct);
+            var cf = SelectCrossfade(beatmatch, inSec, bBpm, bStruct, rules);
             return BuildCrossfade(cf, outSec, inSec, fade, basePoints.BeatAligned, bpmClose, bpmDelta, bpmKnown, fallback: false);
         }
 
@@ -206,14 +206,25 @@ public static class MixPlanner
         return null; // no move fits
     }
 
-    /// <summary>The Crossfade section's pick: Beat drop when the tempos align and
-    /// B has a strong intro downbeat to drop on; Beatmatching when the tempos
-    /// align; otherwise Normal (the floor — also when tempos are too far apart).</summary>
-    private static Transition SelectCrossfade(bool beatmatch, double inSec, double? bBpm, TrackStructureData? bStruct)
+    /// <summary>
+    /// The Crossfade section's pick: Beat drop when the tempos align and B has a
+    /// strong intro downbeat to drop on; Beatmatching when the tempos align;
+    /// otherwise Normal (the floor — also when tempos are too far apart).
+    ///
+    /// Either of the two clever ones can be switched off in settings, in which
+    /// case the pick falls THROUGH to the next allowed option rather than being
+    /// abandoned: with beat drop off a punchy intro still gets a beat-matched
+    /// crossfade, and with both off everything lands on Normal. Only the AUTO
+    /// pick is gated — the deck panel's Force buttons bypass this entirely, so a
+    /// transition asked for by hand is always honoured.
+    /// </summary>
+    private static Transition SelectCrossfade(bool beatmatch, double inSec, double? bBpm,
+                                              TrackStructureData? bStruct, MixRules rules)
     {
         if (!beatmatch) return Transition.NormalCrossfade;
-        if (BIntroPunchy(bStruct, inSec, bBpm)) return Transition.BeatDropCrossfade;
-        return Transition.BeatmatchingCrossfade;
+        if (rules.AllowBeatDrop && BIntroPunchy(bStruct, inSec, bBpm))
+            return Transition.BeatDropCrossfade;
+        return rules.AllowBeatmatching ? Transition.BeatmatchingCrossfade : Transition.NormalCrossfade;
     }
 
     private static MixPlan BuildCrossfade(
