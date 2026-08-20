@@ -400,12 +400,19 @@ export default function App() {
     setQ(v)
   }
 
-  // Toggling a field off narrows the search; turning the last one off would
-  // leave nothing searchable, so the last active field can't be switched off.
+  // All three lit and none lit both mean the same thing — search everywhere —
+  // so the buttons behave the way a filter row is expected to:
+  //
+  //   from "everything", tapping one SELECTS it (rather than switching it off
+  //   and leaving the other two lit, which reads as two buttons turning on);
+  //   after that each button toggles independently;
+  //   turning the last one off returns to everything.
   const toggleField = (f: Field) =>
-    setFields(prev => prev.includes(f)
-      ? (prev.length === 1 ? prev : prev.filter(x => x !== f))
-      : [...prev, f])
+    setFields(prev => {
+      if (prev.length === 3) return [f]                       // pick one
+      if (prev.includes(f)) return prev.filter(x => x !== f)   // may empty = everywhere
+      return [...prev, f]
+    })
 
   // The New songs chip is its own browse: it clears the text, the album and the
   // playlist so the list shows exactly the new arrivals and nothing else.
@@ -620,12 +627,16 @@ export default function App() {
               the text — three toggles, at least one always on. */}
           {q.trim().length > 0 && (
             <div className="lz-filters">
-              <span className="lz-filters-label">Search in</span>
+              <span className="lz-filters-label">
+                {fields.length === 0 || fields.length === 3 ? 'Searching everywhere' : 'Searching in'}
+              </span>
               {([['artist', 'Artist'], ['album', 'Album'], ['title', 'Song']] as [Field, string][])
                 .map(([f, label]) => (
                   <button key={f}
-                    className={`lz-filter${fields.includes(f) ? ' is-on' : ''}`}
-                    title={`Match the words against the ${label.toLowerCase()}`}
+                    className={`lz-filter${fields.length < 3 && fields.includes(f) ? ' is-on' : ''}`}
+                    title={fields.length === 3
+                      ? `Search only the ${label.toLowerCase()}`
+                      : `Match the words against the ${label.toLowerCase()}`}
                     onClick={() => toggleField(f)}>{label}</button>
                 ))}
             </div>
