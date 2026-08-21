@@ -676,20 +676,23 @@ export default function App() {
           {/* Search box and the player/theme controls share one row: laid out
               side by side rather than floating over each other. */}
           <div className="lz-searchrow">
-            <input
-              className="lz-input lz-input-search lz-search-top"
-              type="search"
-              value={q}
-              onChange={e => onQueryChange(e.target.value)}
-              disabled={!nameOk}
-              placeholder={nameOk ? 'Search songs or artists…' : 'Enter your name first (min. 3 letters)…'}
-              title={nameOk ? 'Search songs' : 'Type at least 3 letters of your name to unlock the search'}
-            />
-            {/* Clear belongs to the search box, so it sits against it and matches
-                its height rather than floating among the player controls. */}
-            <button className="lz-btn lz-clear-top" title="Clear the search"
-              disabled={q.length === 0 && !albumView && !newestOnly}
-              onClick={() => { onQueryChange(''); setAlbumView(null); setNewestOnly(false) }}>Clear</button>
+            {/* Search box with Clear underneath it: Clear acts on the search, so
+                it belongs to the box, but it doesn't need to be the same size as
+                it — a small button under a modest box, not two tall slabs. */}
+            <div className="lz-searchcol">
+              <input
+                className="lz-input lz-input-search lz-search-top"
+                type="search"
+                value={q}
+                onChange={e => onQueryChange(e.target.value)}
+                disabled={!nameOk}
+                placeholder={nameOk ? 'Search songs or artists…' : 'Enter your name first (min. 3 letters)…'}
+                title={nameOk ? 'Search songs' : 'Type at least 3 letters of your name to unlock the search'}
+              />
+              <button className="lz-btn lz-clear-below" title="Clear the search"
+                disabled={q.length === 0 && !albumView && !newestOnly}
+                onClick={() => { onQueryChange(''); setAlbumView(null); setNewestOnly(false) }}>Clear</button>
+            </div>
 
             {/* Listen Live and the theme picker stack: two half-height controls
                 in the space one full-height one would take, which keeps the row

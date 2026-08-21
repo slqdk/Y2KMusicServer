@@ -206,11 +206,13 @@
 /* Two-class selector on purpose: .lz-input and .lz-input-search are defined
    LATER in this file with the same specificity, so a bare .lz-search-top rule
    lost to them and the bar never grew. */
+/* Half the height of the slab this briefly became: taller than the original
+   7px, nothing like the row-filling box that stretch alignment produced. */
 .lz-searchrow .lz-input.lz-search-top {
-  padding: 17px 14px 17px 42px;
-  font-size: 1.08rem;
-  background-position: 15px center;
-  background-size: 17px;
+  padding: 9px 12px 9px 36px;
+  font-size: 1rem;
+  background-position: 12px center;
+  background-size: 15px;
 }
 .lz-rescol .lz-results { flex: none; min-height: 0; max-height: none; overflow: visible; }
 .lz-side {
@@ -223,12 +225,17 @@
 /* Theme picker alone in the top-right corner */
 
 /* Search row: the box grows, the player + theme controls sit beside it */
-.lz-searchrow { display: flex; align-items: stretch; gap: 10px; }
+.lz-searchrow { display: flex; align-items: flex-start; gap: 10px; }
 .lz-searchrow .lz-input-search { flex: 1; min-width: 0; }
 .lz-theme-corner { min-height: 0; }
 
-/* Clear matches the search box it belongs to. */
-.lz-clear-top { flex: 0 0 auto; padding: 0 22px; font-size: 1rem; }
+/* Search box on top, Clear beneath it and left-aligned. */
+.lz-searchcol {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+}
+.lz-searchcol .lz-input-search { width: 100%; }
+.lz-clear-below { flex: 0 0 auto; padding: 5px 20px; font-size: .85rem; }
 
 /* Listen Live above the theme picker, stacked into the search row's height. */
 .lz-topctrls {
