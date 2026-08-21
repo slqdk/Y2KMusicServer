@@ -473,12 +473,14 @@
 .lz-results-wrap { overflow: hidden; }
 .lz-results-list {
   list-style: none; padding: 0; margin: 0 0 0 -1px;
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(430px, 1fr));
+  /* Wider tracks than before: the rows are two lines now, so fewer, roomier
+     columns read better than five cramped ones. */
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(540px, 1fr));
   column-gap: 0; row-gap: 0;
 }
 .lz-result {
   display: grid; grid-template-columns: 1fr auto auto; gap: 4px 12px; align-items: center;
-  padding: 7px 16px;
+  padding: 9px 16px;
   border-left: 1px solid var(--lz-line);
   border-bottom: 1px solid var(--lz-line-soft, var(--lz-line));
 }
@@ -486,9 +488,19 @@
 .lz-result.is-selected { background: var(--lz-sel-row); }
 .lz-result.is-selected .lz-result-title { color: var(--lz-sel-fg); }
 .lz-result-main { min-width: 0; }
-.lz-result-title { color: var(--lz-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lz-result-title {
+  color: var(--lz-text); font-size: .98rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Line one: artist bold, album quiet — the album is context, not the answer. */
+.lz-result-top { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .lz-result-artist {
   font-weight: 700; color: var(--lz-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex: 0 1 auto;
+}
+.lz-result-album {
+  font-weight: 400; color: var(--lz-muted); font-size: .84rem;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   flex: 0 1 auto;
 }
@@ -497,8 +509,8 @@
 
 /* Result rows with a leading mini icon (songs without artwork) */
 .lz-result.lz-result-icon { grid-template-columns: auto 1fr auto auto; }
-/* Compact rows: title and artist share one line so more songs fit on screen. */
-.lz-result-main { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+/* Two-line rows: line one is artist + album, line two the song title. */
+.lz-result-main { display: block; min-width: 0; }
 .lz-mini-icon {
   width: 24px; height: 24px; flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
@@ -525,9 +537,9 @@
 /* Album cards. Bigger than the song tiles on purpose: the cover IS the
    affordance here — a guest recognises a record long before they read its
    title — and these are tap targets on a phone held at arm's length. */
-.lz-album { flex: 0 0 168px; width: 168px; cursor: pointer; }
+.lz-album { flex: 0 0 208px; width: 208px; cursor: pointer; }
 .lz-album-art {
-  width: 168px; height: 168px; object-fit: cover; display: block;
+  width: 208px; height: 208px; object-fit: cover; display: block;
   border-radius: var(--lz-radius-sm, 6px);
   background: var(--lz-art-bg, var(--lz-panel));
   border: 1px solid var(--lz-line-soft, var(--lz-line));
@@ -861,3 +873,10 @@
   .lz-railfoot { margin-top: 4px; padding-top: 0; border-top: 0; width: 100%; }
   .lz-railfoot .lz-sppop { bottom: auto; top: calc(100% + 8px); }
 }
+
+
+/* Songs in the artwork row (browsing, no search text). Same card as an album
+   card, plus its own Request button — the row is a shortcut, not a preview, so
+   a guest can act on it without scrolling into the list. */
+.lz-artsong { cursor: default; }
+.lz-artsong-req { width: 100%; margin-top: 6px; }

@@ -31,6 +31,10 @@ interface PlaylistsInfo {
 interface AlbumHit { album: string; artist: string | null; trackId: number; count: number }
 const PAGE = 80
 
+/** Songs in the artwork row while browsing. One row, large covers — the strip
+ *  scrolls sideways rather than wrapping, so this is a starting width, not a cap. */
+const ART_ROW = 12
+
 interface SearchResp {
   items: SearchItem[]
   albums?: AlbumHit[]
@@ -697,16 +701,40 @@ export default function App() {
             {results.length === 0 && albums.length === 0
               ? <div className="lz-empty">No matches.</div>
               : (() => {
-                    // Cover art belongs to the ALBUM row at the top and nowhere
-                    // else. A grid of song tiles fits about a dozen tracks on a
-                    // screen and makes every one of them a picture to decode; the
-                    // same space as text rows holds three times as many and reads
-                    // at a glance, which is what a guest hunting for a song wants.
+                    // Exactly ONE row of artwork at the top, whatever the mode:
+                    // browsing shows SONGS there (nothing has been searched, so
+                    // there are no albums to show), searching shows the matching
+                    // ALBUMS. Everything else is text rows, which read far faster
+                    // than a grid of covers when you are hunting for a title.
                     const visible = results.slice(0, shown)
+                    const searching = q.trim().length > 0
+                    const artSongs = (!searching && !albumView) ? visible.slice(0, ART_ROW) : []
+                    const listItems = artSongs.length > 0 ? visible.slice(ART_ROW) : visible
                     return <>
                       {fallbackQ && (
                         <div className="lz-fallback">
                           No matches for “{q.trim()}” — showing “{fallbackQ}” instead.
+                        </div>
+                      )}
+                      {artSongs.length > 0 && (
+                        <div className="lz-sect">
+                          <div className="lz-sect-label">Songs</div>
+                          <div className="lz-albums">
+                            {artSongs.map(t => {
+                              const d = splitArtistTitle(t.artist, t.title)
+                              return (
+                                <div key={t.id} className="lz-album lz-artsong">
+                                  <AlbumArtTile trackId={t.id} />
+                                  <div className="lz-album-name">{d.artist ?? d.title}</div>
+                                  <div className="lz-album-artist">{d.artist ? d.title : (t.album ?? '')}</div>
+                                  {!cd && (
+                                    <button className="lz-btn lz-req-btn lz-artsong-req"
+                                      onClick={() => requestTrack(t)} title="Request this song">Request</button>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
                         </div>
                       )}
                       {albums.length > 0 && (
@@ -723,23 +751,28 @@ export default function App() {
                           </div>
                         </div>
                       )}
-                      {visible.length > 0 && (
+                      {listItems.length > 0 && (
                         <div className="lz-sect">
-                          {albums.length > 0 && !albumView && <div className="lz-sect-label">Songs</div>}
+                          {(albums.length > 0 || artSongs.length > 0) && !albumView
+                            && <div className="lz-sect-label">All songs</div>}
                           <div className="lz-results-wrap">
                           <ul className="lz-results-list">
-                            {visible.map(t => (
+                            {listItems.map(t => (
                               <li key={t.id} className="lz-result lz-result-icon">
                                 <span className="lz-mini-icon" aria-hidden="true">♪</span>
+                                {/* Two lines: who and where on top, what underneath.
+                                    The song title is the thing being hunted, so it
+                                    gets its own line rather than sharing one. */}
                                 <div className="lz-result-main">
                                   {(() => {
                                     const d = splitArtistTitle(t.artist, t.title)
                                     return <>
-                                      {d.artist && <>
-                                        <span className="lz-result-artist">{d.artist}</span>
-                                        <span className="lz-result-sep">–</span>
-                                      </>}
-                                      <span className="lz-result-title">{d.title}</span>
+                                      <div className="lz-result-top">
+                                        {d.artist && <span className="lz-result-artist">{d.artist}</span>}
+                                        {d.artist && t.album && <span className="lz-result-sep">–</span>}
+                                        {t.album && <span className="lz-result-album">{t.album}</span>}
+                                      </div>
+                                      <div className="lz-result-title">{d.title}</div>
                                     </>
                                   })()}
                                 </div>
