@@ -573,6 +573,41 @@ public sealed class PlaylistService
         finally { _mutateGate.Release(); }
     }
 
+    /// <summary>
+    /// The last few tracks that actually played, newest first — for the
+    /// listener's "recently played" list. Read from the same in-memory history
+    /// the shuffle uses (and which survives a restart via shuffle-state.json),
+    /// so it reflects what the ROOM heard rather than what the queue happens to
+    /// contain: requests, jingles and hand-loaded tracks are all in it.
+    /// </summary>
+    public async Task<List<Track>> RecentlyPlayedAsync(int take, int? excludeTrackId = null,
+                                                       CancellationToken ct = default)
+    {
+        take = Math.Clamp(take, 1, 30);
+
+        List<int> ids;
+        lock (_historyLock)
+        {
+            // Newest first, de-duplicated: a song played twice in a night should
+            // occupy one line, at its most recent position.
+            ids = _recentlyPlayed.AsEnumerable().Reverse()
+                .Where(id => id != excludeTrackId)
+                .Distinct()
+                .Take(take)
+                .ToList();
+        }
+        if (ids.Count == 0) return new List<Track>();
+
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        var rows = await db.Tracks.AsNoTracking()
+            .Where(t => ids.Contains(t.Id))
+            .ToListAsync(ct);
+
+        // Restore the history order the database query lost.
+        var byId = rows.ToDictionary(r => r.Id);
+        return ids.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
+    }
+
     /// <summary>The track behind a queue entry, or null if it's already gone.
     /// Read BEFORE a delete, so the caller can drop a matching armed cue.</summary>
     public async Task<int?> TrackIdOfEntryAsync(int entryId, CancellationToken ct = default)

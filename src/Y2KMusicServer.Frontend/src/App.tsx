@@ -195,8 +195,23 @@ export default function App() {
   // not exist otherwise.
   type Speaker = { id: string; name: string; casting: boolean }
   const [speakers, setSpeakers] = useState<Speaker[]>([])
+  // What the room has heard, newest first — shown in the rail so a guest can see
+  // that their request landed without watching the bar the whole time.
+  const [recent, setRecent] = useState<SearchItem[]>([])
   const [spOpen, setSpOpen] = useState(false)
   const [spBusy, setSpBusy] = useState(false)
+  const loadRecent = () =>
+    fetch('/api/recent?take=12')
+      .then(r => r.ok ? r.json() : { items: [] })
+      .then(d => setRecent(Array.isArray(d?.items) ? d.items : []))
+      .catch(() => { /* the rail simply stays as it was */ })
+
+  useEffect(() => {
+    void loadRecent()
+    const id = window.setInterval(() => { void loadRecent() }, 20000)
+    return () => window.clearInterval(id)
+  }, [])
+
   const loadSpeakers = () =>
     fetch('/api/cast/speakers')
       .then(r => r.json())
@@ -627,6 +642,30 @@ export default function App() {
                 onClick={toggleNewest}>
                 <span className="lz-chip-name">✨ Just added</span>
               </button>
+
+              {/* Recently played: text only, clipped to whatever the column has
+                  room for. No scrollbar — the rail is a glance, not a list to
+                  work through. */}
+              {recent.length > 0 && (
+                <div className="lz-recent">
+                  <div className="lz-recent-head">Recently played</div>
+                  <ul className="lz-recent-list">
+                    {recent.map(t => {
+                      const d = splitArtistTitle(t.artist, t.title)
+                      return (
+                        <li key={t.id} className="lz-recent-row">
+                          <div className="lz-recent-top">
+                            {d.artist && <span className="lz-recent-artist">{d.artist}</span>}
+                            {d.artist && t.album && <span className="lz-result-sep">–</span>}
+                            {t.album && <span className="lz-recent-album">{t.album}</span>}
+                          </div>
+                          <div className="lz-recent-title">{d.title}</div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              )}
 
               {/* Pinned to the bottom of the rail, clear of the now-playing bar. */}
               {speakersBlock && <div className="lz-railfoot">{speakersBlock}</div>}

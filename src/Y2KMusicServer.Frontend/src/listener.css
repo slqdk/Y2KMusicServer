@@ -203,7 +203,10 @@
   position: sticky; top: 0; z-index: 30;
   background: var(--lz-bg); padding: 6px 0;
 }
-.lz-search-top { padding: 10px 12px 10px 34px; font-size: 1rem; background-position: 11px center; }
+.lz-search-top {
+  padding: 16px 14px 16px 40px; font-size: 1.08rem;
+  background-position: 14px center;
+}
 .lz-rescol .lz-results { flex: none; min-height: 0; max-height: none; overflow: visible; }
 .lz-side {
   position: sticky; top: 16px;
@@ -247,10 +250,16 @@
    — two scroll surfaces a few pixels apart, so a wheel over the left edge moved
    whichever one the pointer happened to be inside. Content height + sticky keeps
    it in view without owning a scrollbar. */
+/* The rail is exactly the height of the window minus the now-playing bar, and
+   it never scrolls: chips at the top, recently-played filling what's left,
+   Speakers pinned to the bottom. Anything that doesn't fit is clipped rather
+   than given a scrollbar — a second scroll surface next to the page's own was
+   the thing that made the left edge unusable. */
 .lz-plcol {
   position: sticky; top: 0; align-self: start;
   display: flex; flex-direction: column; gap: 6px;
-  max-height: none; overflow: visible; padding-right: 4px;
+  height: calc(100vh - var(--lz-nowbar-h) - 32px);
+  overflow: hidden; padding-right: 4px;
 }
 .lz-plcol .lz-chip { width: 100%; justify-content: space-between; }
 
@@ -530,16 +539,22 @@
 }
 
 /* Albums row — horizontally scrollable cover tiles */
+/* One row that FITS: a grid sized to the panel rather than a strip that runs
+   off the edge. Cards that don't fit wrap to a second row which max-height
+   clips, so the row always ends cleanly and there is no horizontal scrollbar to
+   drag on a touchscreen. */
 .lz-albums {
-  display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px;
-  scrollbar-width: thin;
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
+  grid-auto-rows: max-content;
+  max-height: 296px; overflow: hidden; padding-bottom: 8px;
 }
 /* Album cards. Bigger than the song tiles on purpose: the cover IS the
    affordance here — a guest recognises a record long before they read its
    title — and these are tap targets on a phone held at arm's length. */
-.lz-album { flex: 0 0 208px; width: 208px; cursor: pointer; }
+.lz-album { width: 100%; cursor: pointer; }
 .lz-album-art {
-  width: 208px; height: 208px; object-fit: cover; display: block;
+  width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block;
   border-radius: var(--lz-radius-sm, 6px);
   background: var(--lz-art-bg, var(--lz-panel));
   border: 1px solid var(--lz-line-soft, var(--lz-line));
@@ -849,12 +864,33 @@
    phone's gesture bar and the browser chrome both crowd it. margin-top:auto
    inside the (already flex-column) rail keeps it under the chips however many
    playlists there are. */
-/* Speakers sits directly under the chips, separated by a rule — "bottom of the
-   column" now means the bottom of its content, since the column is no longer
-   stretched to the viewport. */
+/* Speakers, pinned to the bottom of the rail. */
 .lz-railfoot {
-  margin-top: 10px; padding-top: 12px;
+  margin-top: auto; padding-top: 12px; flex: 0 0 auto;
   border-top: 1px solid var(--lz-line);
+}
+
+/* Recently played: takes the space between the chips and Speakers, and clips.
+   Text only — this is a glance, not a list to work through. */
+.lz-recent { flex: 1 1 auto; min-height: 0; overflow: hidden; margin-top: 12px; }
+.lz-recent-head {
+  font-size: .64rem; letter-spacing: .1em; font-weight: 700; text-transform: uppercase;
+  color: var(--lz-faint); margin-bottom: 6px;
+}
+.lz-recent-list { list-style: none; margin: 0; padding: 0; }
+.lz-recent-row { padding: 5px 0; border-bottom: 1px solid var(--lz-line-soft, var(--lz-line)); }
+.lz-recent-top { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
+.lz-recent-artist {
+  font-weight: 700; font-size: .8rem; color: var(--lz-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.lz-recent-album {
+  font-size: .72rem; color: var(--lz-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.lz-recent-title {
+  font-size: .84rem; color: var(--lz-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .lz-spbtn { width: 100%; justify-content: center; }
 /* In the rail the popover has room to open downward from the button. */
@@ -871,6 +907,10 @@
   /* The rail becomes a wrapped row on a phone, so the footer stops being a
      footer — it just follows the chips. */
   .lz-railfoot { margin-top: 4px; padding-top: 0; border-top: 0; width: 100%; }
+  /* On a phone the rail is a wrapped row above the results: no fixed height,
+     and the recently-played list would push the songs off screen. */
+  .lz-plcol { height: auto; }
+  .lz-recent { display: none; }
   .lz-railfoot .lz-sppop { bottom: auto; top: calc(100% + 8px); }
 }
 

@@ -466,6 +466,30 @@ public sealed class PublicController : ControllerBase
     /// is nearest) looking at a paused player on a phone and needing the music
     /// back without walking to the desktop.
     /// </summary>
+    /// <summary>
+    /// What the room has heard recently, newest first — the listener rail's
+    /// "recently played" list. Excludes whatever is on air now, since that is
+    /// already shown in the bar.
+    /// </summary>
+    [HttpGet("recent")]
+    public async Task<object> Recent([FromQuery] int take = 10, CancellationToken ct = default)
+    {
+        var current = _engine.GetStatus().TrackId;
+        var rows = await _playlist.RecentlyPlayedAsync(Math.Clamp(take, 1, 30), current, ct);
+        rows = ApplyFolderVisibility(rows);
+        return new
+        {
+            items = rows.Select(t => new
+            {
+                id = t.Id,
+                title = t.Title,
+                artist = t.Artist,
+                album = t.Album,
+                durationSec = t.DurationSec
+            }).ToList()
+        };
+    }
+
     [HttpPost("play")]
     public async Task<IActionResult> Play(CancellationToken ct)
     {
