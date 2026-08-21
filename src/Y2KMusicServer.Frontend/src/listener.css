@@ -225,7 +225,12 @@
 /* Theme picker alone in the top-right corner */
 
 /* Search row: the box grows, the player + theme controls sit beside it */
-.lz-searchrow { display: flex; align-items: flex-start; gap: 10px; }
+/* The stacked player controls are taken OUT of the flow: as a flex child they
+   set the row's height (Listen Live + theme + kbps ≈ 110px), and the search
+   column only fills about 70px of it — the rest was the empty band under Clear.
+   Positioned instead, they sit top-right and the row is as tall as the search
+   column needs. */
+.lz-searchrow { display: flex; align-items: flex-start; gap: 10px; position: relative; }
 .lz-searchrow .lz-input-search { flex: 1; min-width: 0; }
 .lz-theme-corner { min-height: 0; }
 
@@ -233,6 +238,7 @@
 .lz-searchcol {
   flex: 1; min-width: 0;
   display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  padding-right: 162px;   /* clear of the positioned controls */
 }
 .lz-searchcol .lz-input-search { width: 100%; }
 .lz-clear-below { flex: 0 0 auto; padding: 5px 20px; font-size: .85rem; }
@@ -240,10 +246,11 @@
 .lz-searchsub { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: 100%; }
 .lz-searchsub .lz-filters { margin: 0; }
 
-/* Listen Live above the theme picker, stacked into the search row's height. */
+/* Listen Live above the theme picker, pinned to the row's top-right. */
 .lz-topctrls {
-  display: flex; flex-direction: column; justify-content: center;
-  align-items: stretch; gap: 4px; flex: 0 0 auto;
+  position: absolute; top: 0; right: 0;
+  display: flex; flex-direction: column; align-items: stretch; gap: 4px;
+  width: 150px;
 }
 .lz-stacked { min-height: 0; padding: 6px 14px; font-size: .86rem; width: 100%; }
 .lz-topctrls .lz-kbps { text-align: right; font-size: .68rem; }
@@ -579,11 +586,15 @@
      halfway instead, leaving a sliver of covers under the strip. */
   grid-template-rows: auto;
   grid-auto-rows: 0;
-  overflow: hidden; padding-bottom: 8px;
+  overflow: hidden; padding-bottom: 0;
 }
 /* Album cards. Bigger than the song tiles on purpose: the cover IS the
    affordance here — a guest recognises a record long before they read its
    title — and these are tap targets on a phone held at arm's length. */
+/* Each card clips itself as well as the strip clipping the grid: a card in a
+   zero-height row would otherwise still paint its cover past the row, which is
+   the sliver that appeared under the first column. */
+.lz-albums > * { overflow: hidden; min-height: 0; }
 .lz-album { width: 100%; cursor: pointer; }
 .lz-album-art {
   width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block;
