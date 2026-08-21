@@ -36,7 +36,11 @@ public sealed class AutoDjScheduler : BackgroundService
     private readonly ILogger<AutoDjScheduler> _log;
 
     private int? _currentTrackId;   // last track we reconciled against
-    private bool _toppedUpThisTrack; // single-flight latch (legacy _autoDjQueued)
+    private bool _toppedUpThisTrack;
+
+    // When the idle queue was last primed, and how often that may be retried.
+    private DateTime _idlePrimeUtc = DateTime.MinValue;
+    private static readonly TimeSpan IdlePrimeInterval = TimeSpan.FromSeconds(20); // single-flight latch (legacy _autoDjQueued)
 
     public AutoDjScheduler(AudioEngine engine, PlaylistService playlist, ILogger<AutoDjScheduler> log)
     {
@@ -125,6 +129,14 @@ public sealed class AutoDjScheduler : BackgroundService
             // track the operator explicitly stopped.
             _currentTrackId = null;
             _toppedUpThisTrack = false;
+
+            // …but DO fill the queue, so there is something to press Play on.
+            // The top-up below only runs while playing, which left a cold start
+            // with Auto DJ on and every playlist eligible showing an empty queue
+            // and a dead Play button — nothing could begin because nothing had
+            // begun. Priming is not starting: the queue fills, the operator still
+            // decides when the room hears it.
+            await PrimeIdleQueueAsync(ct);
             return;
         }
 
@@ -156,6 +168,7 @@ public sealed class AutoDjScheduler : BackgroundService
 
         // ── Top up the playlist when it runs low (Auto DJ only) ───────────────
         if (!await _playlist.IsAutoDjOnAsync(ct)) return;
+        _idlePrimeUtc = DateTime.MinValue;   // playing again; allow a fresh prime later
         if (!_toppedUpThisTrack)
         {
             int upcoming = await _playlist.UpcomingCountAsync(status.TrackId, ct);
@@ -165,5 +178,29 @@ public sealed class AutoDjScheduler : BackgroundService
                 await _playlist.TopUpAsync(ct);
             }
         }
+    }
+
+    /// <summary>
+    /// Fills an empty queue while the deck is idle, so Play has something to
+    /// start. Never starts playback — a stopped deck is a decision, and the
+    /// scheduler does not overrule it.
+    ///
+    /// Rate-limited: with Auto DJ on but no playlist eligible (all switched off,
+    /// or every schedule outside its slot) a top-up legitimately produces
+    /// nothing, and retrying that every two seconds would hammer the database
+    /// and the log for the whole silent stretch.
+    /// </summary>
+    private async Task PrimeIdleQueueAsync(CancellationToken ct)
+    {
+        if (!await _playlist.IsAutoDjOnAsync(ct)) return;
+        if (DateTime.UtcNow - _idlePrimeUtc < IdlePrimeInterval) return;
+        _idlePrimeUtc = DateTime.UtcNow;
+
+        if (await _playlist.UpcomingCountAsync(null, ct) > 0) return;
+
+        await _playlist.TopUpAsync(ct);
+        int now = await _playlist.UpcomingCountAsync(null, ct);
+        if (now > 0)
+            _log.LogInformation("Auto DJ primed an empty queue with {Count} track(s) while stopped — press Play to start.", now);
     }
 }

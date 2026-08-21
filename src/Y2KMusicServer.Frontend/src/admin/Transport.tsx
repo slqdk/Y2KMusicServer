@@ -72,7 +72,14 @@ export default function Transport(
         <div className="w-transport">
           <button className="w-btn" title="Restart" disabled={!trackId || busy}
             onClick={() => act(() => api.seek(0))}>⏮</button>
-          <button className="w-btn w-play w-primary" disabled={!trackId || busy}
+          {/* Play stays live with an empty deck: the server resumes the queue, and
+              tops up from Auto DJ first if the queue is empty too. Disabling it
+              on "no track loaded" made a cold start impossible — nothing could
+              begin because nothing had begun. The other three still need a deck. */}
+          <button className="w-btn w-play w-primary" disabled={busy || (playing && !trackId)}
+            title={trackId
+              ? (playing ? 'Pause' : 'Play')
+              : 'Start the queue (tops up from Auto DJ if it is empty)'}
             onClick={() => act(() => (playing ? api.pause() : api.play()))}>
             {playing ? 'Pause' : 'Play'}
           </button>
