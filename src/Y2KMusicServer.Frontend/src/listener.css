@@ -203,9 +203,14 @@
   position: sticky; top: 0; z-index: 30;
   background: var(--lz-bg); padding: 6px 0;
 }
-.lz-search-top {
-  padding: 16px 14px 16px 40px; font-size: 1.08rem;
-  background-position: 14px center;
+/* Two-class selector on purpose: .lz-input and .lz-input-search are defined
+   LATER in this file with the same specificity, so a bare .lz-search-top rule
+   lost to them and the bar never grew. */
+.lz-searchrow .lz-input.lz-search-top {
+  padding: 17px 14px 17px 42px;
+  font-size: 1.08rem;
+  background-position: 15px center;
+  background-size: 17px;
 }
 .lz-rescol .lz-results { flex: none; min-height: 0; max-height: none; overflow: visible; }
 .lz-side {
@@ -879,19 +884,29 @@
 }
 .lz-recent-list { list-style: none; margin: 0; padding: 0; }
 .lz-recent-row { padding: 5px 0; border-bottom: 1px solid var(--lz-line-soft, var(--lz-line)); }
-.lz-recent-top { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
+/* Quiet by design: this is history, not something to act on, so it sits below
+   the chips in weight as well as position — no bold anywhere, and muted colours
+   throughout.
+
+   The ARTIST is never truncated and the ALBUM absorbs the shortfall: knowing
+   which artist played is the whole point of the line, while the album is
+   context you can lose. flex 0 0 auto on the artist, 1 1 auto + min-width 0 on
+   the album, is what makes the ellipsis land on the right one. */
+.lz-recent-top { display: flex; align-items: baseline; gap: 5px; min-width: 0; overflow: hidden; }
 .lz-recent-artist {
-  font-weight: 700; font-size: .8rem; color: var(--lz-text);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-weight: 400; font-size: .78rem; color: var(--lz-muted);
+  white-space: nowrap; flex: 0 0 auto;
 }
 .lz-recent-album {
-  font-size: .72rem; color: var(--lz-muted);
+  font-size: .72rem; color: var(--lz-faint);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex: 1 1 auto; min-width: 0;
 }
 .lz-recent-title {
-  font-size: .84rem; color: var(--lz-text);
+  font-weight: 400; font-size: .8rem; color: var(--lz-faint);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.lz-recent-row .lz-result-sep { color: var(--lz-faint); flex: 0 0 auto; }
 .lz-spbtn { width: 100%; justify-content: center; }
 /* In the rail the popover has room to open downward from the button. */
 .lz-railfoot .lz-sppop { bottom: auto; top: calc(100% + 8px); }
