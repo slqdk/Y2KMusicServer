@@ -947,7 +947,20 @@
 .lz-recent-row .lz-result-sep { color: var(--lz-faint); flex: 0 0 auto; }
 .lz-spbtn { width: 100%; justify-content: center; }
 /* In the rail the popover has room to open downward from the button. */
-.lz-railfoot .lz-sppop { bottom: auto; top: calc(100% + 8px); }
+/* The rail clips its overflow (that's what removed the second scrollbar), so an
+   absolutely-positioned popover inside it is invisible no matter which way it
+   opens — downward it lands outside the rail entirely, upward it is cut at the
+   first pixel that leaves the box.
+   Fixed positioning takes it out of the rail's clipping context: pinned to the
+   bottom-left of the WINDOW, sitting just above the now-playing bar and the
+   Speakers button it belongs to, and growing upward from there. */
+.lz-railfoot .lz-sppop {
+  position: fixed;
+  left: 14px; right: auto;
+  top: auto; bottom: calc(var(--lz-nowbar-h, 96px) + 62px);
+  max-height: 52vh; overflow-y: auto;
+  z-index: 90;
+}
 
 /* Start button: same round slot as Skip, but it reads as GO. */
 .lz-playbtn {
@@ -964,7 +977,13 @@
      and the recently-played list would push the songs off screen. */
   .lz-plcol { height: auto; }
   .lz-recent { display: none; }
-  .lz-railfoot .lz-sppop { bottom: auto; top: calc(100% + 8px); }
+  /* On a phone the rail sits at the top of the page, so the popover opens
+     downward from the button rather than up from the bottom bar. */
+  .lz-railfoot .lz-sppop {
+    position: absolute; left: 0; right: auto;
+    top: calc(100% + 8px); bottom: auto;
+    max-height: 60vh;
+  }
 }
 
 
