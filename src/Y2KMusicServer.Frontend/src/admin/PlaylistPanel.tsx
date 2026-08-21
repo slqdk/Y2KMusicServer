@@ -357,7 +357,11 @@ export default function PlaylistPanel(
             rotation, so it shouldn't sit among the playlists that are. */}
         {[...tiles].sort((a, b) => Number(a.isJingle) - Number(b.isJingle)).map(pl => (
           <div key={pl.id}
-            className={`w-pltile w-raised ${viewing?.id === pl.id ? 'w-viewing' : ''}${pl.isJingle ? ' w-pltile-jingle' : ''}`}
+            className={'w-pltile w-raised'
+              + (viewing?.id === pl.id ? ' w-viewing' : '')
+              + (pl.isJingle ? ' w-pltile-jingle'
+                : pl.explicitOn ? ' w-pltile-on'
+                  : pl.forcedOff ? ' w-pltile-off' : ' w-pltile-sched')}
             onClick={() => setViewing(v => v?.id === pl.id ? null : pl)}
             onContextMenu={e => openTileMenu(e, pl)}
             style={{ position: 'relative' }}
@@ -388,9 +392,11 @@ export default function PlaylistPanel(
                     ? 'Schedule: a timeslot covers now, so it is feeding — click for On'
                     : 'Schedule: no timeslot covers now, so it is not feeding — click for On'}
               onClick={e => { e.stopPropagation(); toggleFeed(pl) }}>
-              {pl.explicitOn ? 'Auto DJ ✓'
-                : pl.forcedOff ? 'Auto DJ ✕'
-                  : pl.feed ? 'Auto DJ ⏱ ✓' : 'Auto DJ ⏱'}
+              {/* Words, not just a glyph: at 10px the icons were the only
+                  difference between two states and it did not read. */}
+              {pl.explicitOn ? 'Auto DJ: ON'
+                : pl.forcedOff ? 'Auto DJ: OFF'
+                  : pl.feed ? 'SCHEDULE ⏱ on now' : 'SCHEDULE ⏱'}
             </button>
             )}
           </div>

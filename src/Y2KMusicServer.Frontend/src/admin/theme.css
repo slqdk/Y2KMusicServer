@@ -223,13 +223,18 @@ button.w-btn.w-tilemenu-btn { position: absolute; top: 1px; right: 1px; min-heig
   padding-right: 14px;
 }
 .w-pltile .w-cat-count { font-size: 10px; }
-/* Auto DJ feed switch on each tile. Green = the operator turned it on; amber =
-   a timeslot has it on right now. Same specificity trick as the ▾ button. */
-button.w-btn.w-tilefeed { margin-top: 2px; width: 100%; min-height: 15px; padding: 0 2px; font-size: 10px; line-height: 13px; }
-button.w-btn.w-tilefeed-on { background: var(--w-on, #C6E8C6); font-weight: bold; }
-button.w-btn.w-tilefeed-sched { background: #F4E4B0; }
-/* Switched off by the operator — a timeslot cannot re-enable it. */
-button.w-btn.w-tilefeed-off { background: #E8C6C6; }
+/* Auto DJ feed switch on each tile — THREE states, each with its own colour on
+   both the button and the tile behind it, because a small glyph at 10px was not
+   telling them apart at a glance:
+     green  = ON, the operator switched it on; schedule ignored
+     pink   = OFF, the operator switched it off; schedule ignored
+     blue   = SCHEDULE, no override — the timeslots decide (the only state in
+              which Schedule… does anything)
+   Same specificity trick as the ▾ button. */
+button.w-btn.w-tilefeed { margin-top: 2px; width: 100%; min-height: 15px; padding: 0 2px; font-size: 10px; line-height: 13px; font-weight: bold; }
+button.w-btn.w-tilefeed-on { background: var(--w-on, #C6E8C6); border-color: #6FA86F; color: #14380F; }
+button.w-btn.w-tilefeed-off { background: #E8C6C6; border-color: #B07A7A; color: #4A1414; }
+button.w-btn.w-tilefeed-sched { background: #CFE0F5; border-color: #6E93C4; color: #10305C; }
 .w-pltile.w-newtile { color: var(--w-disabled); }
 .w-viewhead {
   display: flex; align-items: center; gap: 6px; padding: 2px 6px; margin-bottom: 4px;
@@ -729,10 +734,11 @@ button.w-btn.w-tilefeed-off { background: #E8C6C6; }
 .w-firejingle { font-weight: bold; }
 
 
-/* Auto DJ, third state: following the schedule. Neutral blue so it reads as
-   neither the green "on" nor the pink "off" — and with a ✓ on the label when a
-   timeslot is actually covering right now. */
-.w-tilefeed-sched {
-  background: var(--w-sched-bg, #DCE7F5) !important;
-  border-color: var(--w-sched-edge, #8FAFD4);
-}
+/* The tile itself carries the state too — a tinted body reads from across the
+   room, where a 10px button label does not. Kept pale so the playlist name
+   stays the loudest thing on the tile. */
+.w-pltile-on    { background: #EAF6EA; }
+.w-pltile-off   { background: #F7ECEC; }
+.w-pltile-sched { background: #EDF3FB; }
+/* The jingle tile keeps its own amber; it has no Auto DJ state at all. */
+.w-pltile.w-pltile-jingle { background: var(--w-jingle-bg, #FFF3D6); }
