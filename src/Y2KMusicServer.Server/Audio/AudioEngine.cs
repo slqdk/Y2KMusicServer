@@ -129,9 +129,22 @@ public sealed class AudioEngine
     // Jingle hand-back: a jingle is played out in full, the deck stops, and the
     // next song starts clean after a short silence. No fade in either direction —
     // the silence is the point, it's what makes the room look up.
+    // Stuck-deck watchdog: a deck that says PLAYING while its reader position
+    // never moves and its tap produces nothing. The room hears silence and the
+    // console shows a happy transport, which is the worst possible pairing.
+    private double _watchdogPosSec = -1;
+    private int _watchdogStillTicks;
+    private int _watchdogFiredForTrack = -1;
+
     private bool _gapWaiting;
     private int _gapTicksLeft;
     private const double JingleGapSec = 1.0;
+
+    /// <summary>How long a playing deck may sit at the same position before the
+    /// watchdog calls it stuck. Long enough that a slow SMB read or a paused
+    /// moment can't trip it, short enough that a party notices nothing worse
+    /// than one awkward gap.</summary>
+    private const double StuckMs = 6000;
     private double _crossFadePos;
     private double _crossFadeStep;
     private float _fadeStartVolA;
@@ -1056,6 +1069,55 @@ public sealed class AudioEngine
             lock (_gate)
             {
                 if (_deckA == null) continue;
+
+                // ── Stuck-deck watchdog ─────────────────────────────────────
+                // Playing, not crossfading, not paused — and the reader has not
+                // advanced for StuckSeconds. That means the pump died (an
+                // undecodable file usually, or an output that failed to start):
+                // no exception reaches here, the transport just sits at 0:00
+                // with an empty tap ring while the stream sends silence.
+                //
+                // Recovery is deliberately modest: log it loudly ONCE per track
+                // with the path, then crossfade into the armed deck if there is
+                // one. Nothing is deleted and no queue surgery happens — the
+                // engine says what broke and gets the music moving again.
+                if (_state == PlaybackEngineState.Playing && !_crossfading && !_fadePaused)
+                {
+                    double posNow = -1;
+                    try { posNow = _deckA.Reader.CurrentTime.TotalSeconds; } catch { }
+
+                    if (posNow >= 0 && Math.Abs(posNow - _watchdogPosSec) < 0.02)
+                        _watchdogStillTicks++;
+                    else
+                    {
+                        _watchdogPosSec = posNow;
+                        _watchdogStillTicks = 0;
+                        if (_watchdogFiredForTrack != _deckA.TrackId) _watchdogFiredForTrack = -1;
+                    }
+
+                    if (_watchdogStillTicks * TickMs >= StuckMs && _watchdogFiredForTrack != _deckA.TrackId)
+                    {
+                        _watchdogFiredForTrack = _deckA.TrackId;
+                        _log.LogError(
+                            "Deck A is stuck: \"{Track}\" reports PLAYING but the position has not moved from " +
+                            "{Pos:0.0}s for {Secs:0}s and the deck is producing no audio. The file is most likely " +
+                            "not decodable on this machine. Path: {Path}",
+                            TrackLabel(_deckA.Title, _deckA.Artist), _watchdogPosSec, StuckMs / 1000.0,
+                            _deckA.FilePath);
+
+                        if (_prepared != null && !_crossfading)
+                        {
+                            _log.LogWarning("Stuck deck: crossfading into the armed track to get the room moving.");
+                            _armed = Transition.NormalCrossfade;
+                            tr = StartCrossfade_Locked(_prepared, fromNext: false);
+                        }
+                        else
+                        {
+                            _log.LogWarning("Stuck deck: nothing is armed, so playback stays where it is — " +
+                                            "press Next, or remove the track from the queue.");
+                        }
+                    }
+                }
 
                 // ── Master gain ramp (talk-over duck / fade pause) ──────────
                 // Runs before the mix logic so both decks carry the same gain

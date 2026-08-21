@@ -673,13 +673,17 @@ export default function PlaylistPanel(
           <li className="w-ctxitem" role="menuitem"
             onClick={() => { setConfirmDel(tileMenu.pl); setTileMenu(null) }}>Delete…</li>
           <li className="w-ctxsep" role="separator" />
-          <li className="w-ctxhead" aria-hidden="true">Priority (Auto DJ weight)</li>
-          {[1, 2, 3, 4, 5].map(v => (
-            <li key={v} className="w-ctxitem" role="menuitem" style={{ paddingLeft: 18 }}
-              onClick={() => { setPriority(tileMenu.pl, v); setTileMenu(null) }}>
-              {v}{tileMenu.pl.priority === v ? ' ●' : ''}
-            </li>
-          ))}
+          {/* The number IS the weight in the draw — a 5 is picked five times as
+              often as a 1 — but bare digits gave no clue which end was which. */}
+          <li className="w-ctxhead" aria-hidden="true">Priority — higher plays more often</li>
+          {([[1, 'rarely'], [2, ''], [3, 'default'], [4, ''], [5, 'most often']] as [number, string][])
+            .map(([v, note]) => (
+              <li key={v} className="w-ctxitem" role="menuitem" style={{ paddingLeft: 18 }}
+                title={`Drawn ${v}× as often as a priority-1 playlist`}
+                onClick={() => { setPriority(tileMenu.pl, v); setTileMenu(null) }}>
+                {v}{note ? ` — ${note}` : ''}{tileMenu.pl.priority === v ? ' ●' : ''}
+              </li>
+            ))}
         </ul>
       )}
 
