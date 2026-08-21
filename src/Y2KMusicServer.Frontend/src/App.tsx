@@ -685,13 +685,19 @@ export default function App() {
               placeholder={nameOk ? 'Search songs or artists…' : 'Enter your name first (min. 3 letters)…'}
               title={nameOk ? 'Search songs' : 'Type at least 3 letters of your name to unlock the search'}
             />
+            {/* Clear belongs to the search box, so it sits against it and matches
+                its height rather than floating among the player controls. */}
+            <button className="lz-btn lz-clear-top" title="Clear the search"
+              disabled={q.length === 0 && !albumView && !newestOnly}
+              onClick={() => { onQueryChange(''); setAlbumView(null); setNewestOnly(false) }}>Clear</button>
+
+            {/* Listen Live and the theme picker stack: two half-height controls
+                in the space one full-height one would take, which keeps the row
+                the same height as the taller search box. */}
             <div className="lz-topctrls">
-              <button className="lz-btn" title="Clear the search"
-                disabled={q.length === 0 && !albumView && !newestOnly}
-                onClick={() => { onQueryChange(''); setAlbumView(null); setNewestOnly(false) }}>Clear</button>
               {stream?.showListenLive && (
                 <button
-                  className={`lz-btn${live ? ' is-live' : ''}`}
+                  className={`lz-btn lz-stacked${live ? ' is-live' : ''}`}
                   onClick={toggleLive}
                   disabled={!stream?.enabled}
                   title={stream?.enabled ? 'Listen to the live stream' : 'The stream is off air'}
@@ -699,10 +705,10 @@ export default function App() {
                   {!stream?.enabled ? 'Off air' : live ? '● LIVE' : '▶ Listen Live'}
                 </button>
               )}
+              {themeSelect('lz-theme-corner lz-stacked')}
               {stream?.showListenLive && stream?.enabled && (
                 <span className="lz-kbps">{stream.bitrate} kbps{live ? ` · ${stream.listeners} listening` : ''}</span>
               )}
-              {themeSelect('lz-theme-corner')}
             </div>
           </div>
 
