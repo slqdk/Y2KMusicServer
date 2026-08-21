@@ -689,9 +689,31 @@ export default function App() {
                 placeholder={nameOk ? 'Search songs or artists…' : 'Enter your name first (min. 3 letters)…'}
                 title={nameOk ? 'Search songs' : 'Type at least 3 letters of your name to unlock the search'}
               />
-              <button className="lz-btn lz-clear-below" title="Clear the search"
-                disabled={q.length === 0 && !albumView && !newestOnly}
-                onClick={() => { onQueryChange(''); setAlbumView(null); setNewestOnly(false) }}>Clear</button>
+              {/* Clear and the field filters share the line under the box. They
+                  used to sit apart, leaving a dead band the height of the
+                  stacked player controls beside them. */}
+              <div className="lz-searchsub">
+                <button className="lz-btn lz-clear-below" title="Clear the search"
+                  disabled={q.length === 0 && !albumView && !newestOnly}
+                  onClick={() => { onQueryChange(''); setAlbumView(null); setNewestOnly(false) }}>Clear</button>
+
+                {q.trim().length > 0 && (
+                  <div className="lz-filters">
+                    <span className="lz-filters-label">
+                      {fields.length === 0 || fields.length === 3 ? 'Searching everywhere' : 'Searching in'}
+                    </span>
+                    {([['artist', 'Artist'], ['album', 'Album'], ['title', 'Song']] as [Field, string][])
+                      .map(([f, label]) => (
+                        <button key={f}
+                          className={`lz-filter${fields.length < 3 && fields.includes(f) ? ' is-on' : ''}`}
+                          title={fields.length === 3
+                            ? `Search only the ${label.toLowerCase()}`
+                            : `Match the words against the ${label.toLowerCase()}`}
+                          onClick={() => toggleField(f)}>{label}</button>
+                      ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Listen Live and the theme picker stack: two half-height controls
@@ -717,25 +739,6 @@ export default function App() {
 
           {showResults && (
           <section className="lz-panel lz-results lz-results-bare">
-          {/* Field filters. Only meaningful while searching, so they appear with
-              the text — three toggles, at least one always on. */}
-          {q.trim().length > 0 && (
-            <div className="lz-filters">
-              <span className="lz-filters-label">
-                {fields.length === 0 || fields.length === 3 ? 'Searching everywhere' : 'Searching in'}
-              </span>
-              {([['artist', 'Artist'], ['album', 'Album'], ['title', 'Song']] as [Field, string][])
-                .map(([f, label]) => (
-                  <button key={f}
-                    className={`lz-filter${fields.length < 3 && fields.includes(f) ? ' is-on' : ''}`}
-                    title={fields.length === 3
-                      ? `Search only the ${label.toLowerCase()}`
-                      : `Match the words against the ${label.toLowerCase()}`}
-                    onClick={() => toggleField(f)}>{label}</button>
-                ))}
-            </div>
-          )}
-
           {albumView && (
             <div className="lz-panel-head">
               <span className="lz-albhead">

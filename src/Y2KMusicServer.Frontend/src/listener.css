@@ -236,6 +236,9 @@
 }
 .lz-searchcol .lz-input-search { width: 100%; }
 .lz-clear-below { flex: 0 0 auto; padding: 5px 20px; font-size: .85rem; }
+/* One line under the box: Clear, then the field filters. */
+.lz-searchsub { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: 100%; }
+.lz-searchsub .lz-filters { margin: 0; }
 
 /* Listen Live above the theme picker, stacked into the search row's height. */
 .lz-topctrls {
@@ -571,8 +574,12 @@
 .lz-albums {
   display: grid; gap: 12px;
   grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
-  grid-auto-rows: max-content;
-  max-height: 296px; overflow: hidden; padding-bottom: 8px;
+  /* Exactly one row: the first row sizes to its content, every row after it is
+     given zero height and clipped. A max-height guess cut the second row
+     halfway instead, leaving a sliver of covers under the strip. */
+  grid-template-rows: auto;
+  grid-auto-rows: 0;
+  overflow: hidden; padding-bottom: 8px;
 }
 /* Album cards. Bigger than the song tiles on purpose: the cover IS the
    affordance here — a guest recognises a record long before they read its
