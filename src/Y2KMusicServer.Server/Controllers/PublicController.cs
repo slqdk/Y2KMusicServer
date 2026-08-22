@@ -400,8 +400,14 @@ public sealed class PublicController : ControllerBase
         return hidden == null ? rows : rows.Where(t => !hidden(t.FilePath)).ToList();
     }
 
+    /// <summary>
+    /// The shape every listener/DJ list uses. <c>Type</c> (MP3 / FLAC) rides
+    /// along because the DJ console needs to tell two copies of the same song
+    /// apart — a library with both a FLAC and an MP3 of "Master Of Puppets"
+    /// otherwise shows two identical lines.
+    /// </summary>
     private static List<object> ToItems(IEnumerable<Track> rows) =>
-        rows.Select(t => (object)new { t.Id, t.Title, t.Artist, t.Album, t.DurationSec }).ToList();
+        rows.Select(t => (object)new { t.Id, t.Title, t.Artist, t.Album, t.Type, t.DurationSec }).ToList();
 
     /// <summary>
     /// The saved playlists for the listener browse band (replaces the retired

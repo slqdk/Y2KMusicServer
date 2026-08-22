@@ -30,7 +30,10 @@ type YtJob = {
 }
 type YtDownloads = { folder: string; busy: boolean; jobs: YtJob[] }
 
-type SearchRow = { id: number; title: string | null; artist: string | null; durationSec: number }
+type SearchRow = {
+  id: number; title: string | null; artist: string | null
+  album: string | null; type: string | null; durationSec: number
+}
 
 type JingleRow = { id: number; title: string | null; artist: string | null; durationSec: number }
 type Jingles = { designated: boolean; name: string | null; items: JingleRow[] }
@@ -391,6 +394,12 @@ export default function DjAdmin() {
                 <div className="dj-qmain">
                   <span className="dj-qartist">{d.artist ?? '—'}</span>
                   <span className="dj-qtitle">{d.title}</span>
+                  {/* Album and format underneath: two copies of the same song
+                      are otherwise indistinguishable in this list. */}
+                  <span className="dj-srch-meta">
+                    {t.type && <span className={`dj-fmt is-${(t.type || '').toLowerCase()}`}>{t.type}</span>}
+                    {t.album || 'No album'}
+                  </span>
                 </div>
                 <span className="dj-srch-dur">{fmt(t.durationSec)}</span>
                 <HoldButton

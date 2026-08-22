@@ -205,3 +205,16 @@
 }
 .dj-ytaddbtn { width: 116px; min-height: 46px; flex: 0 0 auto; margin-bottom: 0; }
 .dj-yt-row { flex-direction: column; align-items: stretch; }
+
+/* Search row line three: format badge + album, quieter than the title. */
+.dj-srch-meta {
+  display: flex; align-items: center; gap: 7px;
+  font-size: .76rem; color: #6d7b8d; margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dj-fmt {
+  flex: 0 0 auto; font-size: .66rem; font-weight: 700; letter-spacing: .04em;
+  padding: 1px 6px; border-radius: 6px;
+  background: #1c2430; color: #8fa3ba; border: 1px solid #2b3644;
+}
+.dj-fmt.is-flac { background: #16261d; color: #74c79a; border-color: #2f6a4a; }
