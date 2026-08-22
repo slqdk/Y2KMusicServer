@@ -167,3 +167,41 @@
 .dj-volval.is-dirty { color: #e0a851; }
 .dj-volset { min-height: 62px; }
 .dj-volset:disabled { opacity: .55; }
+
+/* Transport: the biggest button on the screen, because it is the one you press
+   when something has gone wrong and the room is silent. */
+.dj-transport { min-height: 74px; background: #14251a; border-color: #2f7a4d; }
+.dj-transport .dj-btn-label { font-size: 1.25rem; font-weight: 800; }
+.dj-transport.is-playing { background: #251616; border-color: #a04a4a; }
+.dj-transport .dj-btn-fill { background: linear-gradient(90deg, #1f6b3f, #35b06a); }
+.dj-transport.is-playing .dj-btn-fill { background: linear-gradient(90deg, #7a2b2b, #c85a5a); }
+
+/* Search hits: ten text rows, each with a held ＋ to queue it. */
+.dj-srch-list { list-style: none; margin: 10px 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 8px; }
+.dj-srch-row {
+  display: flex; align-items: center; gap: 10px;
+  background: #141821; border: 1px solid #232a36; border-radius: 12px;
+  padding: 8px 10px;
+}
+.dj-srch-dur { font-size: .8rem; color: #6d7b8d; font-variant-numeric: tabular-nums; }
+.dj-srch-req {
+  width: 58px; min-height: 52px; flex: 0 0 auto; margin-bottom: 0;
+  background: #17212c; border-color: #2c3a4a;
+}
+.dj-srch-req .dj-btn-label { font-size: 1.3rem; }
+
+/* Download tab: four tabs no longer fit as three equal columns. */
+.dj-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dj-tab { padding: 11px 6px; font-size: .84rem; }
+
+/* A finished download can be filed into any saved playlist. */
+.dj-ytmain { display: flex; align-items: center; gap: 10px; width: 100%; }
+.dj-ytadd { display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 8px; }
+.dj-ytsel {
+  flex: 1; min-width: 0; font: inherit; font-size: .9rem;
+  background: #0f131a; color: #e8eef7;
+  border: 1px solid #232a36; border-radius: 10px; padding: 10px;
+}
+.dj-ytaddbtn { width: 116px; min-height: 46px; flex: 0 0 auto; margin-bottom: 0; }
+.dj-yt-row { flex-direction: column; align-items: stretch; }

@@ -243,6 +243,64 @@ public sealed class DjController : ControllerBase
         return Ok(new { ok = true });
     }
 
+    /// <summary>
+    /// Starts the music: resumes a paused deck, or with an empty deck picks the
+    /// queue back up (topping up from Auto DJ first if the queue has run dry).
+    /// Same capability as the desktop's Play — the phone should not be the one
+    /// console that cannot start a show.
+    /// </summary>
+    [HttpPost("play")]
+    public async Task<IActionResult> Play(CancellationToken ct)
+    {
+        if (_engine.GetStatus().State == PlaybackEngineState.Playing)
+            return Ok(new { ok = true, alreadyPlaying = true });
+
+        if (_engine.Play()) { _log.LogInformation("DJ page resumed playback."); return Ok(new { ok = true }); }
+
+        var resumeId = await _playlist.ResumeTrackIdAsync(ct);
+        if (resumeId == null && await _playlist.IsAutoDjOnAsync(ct))
+        {
+            await _playlist.TopUpAsync(ct);
+            resumeId = await _playlist.ResumeTrackIdAsync(ct);
+        }
+        if (resumeId is not int trackId)
+            return Conflict(new { ok = false, error = "nothing to play" });
+
+        if (await _engine.LoadAsync(trackId, ct) != LoadResult.Ok)
+            return Conflict(new { ok = false, error = "could not load the track" });
+
+        _engine.Play();
+        _log.LogInformation("DJ page started playback at track {TrackId}.", trackId);
+        return Ok(new { ok = true, started = true });
+    }
+
+    /// <summary>Stops the music. The queue and the playhead are untouched, so
+    /// Play picks up where this left off.</summary>
+    [HttpPost("stop")]
+    public IActionResult Stop()
+    {
+        _engine.Stop();
+        _log.LogInformation("DJ page stopped playback.");
+        return Ok(new { ok = true });
+    }
+
+    /// <summary>
+    /// Queues any library track from the phone's search — it lands where a
+    /// hand-picked track lands, just before the next Auto DJ entry, so it plays
+    /// after the current song rather than interrupting it.
+    /// </summary>
+    [HttpPost("queue/{trackId:int}")]
+    public async Task<IActionResult> QueueTrack(int trackId, CancellationToken ct)
+    {
+        var current = _engine.GetStatus().TrackId;
+        var r = await _playlist.AddAsync(trackId, PlaylistSource.Manual, "DJ", current, ct);
+        if (r != PlaylistAddResult.Ok)
+            return UnprocessableEntity(new { ok = false, error = r.ToString() });
+
+        _log.LogInformation("DJ page queued track {TrackId}.", trackId);
+        return Ok(new { ok = true });
+    }
+
     public sealed record TrimBody(int Percent);
 
     /// <summary>

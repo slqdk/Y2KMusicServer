@@ -25,6 +25,11 @@ export default function YouTubeDialog(
   const [queueing, setQueueing] = useState(false)
   const [dlErr, setDlErr] = useState<string | null>(null)
   const [dl, setDl] = useState<api.YouTubeDownloads | null>(null)
+  // Saved playlists a finished download can be filed into, and the choice made
+  // per job. Adding is only offered once a job is done: before that there is no
+  // library row to add.
+  const [targets, setTargets] = useState<api.SavedPlaylistDto[]>([])
+  const [pickFor, setPickFor] = useState<Record<number, number>>({})
 
   // Search
   const [q, setQ] = useState('')
@@ -39,7 +44,20 @@ export default function YouTubeDialog(
 
   useEffect(() => {
     api.getYouTubeSettings().then(s => setEnabled(s.enabled)).catch(() => setEnabled(false))
+    api.getSavedPlaylists().then(r => setTargets(r.playlists)).catch(() => {})
   }, [])
+
+  const addToSaved = async (jobId: number, trackId: number) => {
+    const plId = pickFor[jobId] ?? targets[0]?.id
+    if (!plId) return
+    try {
+      const r = await api.addToSavedPlaylist(plId, trackId)
+      const name = targets.find(t => t.id === plId)?.name ?? 'playlist'
+      setDlErr(r.alreadyPresent ? `Already in ${name}.` : `Added to ${name}.`)
+    } catch {
+      setDlErr('Could not add it to that playlist.')
+    }
+  }
 
   const refreshJobs = useCallback(() => {
     api.getYouTubeDownloads().then(d => { if (alive.current) setDl(d) }).catch(() => {})
@@ -194,10 +212,30 @@ export default function YouTubeDialog(
                             </button>
                           )}
                           {j.state === 'done' && j.trackId != null && (
-                            <button className="w-btn"
-                              onClick={() => { api.addToPlaylist(j.trackId as number, 'Manual', true).catch(() => {}) }}>
-                              Queue
-                            </button>
+                            <>
+                              <button className="w-btn"
+                                title="Play it later tonight — adds it to the live queue"
+                                onClick={() => { api.addToPlaylist(j.trackId as number, 'Manual', true).catch(() => {}) }}>
+                                Queue
+                              </button>
+                              {targets.length > 0 && (
+                                <>
+                                  <select value={pickFor[j.id] ?? targets[0].id}
+                                    title="Keep it: file the download into a saved playlist"
+                                    onChange={e => setPickFor(m => ({ ...m, [j.id]: Number(e.target.value) }))}>
+                                    {targets.map(t => (
+                                      <option key={t.id} value={t.id}>
+                                        {t.isJingle ? `🔔 ${t.name}` : t.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button className="w-btn"
+                                    onClick={() => { void addToSaved(j.id, j.trackId as number) }}>
+                                    Add
+                                  </button>
+                                </>
+                              )}
+                            </>
                           )}
                         </div>
                       </div>

@@ -30,11 +30,13 @@ type YtJob = {
 }
 type YtDownloads = { folder: string; busy: boolean; jobs: YtJob[] }
 
+type SearchRow = { id: number; title: string | null; artist: string | null; durationSec: number }
+
 type JingleRow = { id: number; title: string | null; artist: string | null; durationSec: number }
 type Jingles = { designated: boolean; name: string | null; items: JingleRow[] }
 
 /** The three screens. Control is what you need mid-song; the rest is planning. */
-type Tab = 'control' | 'playlist' | 'jingles'
+type Tab = 'control' | 'playlist' | 'jingles' | 'download'
 
 type DjState = {
   /** Live volume trim, 10–100% of the master setting. */
@@ -119,11 +121,21 @@ export default function DjAdmin() {
   const [ytUrl, setYtUrl] = useState('')
   const [yt, setYt] = useState<YtDownloads | null>(null)
   const [jingles, setJingles] = useState<Jingles | null>(null)
+  // Every saved playlist, including the jingle one — a downloaded track may well
+  // be a new jingle. Chosen per job, so one download can go to several lists by
+  // picking each in turn.
+  const [targets, setTargets] = useState<{ id: number; name: string; isJingle: boolean }[]>([])
+  const [pickFor, setPickFor] = useState<Record<number, number>>({})
   // Volume trim. The slider is a PROPOSAL until Set is held: it snaps back to
   // the live value after 5 s of no commit, so a slider nudged in a pocket can
   // never quietly become the room's volume.
   const [trimSlider, setTrimSlider] = useState<number | null>(null)
   const trimTimer = useRef<number | undefined>(undefined)
+  // Song search: text only, ten hits, each one held to queue. No artwork — this
+  // screen is used one-handed in a dark room.
+  const [sq, setSq] = useState('')
+  const [sres, setSres] = useState<SearchRow[]>([])
+  const searchTimer = useRef<number | undefined>(undefined)
   // The open screen survives a reload — a DJ who refreshes mid-set shouldn't
   // land back on a tab they weren't using.
   const [tab, setTab] = useState<Tab>(() => {
@@ -162,6 +174,16 @@ export default function DjAdmin() {
       const g = await fetch('/api/dj/jingles')
       if (g.ok) setJingles(await g.json())
     } catch { /* keep the last good list */ }
+    try {
+      const p = await fetch('/api/admin/saved-playlists')
+      if (p.ok) {
+        const d = await p.json()
+        setTargets(Array.isArray(d?.playlists)
+          ? d.playlists.map((x: { id: number; name: string; isJingle?: boolean }) =>
+              ({ id: x.id, name: x.name, isJingle: !!x.isJingle }))
+          : [])
+      }
+    } catch { /* the picker just stays empty */ }
   }, [])
 
   // Queue whatever is in the box: a pasted link, an album link, or just words
@@ -220,6 +242,44 @@ export default function DjAdmin() {
 
   useEffect(() => () => window.clearTimeout(trimTimer.current), [])
 
+  // Debounced so a typed word is one request, not eight.
+  useEffect(() => {
+    window.clearTimeout(searchTimer.current)
+    const term = sq.trim()
+    if (term.length < 2) { setSres([]); return }
+    searchTimer.current = window.setTimeout(() => {
+      fetch(`/api/search?q=${encodeURIComponent(term)}&take=10`)
+        .then(r => r.ok ? r.json() : { items: [] })
+        .then(d => setSres(Array.isArray(d?.items) ? d.items.slice(0, 10) : []))
+        .catch(() => setSres([]))
+    }, 350)
+    return () => window.clearTimeout(searchTimer.current)
+  }, [sq])
+
+  const queueTrack = useCallback(async (t: SearchRow) => {
+    const ok = await post(`/api/dj/queue/${t.id}`)
+    if (ok) setMsg(`“${t.title ?? 'Track'}” is queued.`)
+    void refresh()
+  }, [post, refresh])
+
+  // Adding is only possible once the file exists and has a library row, which is
+  // exactly what state === 'done' with a trackId means.
+  const addToPlaylist = useCallback(async (job: YtJob) => {
+    const plId = pickFor[job.id] ?? targets[0]?.id
+    if (!plId || job.trackId == null) return
+    const ok = await post(`/api/admin/saved-playlists/${plId}/tracks`, { trackId: job.trackId })
+    if (ok) {
+      const name = targets.find(t => t.id === plId)?.name ?? 'playlist'
+      setMsg(`Added to ${name}.`)
+    }
+  }, [pickFor, targets, post])
+
+  const toggleTransport = useCallback(async () => {
+    const ok = await post(st?.playing ? '/api/dj/stop' : '/api/dj/play')
+    if (ok) setMsg(st?.playing ? 'Stopped.' : 'Playing.')
+    void refresh()
+  }, [st?.playing, post, refresh])
+
   const np = split(st?.artist ?? null, st?.title ?? null)
   const gainPct = Math.round((st?.duckGain ?? 1) * 100)
 
@@ -231,7 +291,8 @@ export default function DjAdmin() {
       </header>
 
       <nav className="dj-tabs" role="tablist">
-        {([['control', '🎛 Control'], ['playlist', '♫ Playlist'], ['jingles', '🔔 Jingles']] as [Tab, string][])
+        {([['control', '🎛 Control'], ['playlist', '♫ Playlist'],
+           ['jingles', '🔔 Jingles'], ['download', '⬇ Download']] as [Tab, string][])
           .map(([id, label]) => (
             <button key={id} role="tab" aria-selected={tab === id}
               className={`dj-tab${tab === id ? ' is-on' : ''}`}
@@ -303,6 +364,48 @@ export default function DjAdmin() {
         />
       </div>
 
+      {/* Transport, then search — both at the bottom of Control, where a thumb
+          reaches without shifting grip. */}
+      <HoldButton
+        className={`dj-transport${st?.playing ? ' is-playing' : ''}`}
+        label={st?.playing ? '■ STOP' : '▶ PLAY'}
+        sub={st?.playing ? 'hold ½s · stops the music' : 'hold ½s · starts the queue'}
+        onFire={() => { void toggleTransport() }}
+      />
+
+      <section className="dj-sect">
+        <h2 className="dj-sect-head">Find a song</h2>
+        <input
+          className="dj-yt-input"
+          type="search"
+          value={sq}
+          spellCheck={false}
+          placeholder="Artist or title…"
+          onChange={e => setSq(e.target.value)}
+        />
+        <ul className="dj-srch-list">
+          {sres.map(t => {
+            const d = split(t.artist, t.title)
+            return (
+              <li key={t.id} className="dj-srch-row">
+                <div className="dj-qmain">
+                  <span className="dj-qartist">{d.artist ?? '—'}</span>
+                  <span className="dj-qtitle">{d.title}</span>
+                </div>
+                <span className="dj-srch-dur">{fmt(t.durationSec)}</span>
+                <HoldButton
+                  className="dj-srch-req"
+                  label="＋"
+                  onFire={() => { void queueTrack(t) }}
+                />
+              </li>
+            )
+          })}
+          {sq.trim().length >= 2 && sres.length === 0 && (
+            <li className="dj-empty">No matches.</li>
+          )}
+        </ul>
+      </section>
       </>)}
 
       {tab === 'playlist' && (<>
@@ -358,40 +461,68 @@ export default function DjAdmin() {
         </ul>
       </section>
 
-      <section className="dj-sect">
-        <h2 className="dj-sect-head">Add from YouTube</h2>
-        <input
-          className="dj-yt-input"
-          type="text"
-          value={ytUrl}
-          spellCheck={false}
-          placeholder="Paste a link, or type a song"
-          onChange={e => setYtUrl(e.target.value)}
-        />
-        <HoldButton
-          className="dj-yt-go"
-          label="⬇ Download to library"
-          sub={yt?.folder ? `hold · lands in ${yt.folder}` : 'hold ½s'}
-          disabled={!ytUrl.trim()}
-          onFire={() => { void queueDownload() }}
-        />
-        <ul className="dj-yt-list">
-          {(yt?.jobs ?? []).slice(0, 6).map(j => (
-            <li key={j.id} className={`dj-yt-row is-${j.state}`}>
-              <div className="dj-qmain">
-                <span className="dj-qartist">{j.artist ?? '—'}</span>
-                <span className="dj-qtitle">{j.title}</span>
-              </div>
-              <span className="dj-yt-state">
-                {j.state === 'downloading' ? `${Math.round(j.percent)}%` : j.state}
-              </span>
-            </li>
-          ))}
-          {(yt?.jobs.length ?? 0) === 0 && <li className="dj-empty">No downloads yet.</li>}
-        </ul>
-      </section>
-
       </>)}
+
+      {tab === 'download' && (
+        <section className="dj-sect">
+          <h2 className="dj-sect-head">Add from YouTube</h2>
+          <input
+            className="dj-yt-input"
+            type="text"
+            value={ytUrl}
+            spellCheck={false}
+            placeholder="Paste a link, or type a song"
+            onChange={e => setYtUrl(e.target.value)}
+          />
+          <HoldButton
+            className="dj-yt-go"
+            label="⬇ Download to library"
+            sub={yt?.folder ? `hold · lands in ${yt.folder}` : 'hold ½s'}
+            disabled={!ytUrl.trim()}
+            onFire={() => { void queueDownload() }}
+          />
+
+          {/* A finished download gets a playlist picker: it has a file and a
+              library row, so it can be filed. Pick a list, hold ＋, repeat for
+              as many lists as you want it on. Unfinished jobs show progress
+              only — there is nothing to add yet. */}
+          <ul className="dj-yt-list">
+            {(yt?.jobs ?? []).map(j => (
+              <li key={j.id} className={`dj-yt-row is-${j.state}`}>
+                <div className="dj-ytmain">
+                  <div className="dj-qmain">
+                    <span className="dj-qartist">{j.artist ?? '—'}</span>
+                    <span className="dj-qtitle">{j.title}</span>
+                  </div>
+                  <span className="dj-yt-state">
+                    {j.state === 'downloading' ? `${Math.round(j.percent)}%` : j.state}
+                  </span>
+                </div>
+
+                {j.state === 'done' && j.trackId != null && targets.length > 0 && (
+                  <div className="dj-ytadd">
+                    <select
+                      className="dj-ytsel"
+                      value={pickFor[j.id] ?? targets[0].id}
+                      onChange={e => setPickFor(m => ({ ...m, [j.id]: Number(e.target.value) }))}
+                    >
+                      {targets.map(t => (
+                        <option key={t.id} value={t.id}>{t.isJingle ? `🔔 ${t.name}` : t.name}</option>
+                      ))}
+                    </select>
+                    <HoldButton
+                      className="dj-ytaddbtn"
+                      label="＋ Add"
+                      onFire={() => { void addToPlaylist(j) }}
+                    />
+                  </div>
+                )}
+              </li>
+            ))}
+            {(yt?.jobs.length ?? 0) === 0 && <li className="dj-empty">No downloads yet.</li>}
+          </ul>
+        </section>
+      )}
 
       {tab === 'jingles' && (
         <section className="dj-sect">
