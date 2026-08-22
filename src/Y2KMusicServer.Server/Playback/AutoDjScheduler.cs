@@ -40,7 +40,17 @@ public sealed class AutoDjScheduler : BackgroundService
 
     // When the idle queue was last primed, and how often that may be retried.
     private DateTime _idlePrimeUtc = DateTime.MinValue;
-    private static readonly TimeSpan IdlePrimeInterval = TimeSpan.FromSeconds(20); // single-flight latch (legacy _autoDjQueued)
+    private static readonly TimeSpan IdlePrimeInterval = TimeSpan.FromSeconds(20);
+
+    // Quiet period before a top-up. The queue running low is not urgent — what
+    // IS disruptive is topping up while the operator is still editing: delete
+    // four tracks in a row and the first delete drops the count to the
+    // threshold, Auto DJ appends three, and the remaining deletes are aimed at
+    // a list that has already moved under the finger. Waiting until the queue
+    // has been UNCHANGED for this long means a burst of edits settles first.
+    private static readonly TimeSpan TopUpQuietPeriod = TimeSpan.FromSeconds(20);
+    private DateTime _lowSinceUtc = DateTime.MinValue;
+    private int _lastUpcomingSeen = -1; // single-flight latch (legacy _autoDjQueued)
 
     public AutoDjScheduler(AudioEngine engine, PlaylistService playlist, ILogger<AutoDjScheduler> log)
     {
@@ -172,11 +182,41 @@ public sealed class AutoDjScheduler : BackgroundService
         if (!_toppedUpThisTrack)
         {
             int upcoming = await _playlist.UpcomingCountAsync(status.TrackId, ct);
-            if (upcoming <= TopUpThreshold)
+            var now = DateTime.UtcNow;
+
+            if (upcoming > TopUpThreshold)
             {
-                _toppedUpThisTrack = true; // single-flight; reset on next track change
-                await _playlist.TopUpAsync(ct);
+                // Comfortably stocked: forget any pending wait.
+                _lowSinceUtc = DateTime.MinValue;
+                _lastUpcomingSeen = upcoming;
+                return;
             }
+
+            // Any change to the count — a delete, a request, a hand-queued track —
+            // restarts the wait, so a burst of edits is treated as one edit.
+            if (upcoming != _lastUpcomingSeen)
+            {
+                _lastUpcomingSeen = upcoming;
+                _lowSinceUtc = now;
+                return;
+            }
+            if (_lowSinceUtc == DateTime.MinValue) { _lowSinceUtc = now; return; }
+
+            // Safety valve: an EMPTY queue with the current track nearly over
+            // can't wait out the quiet period — that would be silence. Anything
+            // else waits.
+            double remaining = status.DurationSec - status.PositionSec;
+            bool aboutToRunDry = upcoming == 0 && remaining > 0 && remaining < 45;
+
+            if (!aboutToRunDry && now - _lowSinceUtc < TopUpQuietPeriod) return;
+
+            _toppedUpThisTrack = true; // single-flight; reset on next track change
+            _lowSinceUtc = DateTime.MinValue;
+            int added = await _playlist.TopUpAsync(ct);
+            if (added > 0)
+                _log.LogInformation(
+                    "Auto DJ topped up {Count} track(s) at the end of the queue after {Wait:0}s of no edits.",
+                    added, aboutToRunDry ? 0 : TopUpQuietPeriod.TotalSeconds);
         }
     }
 
