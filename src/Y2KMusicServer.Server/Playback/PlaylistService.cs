@@ -199,8 +199,38 @@ public sealed class PlaylistService
         await using var db = await _dbf.CreateDbContextAsync(ct);
         var entries = await db.PlaylistEntries.AsNoTracking()
             .OrderBy(e => e.Position).ToListAsync(ct);
-        int curPos = CurrentPosition(entries, currentTrackId);
+        int curPos = ResolvedPosition(entries, currentTrackId);
         return entries.Count(e => e.Position > curPos);
+    }
+
+    /// <summary>
+    /// Where the queue has got to, resolving the SAME way whether or not
+    /// something is on the deck.
+    ///
+    /// <see cref="CurrentPosition"/> answers -1 when it can't resolve a track —
+    /// which includes the ordinary case of nothing playing at all. Counting
+    /// "entries after -1" then counts the WHOLE queue as upcoming, including
+    /// everything already played, so a queue that is actually exhausted looks
+    /// four deep. Auto DJ then sees no reason to top up and the show sits
+    /// stopped in front of a list of songs it has already played.
+    ///
+    /// The playhead knows better: it survives restarts and points at the last
+    /// entry that genuinely played, so fall back to it.
+    /// </summary>
+    private int ResolvedPosition(List<PlaylistEntry> entries, int? currentTrackId)
+    {
+        int curPos = CurrentPosition(entries, currentTrackId);
+        if (curPos >= 0) return curPos;
+
+        EnsurePlayheadLoaded();
+        int head = Volatile.Read(ref _playheadEntryId);
+        var prev = head != 0 ? entries.FirstOrDefault(e => e.Id == head) : null;
+        if (prev == null)
+        {
+            int lastTrack = Volatile.Read(ref _playheadTrackId);
+            if (lastTrack != 0) prev = entries.LastOrDefault(e => e.TrackId == lastTrack);
+        }
+        return prev?.Position ?? -1;
     }
 
     /// <summary>
@@ -228,21 +258,10 @@ public sealed class PlaylistService
         // The playhead still remembers the last entry that genuinely played
         // (CurrentPosition leaves it alone when it can't resolve a track), so
         // carry on from THERE instead.
-        if (!currentInQueue)
-        {
-            int head = Volatile.Read(ref _playheadEntryId);
-            var prev = head != 0 ? entries.FirstOrDefault(e => e.Id == head) : null;
-
-            // The remembered entry may have been pruned or renumbered away; fall
-            // back to the last track id we know played, then to the head.
-            if (prev == null)
-            {
-                int lastTrack = Volatile.Read(ref _playheadTrackId);
-                if (lastTrack != 0)
-                    prev = entries.LastOrDefault(e => e.TrackId == lastTrack);
-            }
-            curPos = prev?.Position ?? -1;
-        }
+        // Same fallback the count uses: a fired jingle, a hand-loaded track, or
+        // nothing playing at all leaves CurrentPosition unable to answer, and
+        // resuming from -1 would restart the queue from its head.
+        if (!currentInQueue) curPos = ResolvedPosition(entries, currentTrackId);
 
         var next = entries.Where(e => e.Position > curPos)
             .OrderBy(e => e.Position)

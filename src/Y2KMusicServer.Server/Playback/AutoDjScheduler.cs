@@ -236,11 +236,16 @@ public sealed class AutoDjScheduler : BackgroundService
         if (DateTime.UtcNow - _idlePrimeUtc < IdlePrimeInterval) return;
         _idlePrimeUtc = DateTime.UtcNow;
 
+        // "Upcoming" means AFTER the playhead: a queue holding four already-played
+        // entries and nothing else is exhausted, not stocked.
         if (await _playlist.UpcomingCountAsync(null, ct) > 0) return;
 
         await _playlist.TopUpAsync(ct);
         int now = await _playlist.UpcomingCountAsync(null, ct);
         if (now > 0)
-            _log.LogInformation("Auto DJ primed an empty queue with {Count} track(s) while stopped — press Play to start.", now);
+            _log.LogInformation("Auto DJ primed a spent queue with {Count} track(s) while stopped — press Play to start.", now);
+        else
+            _log.LogWarning("Auto DJ has nothing to queue: no playlist is eligible right now " +
+                            "(all switched off, or every schedule outside its slot).");
     }
 }
