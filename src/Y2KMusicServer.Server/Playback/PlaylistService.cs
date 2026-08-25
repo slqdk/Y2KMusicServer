@@ -976,10 +976,42 @@ public sealed class PlaylistService
 
                     if (scored.Count == 0)
                     {
-                        // This playlist has nothing eligible right now — draw
-                        // another (without replacement) for this pick.
-                        remaining.Remove(pl);
-                        continue;
+                        // Nothing eligible — but "everything is fed" is not the
+                        // only way a playlist runs dry, and it was the only case
+                        // that reset the bag. With 40 of 42 tracks fed and the
+                        // other two outside the duration gate, the bag could
+                        // never empty: permanently 40/42 dealt, permanently
+                        // nothing to play. Reset on NO ELIGIBLE TRACKS instead,
+                        // and try this playlist once more with a fresh deal.
+                        bool hadFed;
+                        lock (_historyLock)
+                        {
+                            hadFed = fed.Count > 0;
+                            if (hadFed)
+                            {
+                                fed.Clear();
+                                ReshuffleBag_Locked(pl, members, rng);
+                            }
+                        }
+
+                        if (hadFed)
+                        {
+                            _log.LogInformation(
+                                "Auto DJ: playlist \"{Name}\" had nothing eligible with {Fed} track(s) dealt — " +
+                                "reshuffled early rather than going quiet.", pl.Name, members.Count);
+
+                            foreach (var t in BagWindowFor(pl, members, rng, Eligible))
+                                scored.Add((t, Score(t, 0.1)));
+                        }
+
+                        if (scored.Count == 0)
+                        {
+                            // Still nothing: this playlist is genuinely blocked
+                            // (all queued, too similar, or unreadable). Draw
+                            // another, without replacement, for this pick.
+                            remaining.Remove(pl);
+                            continue;
+                        }
                     }
 
                     // Weighted-random over the scored candidates keeps variety
@@ -998,6 +1030,43 @@ public sealed class PlaylistService
                 if (normPick.Length > 0) batchArtists.Add(normPick);
                 upcomingArtists.Add(normPick);
                 simWindow.Add((pick.Artist ?? "", pick.Title ?? ""));
+            }
+
+            // Last resort before silence: relax the taste filters — similarity,
+            // artist spacing, the recently-played window — and keep only the
+            // hard ones (playable file, sane duration, not already queued). A
+            // repeat is a small problem; an empty queue is the show stopping.
+            if (picks.Count == 0)
+            {
+                var queuedIds = new HashSet<int>(entries.Select(e => e.TrackId));
+                var fallback = active
+                    .SelectMany(pl => tracksByPl[pl.Id].Select(t => (Track: t, Name: pl.Name)))
+                    .Where(x => !queuedIds.Contains(x.Track.Id)
+                                && x.Track.DurationSec >= MinAutoDjDurationSec
+                                && x.Track.DurationSec <= MaxAutoDjDurationSec
+                                && File.Exists(x.Track.FilePath))
+                    .OrderBy(x => FreshnessFactor(x.Track.Id) * -1)   // least recently played first
+                    .Take(tracksToAdd)
+                    .ToList();
+
+                if (fallback.Count > 0)
+                {
+                    _log.LogWarning(
+                        "Auto DJ relaxed its filters to avoid silence: queued {Count} track(s) that would " +
+                        "normally have been held back (too similar, same artist, or played recently).",
+                        fallback.Count);
+                    foreach (var f in fallback)
+                    {
+                        picks.Add((f.Track, f.Name));
+                        lock (_historyLock)
+                        {
+                            if (!_fedFromPlaylist.TryGetValue(
+                                    active.First(p2 => p2.Name == f.Name).Id, out var bag))
+                                _fedFromPlaylist[active.First(p2 => p2.Name == f.Name).Id] = bag = new HashSet<int>();
+                            bag.Add(f.Track.Id);
+                        }
+                    }
+                }
             }
 
             if (picks.Count == 0)
@@ -1023,12 +1092,16 @@ public sealed class PlaylistService
                     int missingFile = members.Count(m => !fedSet.Contains(m.Id) && !excluded.Contains(m.Id)
                         && !File.Exists(m.FilePath));
 
+                    // Placeholders are POSITIONAL: the names are labels, the
+                    // values bind in order. Min/Max sat before Similar/Missing in
+                    // the template but after them in the argument list, which is
+                    // how a 42-track playlist reported 360 unreadable files.
                     _log.LogWarning(
                         "Auto DJ could not pick from \"{Name}\": {Members} track(s) — {Fed} already fed this pass, " +
                         "{Excluded} queued or recently played, {Length} outside the {MinLen:0}–{MaxLen:0}s duration gate, " +
                         "{Similar} too similar to what just played, {Missing} file(s) not readable.",
-                        pl.Name, members.Count, fedOut, queuedOrRecent, badLength, tooSimilar, missingFile,
-                        MinAutoDjDurationSec, MaxAutoDjDurationSec);
+                        pl.Name, members.Count, fedOut, queuedOrRecent, badLength,
+                        MinAutoDjDurationSec, MaxAutoDjDurationSec, tooSimilar, missingFile);
                 }
                 return 0;
             }
