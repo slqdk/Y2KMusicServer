@@ -206,13 +206,15 @@ public sealed class DjController : ControllerBase
         var status = _engine.GetStatus();
         if (status.State != PlaybackEngineState.Playing || status.TrackId == null)
         {
-            // Nothing on air to mix out of: load it and start.
-            var loaded = await _engine.LoadAsync(trackId, ct);
+            // Stopped: play the jingle ON ITS OWN. No fade either side, nothing
+            // armed behind it, and the deck returns to stopped when it ends —
+            // firing a jingle is not a way of starting the night by accident.
+            var loaded = await _engine.PlayJingleOnceAsync(trackId, ct);
             if (loaded != LoadResult.Ok)
                 return UnprocessableEntity(new { ok = false, error = loaded.ToString() });
-            _engine.Play();
-            _log.LogInformation("DJ page started jingle track {TrackId} from stopped.", trackId);
-            return Ok(new { ok = true, started = true });
+
+            _log.LogInformation("DJ page fired a one-shot jingle (track {TrackId}) from a stopped deck.", trackId);
+            return Ok(new { ok = true, started = true, oneShot = true });
         }
 
         _engine.ArmTransition(Transition.NormalCrossfade);

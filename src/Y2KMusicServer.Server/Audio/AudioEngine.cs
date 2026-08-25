@@ -141,6 +141,12 @@ public sealed class AudioEngine
     // never override a stop somebody asked for.
     private bool _stoppedByOperator;
 
+    // A jingle fired while the deck was STOPPED. It plays once, on its own, with
+    // no fade at either end and nothing armed behind it — and when it finishes
+    // the engine goes back to stopped rather than carrying on. A stop is a
+    // decision; a jingle is not a request to undo it.
+    private bool _oneShotJingle;
+
     private bool _gapWaiting;
     private int _gapTicksLeft;
     private const double JingleGapSec = 1.0;
@@ -529,6 +535,7 @@ public sealed class AudioEngine
             _prepared = null;
             _state = PlaybackEngineState.Stopped;
             _stoppedByOperator = false;   // a freshly loaded deck is waiting, not refused
+            _oneShotJingle = false;
         }
 
         DisposeOffThread(oldA, oldB, oldPrepared);
@@ -661,6 +668,33 @@ public sealed class AudioEngine
     /// than because the music ran out.</summary>
     public bool StoppedByOperator { get { lock (_gate) return _stoppedByOperator; } }
 
+    /// <summary>True while a one-shot jingle is on air. Auto DJ leaves the decks
+    /// alone for its duration: nothing is armed behind it and the queue is not
+    /// topped up, so it ends in silence instead of mixing into a show that was
+    /// deliberately stopped.</summary>
+    public bool OneShotJingle { get { lock (_gate) return _oneShotJingle; } }
+
+    /// <summary>
+    /// Plays one jingle from a stopped deck and stops again afterwards. No
+    /// crossfade in (there is nothing to fade from) and none out (nothing is
+    /// armed) — it starts, it plays, it ends, and the transport returns to
+    /// stopped until somebody presses Play.
+    /// </summary>
+    public async Task<LoadResult> PlayJingleOnceAsync(int trackId, CancellationToken ct = default)
+    {
+        var loaded = await LoadAsync(trackId, ct);
+        if (loaded != LoadResult.Ok) return loaded;
+
+        lock (_gate) _oneShotJingle = true;   // set AFTER the load, which clears it
+        if (!Play())
+        {
+            lock (_gate) _oneShotJingle = false;
+            return LoadResult.NotFound;
+        }
+        _log.LogInformation("One-shot jingle: playing from a stopped deck; the show stays stopped afterwards.");
+        return LoadResult.Ok;
+    }
+
     public bool Play()
     {
         lock (_gate)
@@ -716,6 +750,7 @@ public sealed class AudioEngine
             _prepared = null;
             _bManualStarted = false;
             _stoppedByOperator = true;
+            _oneShotJingle = false;
             _deckA.StopRequested = true;
             _deckA.Out.Stop();
             try { _deckA.Reader.Position = 0; } catch { }
@@ -2283,12 +2318,26 @@ public sealed class AudioEngine
             }
             else if (ReferenceEquals(deck, _deckA))
             {
-                // Ran out with nothing armed. Leave the flag alone so Auto DJ can
-                // tell this apart from a stop somebody pressed.
                 _state = PlaybackEngineState.Stopped;
-                _stoppedByOperator = false;
                 np = BuildNowPlaying_Locked();
-                _log.LogWarning("Deck A reached the end with nothing armed — playback stopped.");
+
+                if (_oneShotJingle)
+                {
+                    // The deck was stopped before this jingle and goes back to
+                    // stopped now. Marking it as an operator stop is what keeps
+                    // Auto DJ from treating the silence as "the music ran out"
+                    // and restarting the show behind it.
+                    _oneShotJingle = false;
+                    _stoppedByOperator = true;
+                    _log.LogInformation("One-shot jingle finished — staying stopped until Play is pressed.");
+                }
+                else
+                {
+                    // Ran out with nothing armed. Leave the flag alone so Auto DJ
+                    // can tell this apart from a stop somebody pressed.
+                    _stoppedByOperator = false;
+                    _log.LogWarning("Deck A reached the end with nothing armed — playback stopped.");
+                }
             }
             else
             {

@@ -153,6 +153,11 @@ public sealed class AutoDjScheduler : BackgroundService
 
         if (status.State != PlaybackEngineState.Playing || status.TrackId is null) return;
 
+        // A one-shot jingle owns the decks for its duration. This gate sits ABOVE
+        // the arming block on purpose: arming is exactly what would queue a song
+        // behind the jingle and turn a deliberate stop into a running show.
+        if (_engine.OneShotJingle) return;
+
         // ── Chain: keep the engine armed with the playlist's NEXT entry ───────
         // Deliberately NOT gated on the Auto DJ toggle: a queue with entries is
         // a promise to play through — manual adds and activated playlists must
