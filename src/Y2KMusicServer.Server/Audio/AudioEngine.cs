@@ -150,6 +150,11 @@ public sealed class AudioEngine
     /// moment can't trip it, short enough that a party notices nothing worse
     /// than one awkward gap.</summary>
     private const double StuckMs = 6000;
+
+    /// <summary>How long after a track starts the health tap tolerates slow
+    /// reads and level steps without calling them anomalies. A first read off
+    /// the SMB share routinely takes tens of milliseconds.</summary>
+    private const double StartupGraceSec = 3.0;
     private double _crossFadePos;
     private double _crossFadeStep;
     private float _fadeStartVolA;
@@ -274,6 +279,24 @@ public sealed class AudioEngine
 
         string ctx = _crossfading ? (_activePlan != null ? "mix plan" : "crossfade")
                    : _prepared != null ? "armed" : "steady";
+
+        // Grace period at the head of a track. The first seconds of a deck are
+        // a cold SMB read: one slow read and a step in level as the fade-in
+        // takes hold are NORMAL there, and reporting them as anomalies filled
+        // the log and the diagnostics folder with WAVs of a healthy start.
+        // A genuine fault — non-finite samples, clicks, a silent run, or the
+        // ring running dry — is still reported from the first sample.
+        bool startupGrace = pos >= 0 && pos < StartupGraceSec;
+        bool onlyStartupNoise = win.NonFinite == 0 && win.Clicks == 0
+                                && win.MaxZeroRunMs == 0 && win.Shortfalls == 0;
+        if (startupGrace && onlyStartupNoise)
+        {
+            _log.LogDebug(
+                "Audio health {Name}: settling in ({Slow} slow read(s), max {MaxRead:0.0}ms, maxDelta {MaxDelta:0.00}) " +
+                "at {Pos:0.0}s — inside the {Grace:0.0}s start-up grace, not treated as an anomaly.",
+                tap.Name, win.SlowReads, win.MaxReadMs, win.MaxDelta, pos, StartupGraceSec);
+            return;
+        }
 
         _log.LogWarning(
             "Audio health {Name}: nonFinite={NonFinite} clicks={Clicks} maxDelta={MaxDelta:0.00} " +

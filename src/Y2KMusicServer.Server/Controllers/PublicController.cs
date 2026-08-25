@@ -751,24 +751,50 @@ public sealed class PublicController : ControllerBase
         return r == QueueResult.Ok ? Ok(new { ok = true }) : Conflict(new { error = r.ToString() });
     }
 
+    /// <summary>
+    /// Track ids known to carry no embedded picture. The listener page asks for
+    /// the current and next few tracks every couple of seconds, so an artless
+    /// track was re-reading its tags off the SMB share several times a second,
+    /// forever, to answer 404 again. Remembering the misses turns that into one
+    /// read per track per service run.
+    ///
+    /// Cleared wholesale when it grows large rather than per-entry: it is a
+    /// cache of absence, and the cost of a wrong answer is one extra tag read
+    /// after a restart or a re-tag.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, byte> NoArtTracks = new();
+
     [HttpGet("albumart")]
     public async Task<IActionResult> AlbumArt([FromQuery] int trackId, CancellationToken ct)
     {
+        // Browser-side caching matters as much as the server-side memo: without
+        // it the page re-asks on every poll even for a 404.
+        Response.Headers.CacheControl = "public, max-age=3600";
+
+        if (NoArtTracks.ContainsKey(trackId)) return NotFound();
+
         string? path;
         await using (var db = await _dbf.CreateDbContextAsync(ct))
             path = await db.Tracks.AsNoTracking().Where(t => t.Id == trackId)
                 .Select(t => t.FilePath).FirstOrDefaultAsync(ct);
 
-        if (path == null || !System.IO.File.Exists(path)) return NotFound();
+        if (path == null || !System.IO.File.Exists(path)) return RememberMiss(trackId);
 
         try
         {
             using var tf = TagLib.File.Create(path);
             var pic = tf.Tag.Pictures.FirstOrDefault();
-            if (pic == null || pic.Data.Count == 0) return NotFound();
+            if (pic == null || pic.Data.Count == 0) return RememberMiss(trackId);
             var mime = string.IsNullOrEmpty(pic.MimeType) ? "image/jpeg" : pic.MimeType;
             return File(pic.Data.Data, mime);
         }
-        catch { return NotFound(); }
+        catch { return RememberMiss(trackId); }
+    }
+
+    private IActionResult RememberMiss(int trackId)
+    {
+        if (NoArtTracks.Count > 5000) NoArtTracks.Clear();
+        NoArtTracks[trackId] = 1;
+        return NotFound();
     }
 }
