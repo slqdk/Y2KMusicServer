@@ -276,7 +276,10 @@ public sealed class AutoDjScheduler : BackgroundService
         if (now > 0)
             _log.LogInformation("Auto DJ primed a spent queue with {Count} track(s) while stopped — press Play to start.", now);
         else
-            _log.LogWarning("Auto DJ has nothing to queue: no playlist is eligible right now " +
-                            "(all switched off, or every schedule outside its slot).");
+            // Deliberately vague: the reason lives in PlaylistService, which has
+            // just logged the per-playlist breakdown. Claiming a cause here was
+            // wrong — the tiles said a schedule WAS covering while this line
+            // insisted none was.
+            _log.LogWarning("Auto DJ topped up and the queue is still empty — see the reason above.");
     }
 }

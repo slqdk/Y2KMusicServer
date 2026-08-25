@@ -1000,7 +1000,38 @@ public sealed class PlaylistService
                 simWindow.Add((pick.Artist ?? "", pick.Title ?? ""));
             }
 
-            if (picks.Count == 0) return 0;
+            if (picks.Count == 0)
+            {
+                // Nothing was pickable even though playlists were eligible. That
+                // used to end in silence with a guessed explanation; count the
+                // actual reasons instead, per playlist, so the log names the one
+                // that is blocking. Cheap: it only runs when a top-up failed.
+                foreach (var pl in active)
+                {
+                    var members = tracksByPl[pl.Id];
+                    HashSet<int> fedSet;
+                    lock (_historyLock)
+                        fedSet = _fedFromPlaylist.TryGetValue(pl.Id, out var f) ? new HashSet<int>(f) : new HashSet<int>();
+
+                    int fedOut = members.Count(m => fedSet.Contains(m.Id));
+                    int queuedOrRecent = members.Count(m => !fedSet.Contains(m.Id) && excluded.Contains(m.Id));
+                    int badLength = members.Count(m => !fedSet.Contains(m.Id) && !excluded.Contains(m.Id)
+                        && (m.DurationSec < MinAutoDjDurationSec || m.DurationSec > MaxAutoDjDurationSec));
+                    int tooSimilar = members.Count(m => !fedSet.Contains(m.Id) && !excluded.Contains(m.Id)
+                        && m.DurationSec >= MinAutoDjDurationSec && m.DurationSec <= MaxAutoDjDurationSec
+                        && IsTooSimilar(m, simWindow));
+                    int missingFile = members.Count(m => !fedSet.Contains(m.Id) && !excluded.Contains(m.Id)
+                        && !File.Exists(m.FilePath));
+
+                    _log.LogWarning(
+                        "Auto DJ could not pick from \"{Name}\": {Members} track(s) — {Fed} already fed this pass, " +
+                        "{Excluded} queued or recently played, {Length} outside the {MinLen:0}–{MaxLen:0}s duration gate, " +
+                        "{Similar} too similar to what just played, {Missing} file(s) not readable.",
+                        pl.Name, members.Count, fedOut, queuedOrRecent, badLength, tooSimilar, missingFile,
+                        MinAutoDjDurationSec, MaxAutoDjDurationSec);
+                }
+                return 0;
+            }
 
             int nextPos = entries.Count == 0 ? 0 : entries[^1].Position + 1;
             foreach (var (track, plName) in picks)
