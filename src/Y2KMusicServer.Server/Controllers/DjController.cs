@@ -255,9 +255,14 @@ public sealed class DjController : ControllerBase
         if (_engine.GetStatus().State == PlaybackEngineState.Playing)
             return Ok(new { ok = true, alreadyPlaying = true });
 
-        if (_engine.Play()) { _log.LogInformation("DJ page resumed playback."); return Ok(new { ok = true }); }
+        // A deck parked at the end of its track can't be resumed — advance past
+        // it instead, or Play just replays the same end-of-file.
+        if (!_engine.DeckSpent && _engine.Play()) { _log.LogInformation("DJ page resumed playback."); return Ok(new { ok = true }); }
 
-        var resumeId = await _playlist.ResumeTrackIdAsync(ct);
+        var (upcomingId, _) = await _playlist.NextUpcomingAsync(null, ct);
+        var resumeId = _engine.DeckSpent
+            ? upcomingId ?? await _playlist.ResumeTrackIdAsync(ct)
+            : await _playlist.ResumeTrackIdAsync(ct);
         if (resumeId == null && await _playlist.IsAutoDjOnAsync(ct))
         {
             await _playlist.TopUpAsync(ct);

@@ -136,6 +136,11 @@ public sealed class AudioEngine
     private int _watchdogStillTicks;
     private int _watchdogFiredForTrack = -1;
 
+    // Whether the last stop was the OPERATOR's. A deck that ran out with nothing
+    // armed also lands in Stopped, and Auto DJ should pick that up — but it must
+    // never override a stop somebody asked for.
+    private bool _stoppedByOperator;
+
     private bool _gapWaiting;
     private int _gapTicksLeft;
     private const double JingleGapSec = 1.0;
@@ -500,6 +505,7 @@ public sealed class AudioEngine
             _deckB = null;
             _prepared = null;
             _state = PlaybackEngineState.Stopped;
+            _stoppedByOperator = false;   // a freshly loaded deck is waiting, not refused
         }
 
         DisposeOffThread(oldA, oldB, oldPrepared);
@@ -609,12 +615,45 @@ public sealed class AudioEngine
         lock (_gate) return (_duckGain, _duckActive, _fadePaused);
     }
 
+    /// <summary>
+    /// True when Deck A is parked at the end of its track. Ending with nothing
+    /// armed leaves the deck loaded and the reader at EOF, so the transport looks
+    /// resumable when there is nothing left to resume — pressing Play just
+    /// restarts the same end-of-file and stops again.
+    /// </summary>
+    public bool DeckSpent
+    {
+        get
+        {
+            lock (_gate)
+            {
+                if (_deckA == null) return false;
+                try { return _deckA.Reader.CurrentTime.TotalSeconds >= _deckA.DurationSec - 0.25; }
+                catch { return false; }
+            }
+        }
+    }
+
+    /// <summary>True when playback stopped because somebody stopped it, rather
+    /// than because the music ran out.</summary>
+    public bool StoppedByOperator { get { lock (_gate) return _stoppedByOperator; } }
+
     public bool Play()
     {
         lock (_gate)
         {
             if (_deckA == null) return false;
-            if (_state == PlaybackEngineState.Playing) return true;
+            if (_state == PlaybackEngineState.Playing) { _stoppedByOperator = false; return true; }
+
+            // Refuse to "resume" a finished track: the caller's fallback path
+            // (load the next queue entry) is the only thing that can actually
+            // start music from here.
+            bool spent;
+            try { spent = _deckA.Reader.CurrentTime.TotalSeconds >= _deckA.DurationSec - 0.25; }
+            catch { spent = false; }
+            if (spent) return false;
+
+            _stoppedByOperator = false;
             _deckA.StopRequested = false;
             _deckA.Out.Play();
             if (_crossfading && !_fadeBHeld) _deckB?.Out.Play();   // a held-out B stays paused until it's let in
@@ -653,6 +692,7 @@ public sealed class AudioEngine
             _deckB = null;
             _prepared = null;
             _bManualStarted = false;
+            _stoppedByOperator = true;
             _deckA.StopRequested = true;
             _deckA.Out.Stop();
             try { _deckA.Reader.Position = 0; } catch { }
@@ -2220,8 +2260,12 @@ public sealed class AudioEngine
             }
             else if (ReferenceEquals(deck, _deckA))
             {
+                // Ran out with nothing armed. Leave the flag alone so Auto DJ can
+                // tell this apart from a stop somebody pressed.
                 _state = PlaybackEngineState.Stopped;
+                _stoppedByOperator = false;
                 np = BuildNowPlaying_Locked();
+                _log.LogWarning("Deck A reached the end with nothing armed — playback stopped.");
             }
             else
             {

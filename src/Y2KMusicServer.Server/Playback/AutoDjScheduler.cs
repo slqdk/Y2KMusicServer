@@ -147,6 +147,7 @@ public sealed class AutoDjScheduler : BackgroundService
             // begun. Priming is not starting: the queue fills, the operator still
             // decides when the room hears it.
             await PrimeIdleQueueAsync(ct);
+            await ResumeIfMusicRanOutAsync(ct);
             return;
         }
 
@@ -218,6 +219,36 @@ public sealed class AutoDjScheduler : BackgroundService
                     "Auto DJ topped up {Count} track(s) at the end of the queue after {Wait:0}s of no edits.",
                     added, aboutToRunDry ? 0 : TopUpQuietPeriod.TotalSeconds);
         }
+    }
+
+    /// <summary>
+    /// Starts the music again after it RAN OUT — not after somebody stopped it.
+    ///
+    /// A deck that reaches the end with nothing armed parks at EOF and the engine
+    /// goes to Stopped. Nothing then re-arms, because arming only happens while
+    /// playing: the show sits in front of a queue it never touches, and pressing
+    /// Play only replays the same end-of-file. So when Auto DJ is on, the stop
+    /// was not the operator's, and there is something queued after the playhead,
+    /// load that entry and start it.
+    ///
+    /// A stop somebody pressed is never overridden — that flag is the whole
+    /// reason this is safe.
+    /// </summary>
+    private async Task ResumeIfMusicRanOutAsync(CancellationToken ct)
+    {
+        if (_engine.StoppedByOperator) return;
+        if (!await _playlist.IsAutoDjOnAsync(ct)) return;
+
+        var (nextId, _) = await _playlist.NextUpcomingAsync(null, ct);
+        if (nextId is not int trackId) return;
+
+        if (await _engine.LoadAsync(trackId, ct) != LoadResult.Ok)
+        {
+            _log.LogWarning("Auto DJ tried to restart after the music ran out but track {TrackId} would not load.", trackId);
+            return;
+        }
+        if (_engine.Play())
+            _log.LogInformation("Auto DJ restarted the show after the music ran out (track {TrackId}).", trackId);
     }
 
     /// <summary>
