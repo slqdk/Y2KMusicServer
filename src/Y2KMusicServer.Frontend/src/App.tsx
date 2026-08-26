@@ -893,31 +893,38 @@ export default function App() {
           {np?.trackId && artOk
             ? <img className="lz-np-art" src={`/api/albumart?trackId=${np.trackId}`} alt="" onError={() => setArtOk(false)} />
             : <div className="lz-np-art lz-np-art-empty">♪</div>}
-          <div className="lz-np-body">
-            <div className="lz-np-state">● {stateLabel}</div>
-            {(() => {
-              const d = splitArtistTitle(np?.artist, np?.title)
-              return <>
+          {/* Three columns rather than one stack: who/what, where from, how far
+              through. The card was five lines tall, which pushed the whole bar
+              up over the rail and hid the Speakers button behind it. */}
+          {(() => {
+            const d = splitArtistTitle(np?.artist, np?.title)
+            return <>
+              <div className="lz-np-main">
+                <div className="lz-np-state">● {stateLabel}</div>
                 {d.artist && <div className="lz-np-artist">{d.artist}</div>}
                 <div className="lz-np-title">{np?.trackId ? d.title : '—'}</div>
-                {np?.album && <div className="lz-np-album">{np.album}</div>}
-            {np?.trackId != null && sourceLabel(np) && (
-              <div className="lz-np-source">{sourceLabel(np)}</div>
-            )}
-              </>
-            })()}
-            {np?.trackId != null && np.durationSec > 0 && (
-              <div className="lz-np-progress">
-                <div className="lz-np-bar">
-                  <span style={{ width: `${Math.min(100, Math.max(0, (np.positionSec / np.durationSec) * 100))}%` }} />
-                </div>
-                <span className="lz-np-time">
-                  {fmt(np.positionSec)} / {fmt(np.durationSec)}
-                  <span className="lz-np-left"> · −{fmt(Math.max(0, np.durationSec - np.positionSec))}</span>
-                </span>
               </div>
-            )}
-          </div>
+
+              <div className="lz-np-meta">
+                {np?.album && <div className="lz-np-album">{np.album}</div>}
+                {np?.trackId != null && sourceLabel(np) && (
+                  <div className="lz-np-source">{sourceLabel(np)}</div>
+                )}
+              </div>
+
+              {np?.trackId != null && np.durationSec > 0 && (
+                <div className="lz-np-progress">
+                  <span className="lz-np-time">
+                    {fmt(np.positionSec)} / {fmt(np.durationSec)}
+                    <span className="lz-np-left"> · −{fmt(Math.max(0, np.durationSec - np.positionSec))}</span>
+                  </span>
+                  <div className="lz-np-bar">
+                    <span style={{ width: `${Math.min(100, Math.max(0, (np.positionSec / np.durationSec) * 100))}%` }} />
+                  </div>
+                </div>
+              )}
+            </>
+          })()}
 
           {/* Transport, inside the card. Play while stopped, Skip while playing. */}
           <div className="lz-nextslot">
