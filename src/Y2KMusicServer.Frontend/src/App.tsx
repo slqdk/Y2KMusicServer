@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './listener.css'
 
 /* ── Types ───────────────────────────────────────────────────────────── */
+/** How the current track reached the deck: 'Schedule' (a playlist), 'Manual'
+ *  (the DJ picked it) or 'Request' (a guest asked for it). addedBy carries the
+ *  playlist name or the requester's name. */
 interface NowPlaying {
+  source?: string | null
+  addedBy?: string | null
   trackId: number | null
   title: string | null
   artist: string | null
@@ -29,6 +34,18 @@ interface PlaylistsInfo {
   playlists: PublicPlaylist[]
 }
 interface AlbumHit { album: string; artist: string | null; trackId: number; count: number }
+/** One line saying how the song on air got there. A request names the guest —
+ *  seeing your own name is the point of asking. */
+function sourceLabel(np: NowPlaying): string | null {
+  const who = np.addedBy?.trim()
+  switch (np.source) {
+    case 'Request': return who ? `🙋 Requested by ${who}` : '🙋 Guest request'
+    case 'Manual': return who && who !== 'DJ' ? `🎧 Added by ${who}` : '🎧 Picked by the DJ'
+    case 'Schedule': return who ? `♫ From ${who}` : '♫ Auto DJ'
+    default: return null
+  }
+}
+
 const PAGE = 80
 
 /** Songs in the artwork row while browsing. One row, large covers — the strip
@@ -884,6 +901,9 @@ export default function App() {
                 {d.artist && <div className="lz-np-artist">{d.artist}</div>}
                 <div className="lz-np-title">{np?.trackId ? d.title : '—'}</div>
                 {np?.album && <div className="lz-np-album">{np.album}</div>}
+            {np?.trackId != null && sourceLabel(np) && (
+              <div className="lz-np-source">{sourceLabel(np)}</div>
+            )}
               </>
             })()}
             {np?.trackId != null && np.durationSec > 0 && (

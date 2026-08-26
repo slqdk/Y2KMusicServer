@@ -1101,3 +1101,11 @@
   .lz-searchcol { padding-left: 52px; }
   .lz-searchrow .lz-input.lz-search-top { min-width: 0; }
 }
+
+
+/* Provenance line on the on-air card: quieter than the album, since it is
+   context rather than the song itself. */
+.lz-np-source {
+  font-size: .74rem; color: var(--lz-muted); margin-top: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}

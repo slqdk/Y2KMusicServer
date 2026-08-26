@@ -79,11 +79,17 @@ public sealed class PublicController : ControllerBase
             }
         }
 
+        // Where this airing came from — shown on the listener's now-playing card
+        // so a guest can see that their request is the one playing.
+        var (src, addedBy) = await _playlist.CurrentSourceAsync(s.TrackId, ct);
+
         return new
         {
             trackId = s.TrackId,
             title = s.Title,
             artist = s.Artist,
+            source = src?.ToString(),
+            addedBy,
             album = s.Album,
             positionSec = s.PositionSec,
             durationSec = s.DurationSec,

@@ -627,6 +627,36 @@ public sealed class PlaylistService
         return ids.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
     }
 
+    /// <summary>
+    /// How the track on air got there: which queue entry it came from, what put
+    /// it in the queue (a playlist's schedule, a hand-pick, a guest request) and
+    /// under whose name. Resolved through the playhead, so a track that appears
+    /// twice in the queue reports the airing that is actually playing.
+    /// </summary>
+    public async Task<(PlaylistSource? Source, string? AddedBy)> CurrentSourceAsync(
+        int? currentTrackId, CancellationToken ct = default)
+    {
+        await using var db = await _dbf.CreateDbContextAsync(ct);
+        var entries = await db.PlaylistEntries.AsNoTracking()
+            .OrderBy(e => e.Position).ToListAsync(ct);
+        if (entries.Count == 0) return (null, null);
+
+        // The playhead points at the entry that actually played; fall back to a
+        // track-id match for a deck loaded outside the queue.
+        EnsurePlayheadLoaded();
+        int head = Volatile.Read(ref _playheadEntryId);
+        var entry = head != 0 ? entries.FirstOrDefault(e => e.Id == head) : null;
+        if (entry == null && currentTrackId is int tid)
+            entry = entries.LastOrDefault(e => e.TrackId == tid);
+        if (entry == null) return (null, null);
+
+        // A stale playhead (the deck moved on to something else entirely) should
+        // not label the current song with the previous one's source.
+        if (currentTrackId is int cur && entry.TrackId != cur) return (null, null);
+
+        return (entry.Source, string.IsNullOrWhiteSpace(entry.AddedBy) ? null : entry.AddedBy);
+    }
+
     /// <summary>The track behind a queue entry, or null if it's already gone.
     /// Read BEFORE a delete, so the caller can drop a matching armed cue.</summary>
     public async Task<int?> TrackIdOfEntryAsync(int entryId, CancellationToken ct = default)
