@@ -1052,3 +1052,33 @@
   .lz-result-dur { display: none; }          /* the duration is the first thing to go */
   .lz-req-btn { padding: 8px 16px; font-size: .86rem; }
 }
+
+
+/* ── Mobile alignment fixes ──────────────────────────────────────────── */
+@media (max-width: 640px) {
+  /* The rail is a desktop object: chips, recently-played and Speakers all have
+     homes in the drawer at this width. Leaving it in the flow put a green
+     Speakers button under the banner and pushed the search box around. */
+  .lz-plcol { display: none; }
+  .lz-drawer-speakers .lz-spwrap { width: 100%; }
+  .lz-drawer-speakers .lz-spbtn { width: 100%; }
+  .lz-drawer-speakers .lz-sppop { position: static; width: 100%; margin-top: 8px; box-shadow: none; }
+
+  /* The search column reserves 162px for the absolutely-positioned player
+     controls on desktop; on a phone those sit under it instead, so the box gets
+     the full width back. */
+  .lz-searchcol { padding-right: 0; width: 100%; }
+  .lz-searchrow { flex-wrap: wrap; }
+  .lz-topctrls {
+    position: static; width: 100%; flex-direction: row; align-items: center;
+    gap: 8px; margin-top: 8px;
+  }
+  .lz-topctrls .lz-stacked { width: auto; flex: 1 1 auto; }
+  .lz-topctrls .lz-kbps { flex: 0 0 auto; }
+
+  /* Result rows: let the text column shrink so the Request button stays inside
+     the row instead of being pushed off the right edge by a long album name. */
+  .lz-result > * { min-width: 0; }
+  .lz-result-main, .lz-result-top { min-width: 0; overflow: hidden; }
+  .lz-req-btn { white-space: nowrap; }
+}

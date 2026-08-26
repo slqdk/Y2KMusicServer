@@ -592,6 +592,16 @@ export default function App() {
                 </div>
               </>
             )}
+
+            {/* Speakers lives here on a phone. The rail it normally sits in is
+                hidden at this width, and a full-width green button wedged under
+                the banner was the worst of both worlds. */}
+            {speakersBlock && (
+              <div className="lz-drawer-speakers">
+                <div className="lz-field-label" style={{ marginTop: 14 }}>Play on a speaker</div>
+                {speakersBlock}
+              </div>
+            )}
           </div>
         </div>
       )}
