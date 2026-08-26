@@ -992,3 +992,63 @@
    a guest can act on it without scrolling into the list. */
 .lz-artsong { cursor: default; }
 .lz-artsong-req { width: 100%; margin-top: 6px; }
+
+
+/* ── Bottom bar, reworked ────────────────────────────────────────────────
+   Half the width is the on-air card (art, artist, title, album, progress and
+   the transport button); the other half holds the next three, compacted. */
+.lz-barcard-now {
+  flex: 0 0 50%; max-width: 50%; min-width: 0;
+  gap: 14px;
+}
+.lz-nowbar-queue {
+  flex: 1 1 50%; min-width: 0;
+  display: flex; align-items: stretch; gap: 8px;
+}
+.lz-nowbar-queue .lz-barcard-next {
+  flex: 1 1 0; min-width: 0; padding: 6px 10px; gap: 8px;
+}
+.lz-nowbar-queue .lz-np-artist { font-size: .8rem; }
+.lz-nowbar-queue .lz-np-title { font-size: .76rem; }
+.lz-nowbar-queue .lz-nextup-dur { font-size: .72rem; }
+
+/* Album line and progress inside the on-air card. */
+.lz-np-album {
+  font-size: .78rem; color: var(--lz-faint); margin-top: 1px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.lz-np-progress { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.lz-np-bar {
+  flex: 1 1 auto; height: 5px; border-radius: 3px; overflow: hidden;
+  background: var(--lz-line);
+}
+.lz-np-bar > span {
+  display: block; height: 100%;
+  background: var(--lz-now, var(--lz-accent, #1db954));
+}
+.lz-np-time {
+  flex: 0 0 auto; font-size: .74rem; color: var(--lz-muted);
+  font-variant-numeric: tabular-nums;
+}
+.lz-np-left { color: var(--lz-text); font-weight: 600; }
+
+/* The transport now lives inside the card, hard against its right edge. */
+.lz-barcard-now .lz-nextslot { margin-left: auto; flex: 0 0 56px; }
+
+@media (max-width: 640px) {
+  /* One card per row on a phone: half-width columns would leave both
+     illegible. */
+  .lz-barcard-now { flex: 1 1 100%; max-width: 100%; }
+  .lz-nowbar-queue { flex: 1 1 100%; }
+  .lz-nowbar-queue .lz-barcard-n3 { display: none; }   /* two fit, three don't */
+
+  /* Artwork strip off on mobile. Its cards carry their own Request button and
+     were the ONLY place a Request button appeared on a phone — the text rows
+     below were being squeezed until the button dropped out of the row. With the
+     strip gone the list is the whole answer, and its buttons have room. */
+  .lz-albums, .lz-sect-label { display: none; }
+  .lz-result { grid-template-columns: 1fr auto; row-gap: 6px; padding: 10px 12px; }
+  .lz-result .lz-mini-icon { display: none; }
+  .lz-result-dur { display: none; }          /* the duration is the first thing to go */
+  .lz-req-btn { padding: 8px 16px; font-size: .86rem; }
+}

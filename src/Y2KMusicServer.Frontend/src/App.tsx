@@ -859,13 +859,37 @@ export default function App() {
 
       {/* ── Fixed bottom bar: now playing + the next two songs ─────────── */}
       <div className="lz-nowbar">
-        <div className="lz-nowbar-controls">
-          {/* The slot is always here so the now-playing and next-up lines never
-              shift when skipping unlocks or locks again. While the music is
-              stopped or paused this is a PLAY button — always available, because
-              a silent room with a hidden play control is the one state nobody
-              can fix from the page. Once playing it goes back to being Skip,
-              which stays gated by allowNext. */}
+        {/* On air — half the bar. Art, who and what, the album, a progress bar
+            with time remaining, and the transport button, all in one card so
+            the thing you look at and the thing you press are the same object. */}
+        <div className="lz-np lz-barcard lz-barcard-now">
+          {np?.trackId && artOk
+            ? <img className="lz-np-art" src={`/api/albumart?trackId=${np.trackId}`} alt="" onError={() => setArtOk(false)} />
+            : <div className="lz-np-art lz-np-art-empty">♪</div>}
+          <div className="lz-np-body">
+            <div className="lz-np-state">● {stateLabel}</div>
+            {(() => {
+              const d = splitArtistTitle(np?.artist, np?.title)
+              return <>
+                {d.artist && <div className="lz-np-artist">{d.artist}</div>}
+                <div className="lz-np-title">{np?.trackId ? d.title : '—'}</div>
+                {np?.album && <div className="lz-np-album">{np.album}</div>}
+              </>
+            })()}
+            {np?.trackId != null && np.durationSec > 0 && (
+              <div className="lz-np-progress">
+                <div className="lz-np-bar">
+                  <span style={{ width: `${Math.min(100, Math.max(0, (np.positionSec / np.durationSec) * 100))}%` }} />
+                </div>
+                <span className="lz-np-time">
+                  {fmt(np.positionSec)} / {fmt(np.durationSec)}
+                  <span className="lz-np-left"> · −{fmt(Math.max(0, np.durationSec - np.positionSec))}</span>
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Transport, inside the card. Play while stopped, Skip while playing. */}
           <div className="lz-nextslot">
             {stopped ? (
               <button
@@ -885,23 +909,8 @@ export default function App() {
             )}
           </div>
         </div>
-        {/* On air — the loud card. */}
-        <div className="lz-np lz-barcard lz-barcard-now">
-          {np?.trackId && artOk
-            ? <img className="lz-np-art" src={`/api/albumart?trackId=${np.trackId}`} alt="" onError={() => setArtOk(false)} />
-            : <div className="lz-np-art lz-np-art-empty">♪</div>}
-          <div className="lz-np-body">
-            <div className="lz-np-state">● {stateLabel}</div>
-            {(() => {
-              const d = splitArtistTitle(np?.artist, np?.title)
-              return <>
-                {d.artist && <div className="lz-np-artist">{d.artist}</div>}
-                <div className="lz-np-title">{np?.trackId ? d.title : '—'}</div>
-              </>
-            })()}
-          </div>
-        </div>
 
+        <div className="lz-nowbar-queue">
         {/* Queue — one dimmed card per song, so it reads as "coming later". */}
         {nextUp.length === 0
           ? <div className="lz-barcard lz-barcard-next lz-barcard-empty">Nothing queued.</div>
@@ -922,6 +931,7 @@ export default function App() {
                 <span className="lz-nextup-dur">{fmt(r.durationSec)}</span>
               </div>
             ))}
+        </div>
       </div>
 
       {toast && <div className="lz-toast">{toast}</div>}
