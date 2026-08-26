@@ -1082,3 +1082,22 @@
   .lz-result-main, .lz-result-top { min-width: 0; overflow: hidden; }
   .lz-req-btn { white-space: nowrap; }
 }
+
+
+/* ── Mobile: one column of results, and room for the burger ──────────── */
+@media (max-width: 640px) {
+  /* THE actual cause of the runaway Request buttons: the results grid asks for
+     tracks of at least 540px. On a 360px phone that makes every ROW 540px wide,
+     so the row overflows the screen and its right-hand column — the button —
+     is pushed off the edge by however long the text is. One column, sized to
+     the screen, and the button lands in the same place on every row. */
+  .lz-results-list { grid-template-columns: 1fr; }
+  .lz-results-list, .lz-result { max-width: 100%; }
+  .lz-result { grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; }
+  .lz-req-btn { flex: 0 0 auto; }
+
+  /* The burger is fixed at the top-left; the search row starts beside it rather
+     than underneath it. */
+  .lz-searchcol { padding-left: 52px; }
+  .lz-searchrow .lz-input.lz-search-top { min-width: 0; }
+}
