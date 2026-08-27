@@ -1155,9 +1155,45 @@ public sealed class AudioEngine
 
     private void TickLoop()
     {
+        // The tick is the engine's heartbeat: crossfade triggers, the gain ramp,
+        // spent-deck detection, the watchdog and every log line the engine emits
+        // all happen here. Two things were wrong with the old loop.
+        //
+        // 1. Thread.Sleep(TickMs) sleeps AFTER the work, so the real period is
+        //    TickMs + however long the tick took. That error accumulates: as the
+        //    night goes on and the per-tick work grows, transitions are detected
+        //    later and later than their trigger point, which is heard as dead air
+        //    between songs that gets worse the longer the show runs. Sleeping to
+        //    a DEADLINE instead keeps the period at TickMs regardless.
+        //
+        // 2. An exception anywhere in the body killed the thread outright. The
+        //    transport then froze mid-track — still reporting PLAYING, position
+        //    stuck, nothing arming, and no further engine log lines at all —
+        //    which is exactly a log with nothing in it but WebServer entries.
+        //    Catching per tick means one bad tick is one bad tick.
+        var tickClock = System.Diagnostics.Stopwatch.StartNew();
+        double nextDueMs = TickMs;
+        double lastLateWarnMs = 0;
+
         while (_tickRunning)
         {
-            Thread.Sleep((int)TickMs);
+            double waitMs = nextDueMs - tickClock.Elapsed.TotalMilliseconds;
+            if (waitMs > 0.5) Thread.Sleep((int)Math.Min(waitMs, TickMs));
+
+            double lateMs = tickClock.Elapsed.TotalMilliseconds - nextDueMs;
+            if (lateMs > 10 * TickMs && tickClock.Elapsed.TotalMilliseconds - lastLateWarnMs > 30_000)
+            {
+                lastLateWarnMs = tickClock.Elapsed.TotalMilliseconds;
+                _log.LogWarning("Audio tick ran {Late:0}ms late — transitions will fire late while this persists.", lateMs);
+            }
+
+            // Never chase a backlog of missed ticks; just resume from now.
+            nextDueMs = lateMs > 5 * TickMs
+                ? tickClock.Elapsed.TotalMilliseconds + TickMs
+                : nextDueMs + TickMs;
+
+            try
+            {
 
             NowPlayingInfo? np = null;
             TransitionInfo? tr = null;
@@ -1183,6 +1219,11 @@ public sealed class AudioEngine
                 {
                     double posNow = -1;
                     try { posNow = _deckA.Reader.CurrentTime.TotalSeconds; } catch { }
+
+                    // First tick after a load: adopt the position rather than
+                    // treating the -1 sentinel as "moved", so a deck that dies
+                    // at 0:03 and never advances is caught from that point.
+                    if (_watchdogPosSec < 0 && posNow >= 0) _watchdogPosSec = posNow;
 
                     if (posNow >= 0 && Math.Abs(posNow - _watchdogPosSec) < 0.02)
                         _watchdogStillTicks++;
@@ -1211,8 +1252,22 @@ public sealed class AudioEngine
                         }
                         else
                         {
-                            _log.LogWarning("Stuck deck: nothing is armed, so playback stays where it is — " +
-                                            "press Next, or remove the track from the queue.");
+                            // Nothing armed, so there is nothing to mix into —
+                            // but leaving a dead deck "playing" is the one
+                            // outcome with no way out: the transport says
+                            // PLAYING, so nothing else in the system thinks
+                            // anything is wrong, and the room stays silent until
+                            // somebody notices.
+                            //
+                            // Stopping it hands the problem to the path that
+                            // already knows how to recover: the deck ends, the
+                            // engine goes to Stopped WITHOUT marking it as an
+                            // operator stop, and Auto DJ restarts the show from
+                            // the next queue entry within a couple of seconds.
+                            _log.LogWarning("Stuck deck: nothing is armed — stopping the dead deck so Auto DJ " +
+                                            "can restart the show from the queue.");
+                            _deckA.StopRequested = true;
+                            try { _deckA.Out.Stop(); } catch { /* already gone */ }
                         }
                     }
                 }
@@ -1484,6 +1539,12 @@ public sealed class AudioEngine
             if (np != null) { NowPlayingChanged?.Invoke(np); EmitTaps(); }
             if (onsetA > 0f) BeatDetected?.Invoke(new BeatPulse { Deck = "A", Strength = onsetA });
             if (onsetB > 0f) BeatDetected?.Invoke(new BeatPulse { Deck = "B", Strength = onsetB });
+                    }
+            catch (Exception ex)
+            {
+                // One bad tick must not take the engine with it.
+                _log.LogError(ex, "Audio tick failed; the engine keeps running.");
+            }
         }
     }
 
