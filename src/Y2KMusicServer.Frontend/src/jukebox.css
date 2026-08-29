@@ -1,0 +1,177 @@
+/* /jukebox — its own stylesheet on purpose.
+   The listener page's variables are themeable and shared; this page has one
+   look and is used at arm's length on a tablet, so everything here is sized for
+   a finger and a glance rather than for a desktop reader. Nothing in this file
+   is referenced by the listener page and nothing here overrides it. */
+
+.jb {
+  --jb-bg:      #0b0b0d;
+  --jb-panel:   #141417;
+  --jb-line:    #26262b;
+  --jb-text:    #f2f2f4;
+  --jb-muted:   #a0a0aa;
+  --jb-faint:   #6f6f7a;
+  --jb-accent:  #f47b20;
+  --jb-accent2: #ffa14d;
+
+  min-height: 100vh;
+  background: var(--jb-bg);
+  color: var(--jb-text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  padding: 20px 22px 28px;
+  box-sizing: border-box;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────── */
+.jb-head { max-width: 1600px; margin: 0 auto 18px; }
+.jb-title {
+  margin: 0 0 14px; font-size: 2.6rem; font-weight: 800;
+  letter-spacing: .02em; text-transform: uppercase;
+}
+.jb-searchrow { display: flex; gap: 12px; align-items: stretch; }
+.jb-searchwrap { position: relative; flex: 1 1 auto; min-width: 0; }
+.jb-searchicon {
+  position: absolute; left: 18px; top: 50%; transform: translateY(-50%);
+  font-size: 1.2rem; opacity: .8; pointer-events: none;
+}
+.jb-search {
+  width: 100%; box-sizing: border-box;
+  padding: 18px 18px 18px 54px;
+  font: inherit; font-size: 1.15rem;
+  color: var(--jb-text); background: #101013;
+  border: 2px solid var(--jb-accent); border-radius: 14px;
+  outline: none;
+}
+.jb-search::placeholder { color: var(--jb-faint); }
+.jb-clear {
+  flex: 0 0 auto; padding: 0 28px; font: inherit; font-size: 1.05rem; font-weight: 600;
+  color: var(--jb-text); background: var(--jb-panel);
+  border: 1px solid var(--jb-line); border-radius: 14px; cursor: pointer;
+}
+.jb-clear:disabled { opacity: .4; cursor: default; }
+.jb-hint { margin: 10px 2px 0; color: var(--jb-muted); font-size: 1rem; }
+.jb-hint strong { color: var(--jb-accent); }
+
+/* ── Body: results + queue ──────────────────────────────────────────── */
+.jb-body {
+  max-width: 1600px; margin: 0 auto;
+  display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 22px;
+  align-items: start;
+}
+.jb-main { min-width: 0; }
+
+.jb-sect {
+  display: flex; align-items: center; gap: 10px;
+  margin: 18px 0 12px; font-size: .82rem; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--jb-muted);
+}
+.jb-count { color: var(--jb-faint); font-weight: 600; letter-spacing: 0; }
+.jb-back {
+  margin-left: auto; padding: 6px 14px; font: inherit; font-size: .8rem;
+  color: var(--jb-text); background: var(--jb-panel);
+  border: 1px solid var(--jb-line); border-radius: 10px; cursor: pointer;
+}
+.jb-empty { color: var(--jb-faint); font-size: 1rem; padding: 10px 2px; }
+
+.jb-warn {
+  background: #2a1b10; border: 1px solid #7a4a1c; color: #ffd6ad;
+  border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; line-height: 1.45;
+}
+
+/* Browse chips, shown until the first search. */
+.jb-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.jb-chip {
+  display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
+  padding: 18px 16px; text-align: left; cursor: pointer;
+  background: linear-gradient(160deg, #1c1c21, #121215);
+  border: 1px solid var(--jb-line); border-radius: 14px; color: var(--jb-text);
+  font: inherit;
+}
+.jb-chip:active { border-color: var(--jb-accent); }
+.jb-chip-name { font-size: 1.05rem; font-weight: 700; }
+.jb-chip-count { font-size: .8rem; color: var(--jb-faint); }
+
+/* Two columns of results. Rows are tall because this is touched, not clicked. */
+.jb-list {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
+}
+.jb-row {
+  display: grid; grid-template-columns: 56px minmax(0, 1fr) auto auto;
+  align-items: center; gap: 14px;
+  padding: 10px 12px;
+  background: var(--jb-panel); border: 1px solid var(--jb-line); border-radius: 12px;
+}
+.jb-art {
+  width: 56px; height: 56px; border-radius: 8px; object-fit: cover;
+  background: #1d1d22;
+}
+.jb-rowmain { min-width: 0; }
+.jb-song {
+  font-size: 1.08rem; font-weight: 600; line-height: 1.25;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.jb-artist {
+  font-size: .9rem; color: var(--jb-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.jb-dur { font-size: .9rem; color: var(--jb-faint); font-variant-numeric: tabular-nums; }
+.jb-req {
+  padding: 12px 22px; font: inherit; font-size: .95rem; font-weight: 800;
+  letter-spacing: .04em; color: #1a0d02; cursor: pointer;
+  background: linear-gradient(180deg, var(--jb-accent2), var(--jb-accent));
+  border: none; border-radius: 10px;
+}
+.jb-req:disabled { opacity: .35; cursor: default; }
+.jb-req:active { transform: translateY(1px); }
+
+.jb-more {
+  display: block; width: 100%; margin-top: 14px; padding: 14px;
+  font: inherit; font-size: 1rem; color: var(--jb-text);
+  background: var(--jb-panel); border: 1px solid var(--jb-line);
+  border-radius: 12px; cursor: pointer;
+}
+
+/* ── Queue panel ────────────────────────────────────────────────────── */
+.jb-side {
+  position: sticky; top: 20px;
+  background: var(--jb-panel); border: 1px solid var(--jb-line);
+  border-radius: 16px; padding: 18px 16px;
+}
+.jb-sidehead {
+  margin: 0; font-size: 1.25rem; font-weight: 800;
+  letter-spacing: .04em; text-transform: uppercase;
+}
+.jb-sidesub { margin: 2px 0 14px; font-size: .85rem; color: var(--jb-accent); }
+.jb-queue { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.jb-qrow { display: grid; grid-template-columns: 26px 44px minmax(0, 1fr); gap: 10px; align-items: center; }
+.jb-qnum {
+  width: 26px; height: 26px; display: grid; place-items: center;
+  font-size: .85rem; font-weight: 700; color: var(--jb-accent);
+  border: 1px solid var(--jb-accent); border-radius: 7px;
+}
+.jb-qart { width: 44px; height: 44px; border-radius: 6px; object-fit: cover; background: #1d1d22; }
+.jb-qmain { min-width: 0; }
+.jb-qsong { font-size: .95rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jb-qartist { font-size: .8rem; color: var(--jb-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jb-lock {
+  margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--jb-line);
+  font-size: .82rem; color: var(--jb-faint);
+}
+
+/* ── Confirmation ───────────────────────────────────────────────────── */
+.jb-toast {
+  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+  background: #14301c; border: 1px solid #2f7a4d; color: #b8f0cc;
+  padding: 14px 22px; border-radius: 12px; font-size: 1.05rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .5); z-index: 50;
+}
+
+/* Portrait tablets and phones: one column, and the queue moves below the
+   results rather than squeezing them. */
+@media (max-width: 1000px) {
+  .jb-body { grid-template-columns: minmax(0, 1fr); }
+  .jb-side { position: static; order: 2; }
+  .jb-list { grid-template-columns: minmax(0, 1fr); }
+  .jb-title { font-size: 2rem; }
+}
