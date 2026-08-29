@@ -28,7 +28,10 @@ type QueueRow = {
   durationSec: number
 }
 
-type PlaylistChip = { id: number; name: string; trackCount: number }
+/** /api/playlists answers { id, name, count } — reading a "trackCount" that
+ *  the endpoint never sends is why the chip showed a name with no number, and
+ *  why a single playlist looked like a stray card. */
+type PlaylistChip = { id: number; name: string; count: number }
 
 const PAGE = 60
 
@@ -74,10 +77,31 @@ export default function Jukebox() {
 
   const [queue, setQueue] = useState<QueueRow[]>([])
   const [banner, setBanner] = useState('')
+  // Request cooldown. `until` is a wall-clock deadline so a backgrounded tablet
+  // resumes with the right number rather than a frozen one; `total` is what the
+  // progress bar measures against.
+  const [cool, setCool] = useState<{ until: number; total: number } | null>(null)
+  const [, tick] = useState(0)
+  const [canSkip, setCanSkip] = useState(false)
   const [nameRequired, setNameRequired] = useState(false)
 
   const debounce = useRef<number | undefined>(undefined)
   const bannerTimer = useRef<number | undefined>(undefined)
+
+  // One timer drives the countdown text and the bar.
+  useEffect(() => {
+    if (!cool) return
+    const id = window.setInterval(() => {
+      if (Date.now() >= cool.until) setCool(null)
+      else tick(n => n + 1)
+    }, 250)
+    return () => window.clearInterval(id)
+  }, [cool])
+
+  const coolLeftSec = cool ? Math.max(0, Math.ceil((cool.until - Date.now()) / 1000)) : 0
+  const coolPct = cool && cool.total > 0
+    ? Math.min(100, Math.max(0, ((cool.total - coolLeftSec) / cool.total) * 100))
+    : 0
 
   const say = useCallback((text: string) => {
     setBanner(text)
@@ -103,7 +127,12 @@ export default function Jukebox() {
 
       fetch('/api/nowplaying')
         .then(r => r.ok ? r.json() : null)
-        .then(d => setNameRequired(!!d?.requireName))
+        .then(d => {
+          setNameRequired(!!d?.requireName)
+          // allowNext already carries the operator's switch AND the timed gate,
+          // so the button simply appears when skipping is genuinely allowed.
+          setCanSkip(!!d?.allowNext)
+        })
         .catch(() => { /* leave as-is */ })
     }
     load()
@@ -150,13 +179,19 @@ export default function Jukebox() {
 
       if (r.status === 429) {
         // The throttle is per device, so on a shared tablet this is the whole
-        // room's limit, not one guest's. Say so in minutes, not seconds.
+        // room's limit, not one guest's.
         const j = await r.json().catch(() => null)
-        const mins = Math.max(1, Math.ceil((j?.retryAfterSec ?? 60) / 60))
-        say(`Vent ca. ${mins} min. før næste ønske`)
+        const sec = j?.retryAfterSec ?? 60
+        setCool({ until: Date.now() + sec * 1000, total: j?.totalSec > 0 ? j.totalSec : sec })
+        say(`Vent lidt – næste ønske om ${Math.max(1, Math.ceil(sec / 60))} min.`)
         return
       }
       if (!r.ok) { say('Ønsket kunne ikke sendes'); return }
+
+      const j = await r.json().catch(() => null)
+      // The server hands back the cooldown on success too, so the buttons dim
+      // immediately rather than after the next rejected press.
+      if (j?.cooldownSec > 0) setCool({ until: Date.now() + j.cooldownSec * 1000, total: j.cooldownSec })
       say(`“${d.title}” er ønsket`)
     } catch {
       say('Ingen forbindelse til serveren')
@@ -192,7 +227,16 @@ export default function Jukebox() {
           </button>
         </div>
 
-        <p className="jb-hint">Find en sang og tryk <strong>ØNSK</strong> – så klarer vi resten</p>
+        {cool ? (
+          <div className="jb-cool">
+            <div className="jb-cool-bar"><span style={{ width: `${coolPct}%` }} /></div>
+            <span className="jb-cool-text">
+              Næste ønske om {Math.floor(coolLeftSec / 60)}:{(coolLeftSec % 60).toString().padStart(2, '0')}
+            </span>
+          </div>
+        ) : (
+          <p className="jb-hint">Find en sang og tryk <strong>ØNSK</strong> – så klarer vi resten</p>
+        )}
       </header>
 
       <div className="jb-body">
@@ -214,7 +258,7 @@ export default function Jukebox() {
                 {chips.map(c => (
                   <button key={c.id} className="jb-chip" onClick={() => setChipId(c.id)}>
                     <span className="jb-chip-name">{c.name}</span>
-                    <span className="jb-chip-count">{c.trackCount} numre</span>
+                    <span className="jb-chip-count">{c.count} numre</span>
                   </button>
                 ))}
               </div>
@@ -253,7 +297,12 @@ export default function Jukebox() {
                     <div className="jb-artist">{d.artist || '—'}</div>
                   </div>
                   <span className="jb-dur">{fmt(t.durationSec)}</span>
-                  <button className="jb-req" disabled={nameRequired} onClick={() => request(t)}>
+                  <button
+                    className="jb-req"
+                    disabled={nameRequired || !!cool}
+                    title={cool ? 'Vent til nedtællingen er slut' : 'Ønsk denne sang'}
+                    onClick={() => request(t)}
+                  >
                     ØNSK
                   </button>
                 </li>
@@ -298,6 +347,22 @@ export default function Jukebox() {
           <div className="jb-lock">🔒 Køen styres automatisk</div>
         </aside>
       </div>
+
+      {/* Skip lives in the corner, out of the way of the request flow, and only
+          exists once the operator's timed gate has opened. */}
+      {canSkip && (
+        <button
+          className="jb-skip"
+          onClick={async () => {
+            try {
+              const r = await fetch('/api/next', { method: 'POST' })
+              say(r.ok ? 'Skifter til næste sang…' : 'Kan ikke skippe lige nu')
+            } catch { say('Ingen forbindelse til serveren') }
+          }}
+        >
+          ⏭ Næste sang
+        </button>
+      )}
 
       {banner && <div className="jb-toast">✓ {banner}</div>}
     </div>

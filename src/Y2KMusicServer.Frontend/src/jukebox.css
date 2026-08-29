@@ -175,3 +175,40 @@
   .jb-list { grid-template-columns: minmax(0, 1fr); }
   .jb-title { font-size: 2rem; }
 }
+
+/* ── Request cooldown ────────────────────────────────────────────────────
+   Replaces the hint line while it runs, so the one thing the guest wants to
+   know — when they may ask again — occupies the spot they were already
+   reading. The bar fills as the wait elapses. */
+.jb-cool { display: flex; align-items: center; gap: 14px; margin: 12px 2px 0; }
+.jb-cool-bar {
+  flex: 1 1 auto; height: 8px; border-radius: 5px; overflow: hidden;
+  background: #232329;
+}
+.jb-cool-bar > span {
+  display: block; height: 100%;
+  background: linear-gradient(90deg, var(--jb-accent), var(--jb-accent2));
+  transition: width .25s linear;
+}
+.jb-cool-text {
+  flex: 0 0 auto; font-size: 1rem; font-weight: 700; color: var(--jb-accent2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A disabled ØNSK must read as "not yet", not as "broken". */
+.jb-req:disabled {
+  background: #2a2a31; color: var(--jb-faint); opacity: 1;
+}
+
+/* Skip: corner-anchored so it is reachable but never next to a ØNSK button. */
+.jb-skip {
+  position: fixed; right: 22px; bottom: 22px; z-index: 40;
+  padding: 14px 22px; font: inherit; font-size: 1rem; font-weight: 700;
+  color: var(--jb-text); background: #1b1b20;
+  border: 1px solid var(--jb-accent); border-radius: 12px; cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+}
+.jb-skip:active { transform: translateY(1px); }
+
+/* The toast sits above the skip button rather than under it. */
+.jb-toast { bottom: 88px; }
