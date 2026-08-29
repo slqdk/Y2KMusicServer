@@ -77,7 +77,12 @@ export default function Jukebox() {
   const [chips, setChips] = useState<PlaylistChip[]>([])
   const [chipId, setChipId] = useState<number | null>(null)
 
+  // The FULL queue plus what is on air. /api/playlist returns every entry,
+  // played ones included, so taking the first four showed songs the room had
+  // already heard — "NÆSTE NUMRE" listing the past. The current track is the
+  // divider, exactly as the listener page does it.
   const [queue, setQueue] = useState<QueueRow[]>([])
+  const [onAirId, setOnAirId] = useState<number | null>(null)
   const [banner, setBanner] = useState('')
   // Request cooldown. `until` is a wall-clock deadline so a backgrounded tablet
   // resumes with the right number rather than a frozen one; `total` is what the
@@ -146,13 +151,14 @@ export default function Jukebox() {
 
       fetch('/api/playlist')
         .then(r => r.ok ? r.json() : [])
-        .then(d => setQueue(Array.isArray(d) ? d.slice(0, 4) : []))
+        .then(d => setQueue(Array.isArray(d) ? d : []))
         .catch(() => { /* keep the last good list */ })
 
       fetch('/api/nowplaying')
         .then(r => r.ok ? r.json() : null)
         .then(d => {
           setNameRequired(!!d?.requireName)
+          setOnAirId(typeof d?.trackId === 'number' ? d.trackId : null)
           // allowNext already carries the operator's switch AND the timed gate,
           // so the button simply appears when skipping is genuinely allowed.
           setCanSkip(!!d?.allowNext)
@@ -241,6 +247,14 @@ export default function Jukebox() {
       say('Ingen forbindelse til serveren')
     }
   }
+
+  // Everything after the song on air. If the current track cannot be found in
+  // the queue — a fired jingle, a hand-loaded track — fall back to the whole
+  // list rather than showing nothing.
+  const upNext = (() => {
+    const idx = onAirId != null ? queue.findIndex(r => r.trackId === onAirId) : -1
+    return (idx >= 0 ? queue.slice(idx + 1) : queue).slice(0, 4)
+  })()
 
   const clearAll = () => { setQ(''); setChipId(null); setResults([]); setTotal(0) }
 
@@ -377,7 +391,7 @@ export default function Jukebox() {
           <p className="jb-sidesub">Sådan spiller vi videre</p>
 
           <ol className="jb-queue">
-            {queue.map((r, i) => {
+            {upNext.map((r, i) => {
               const d = split(r.artist, r.title)
               return (
                 <li key={`${r.position}-${r.trackId}`} className="jb-qrow">
@@ -399,7 +413,7 @@ export default function Jukebox() {
                 </li>
               )
             })}
-            {queue.length === 0 && <li className="jb-empty">Køen er tom lige nu.</li>}
+            {upNext.length === 0 && <li className="jb-empty">Køen er tom lige nu.</li>}
           </ol>
 
           <div className="jb-lock">🔒 Køen styres automatisk</div>
