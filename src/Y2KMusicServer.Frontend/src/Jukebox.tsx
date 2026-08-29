@@ -114,23 +114,35 @@ export default function Jukebox() {
     bannerTimer.current = window.setTimeout(() => setBanner(''), 4000)
   }, [])
 
-  // ── Playlists, for the browse chips ────────────────────────────────────
-  useEffect(() => {
-    fetch('/api/playlists')
-      .then(r => r.ok ? r.json() : null)
-      // Only what Auto DJ is drawing from right now. Offering a guest a
-      // playlist the DJ has switched off invites requests for music that was
-      // deliberately taken out of tonight's rotation.
-      .then(d => setChips(
-        Array.isArray(d?.playlists)
-          ? (d.playlists as PlaylistChip[]).filter(p => p.activeNow !== false)
-          : []))
-      .catch(() => setChips([]))
-  }, [])
-
-  // ── The queue panel, and the name-gate check ───────────────────────────
+  // ── Live state: chips, queue, gates ────────────────────────────────────
+  // This tablet is left running all evening, so nothing here may be a one-shot
+  // fetch. Timeslots open and close, the DJ switches playlists off, the skip
+  // gate unlocks — a page that read all that once at load would go on offering
+  // music that is no longer in rotation.
   useEffect(() => {
     const load = () => {
+      fetch('/api/playlists')
+        .then(r => r.ok ? r.json() : null)
+        // Only what Auto DJ is drawing from right now. Offering a guest a
+        // playlist the DJ has switched off invites requests for music that was
+        // deliberately taken out of tonight's rotation.
+        .then(d => {
+          const live = Array.isArray(d?.playlists)
+            ? (d.playlists as PlaylistChip[]).filter(p => p.activeNow !== false)
+            : []
+          setChips(live)
+
+          // If the playlist being browsed has just gone out of rotation, don't
+          // strand the guest inside it: step back to the default view and say
+          // why, rather than leaving a list they can no longer see the origin of.
+          setChipId(cur => {
+            if (cur == null || live.some(p => p.id === cur)) return cur
+            say('Den afspilningsliste er ikke aktiv længere')
+            return null
+          })
+        })
+        .catch(() => { /* keep the last good chips */ })
+
       fetch('/api/playlist')
         .then(r => r.ok ? r.json() : [])
         .then(d => setQueue(Array.isArray(d) ? d.slice(0, 4) : []))
@@ -149,7 +161,7 @@ export default function Jukebox() {
     load()
     const id = window.setInterval(load, 5000)
     return () => window.clearInterval(id)
-  }, [])
+  }, [say])
 
   // ── Search / browse ────────────────────────────────────────────────────
   useEffect(() => {
