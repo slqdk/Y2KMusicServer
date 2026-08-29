@@ -31,7 +31,7 @@ type QueueRow = {
 /** /api/playlists answers { id, name, count } — reading a "trackCount" that
  *  the endpoint never sends is why the chip showed a name with no number, and
  *  why a single playlist looked like a stray card. */
-type PlaylistChip = { id: number; name: string; count: number }
+type PlaylistChip = { id: number; name: string; count: number; activeNow?: boolean }
 
 const PAGE = 60
 
@@ -118,7 +118,13 @@ export default function Jukebox() {
   useEffect(() => {
     fetch('/api/playlists')
       .then(r => r.ok ? r.json() : null)
-      .then(d => setChips(Array.isArray(d?.playlists) ? d.playlists : []))
+      // Only what Auto DJ is drawing from right now. Offering a guest a
+      // playlist the DJ has switched off invites requests for music that was
+      // deliberately taken out of tonight's rotation.
+      .then(d => setChips(
+        Array.isArray(d?.playlists)
+          ? (d.playlists as PlaylistChip[]).filter(p => p.activeNow !== false)
+          : []))
       .catch(() => setChips([]))
   }, [])
 

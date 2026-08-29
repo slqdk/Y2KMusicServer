@@ -431,11 +431,38 @@ public sealed class PublicController : ControllerBase
         // ordinary library rows and remain findable by search — only the
         // playlist is reserved.
         var jingleId = JingleStore.PlaylistId(_cfg);
-        var playlists = await db.SavedPlaylists.AsNoTracking()
-            .Where(p => jingleId == null || p.Id != jingleId)
-            .OrderBy(p => p.TileOrder).ThenBy(p => p.Name)
-            .Select(p => new { id = p.Id, name = p.Name, count = p.Tracks.Count })
+
+        // "Active" here means exactly what it means on the admin tiles: switched
+        // on by hand, or inside one of its own timeslots. Reported per playlist
+        // rather than filtered away, so the listener page keeps showing every
+        // playlist while the jukebox can offer only the ones Auto DJ is actually
+        // drawing from tonight.
+        var feeds = AutoDjFeedStore.LoadState(_cfg);
+        var now = DateTime.Now;
+        var withSlots = await db.SavedPlaylists.AsNoTracking()
+            .Include(p => p.Slots)
             .ToListAsync(ct);
+        // FeedState.IsActive takes the playlist itself (explicit off, then
+        // explicit on, then the schedule), so build the answer from the rows
+        // that carry their Slots and look it up by id afterwards.
+        var activeIds = withSlots
+            .Where(p => feeds.IsActive(p, now, PlaylistService.IsPlaylistActiveNow))
+            .Select(p => p.Id)
+            .ToHashSet();
+
+        var playlists = (await db.SavedPlaylists.AsNoTracking()
+                .Where(p => jingleId == null || p.Id != jingleId)
+                .OrderBy(p => p.TileOrder).ThenBy(p => p.Name)
+                .Select(p => new { id = p.Id, name = p.Name, count = p.Tracks.Count })
+                .ToListAsync(ct))
+            .Select(p => new
+            {
+                p.id,
+                p.name,
+                p.count,
+                activeNow = activeIds.Contains(p.id)
+            })
+            .ToList();
         // canChoose drives the chips' second job: selecting which playlists Auto
         // DJ feeds from. selected is the current live selection, so a phone that
         // arrives late shows the same state as everyone else.
