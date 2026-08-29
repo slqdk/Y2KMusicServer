@@ -26,6 +26,8 @@ type QueueRow = {
   title: string | null
   artist: string | null
   durationSec: number
+  /** 'Schedule' (Auto DJ), 'Manual' (the DJ picked it) or 'Request' (a guest). */
+  source?: string | null
 }
 
 /** /api/playlists answers { id, name, count } — reading a "trackCount" that
@@ -119,8 +121,7 @@ export default function Jukebox() {
   // fetch. Timeslots open and close, the DJ switches playlists off, the skip
   // gate unlocks — a page that read all that once at load would go on offering
   // music that is no longer in rotation.
-  useEffect(() => {
-    const load = () => {
+  const loadLive = useCallback(() => {
       fetch('/api/playlists')
         .then(r => r.ok ? r.json() : null)
         // Only what Auto DJ is drawing from right now. Offering a guest a
@@ -157,11 +158,13 @@ export default function Jukebox() {
           setCanSkip(!!d?.allowNext)
         })
         .catch(() => { /* leave as-is */ })
-    }
-    load()
-    const id = window.setInterval(load, 5000)
-    return () => window.clearInterval(id)
   }, [say])
+
+  useEffect(() => {
+    loadLive()
+    const id = window.setInterval(loadLive, 5000)
+    return () => window.clearInterval(id)
+  }, [loadLive])
 
   // ── Search / browse ────────────────────────────────────────────────────
   useEffect(() => {
@@ -225,7 +228,15 @@ export default function Jukebox() {
       // The server hands back the cooldown on success too, so the buttons dim
       // immediately rather than after the next rejected press.
       if (j?.cooldownSec > 0) setCool({ until: Date.now() + j.cooldownSec * 1000, total: j.cooldownSec })
-      say(`“${d.title}” er ønsket`)
+
+      // Auto-accepted requests are in the queue already; pull the panel now so
+      // the guest SEES their song arrive instead of waiting out the poll and
+      // wondering whether the press worked.
+      loadLive()
+
+      say(j?.accepted
+        ? `“${d.title}” er sat i kø`
+        : `“${d.title}” er ønsket – DJ'en ser den`)
     } catch {
       say('Ingen forbindelse til serveren')
     }
@@ -360,7 +371,10 @@ export default function Jukebox() {
 
         <aside className="jb-side">
           <h2 className="jb-sidehead">NÆSTE NUMRE</h2>
-          <p className="jb-sidesub">Ønsket af festens gæster</p>
+          {/* The panel lists the next four whatever put them there, so the old
+              subtitle claimed every one of them was a guest request. Say what
+              it really is, and mark the ones that ARE requests. */}
+          <p className="jb-sidesub">Sådan spiller vi videre</p>
 
           <ol className="jb-queue">
             {queue.map((r, i) => {
@@ -377,7 +391,10 @@ export default function Jukebox() {
                   />
                   <div className="jb-qmain">
                     <div className="jb-qsong">{d.title}</div>
-                    <div className="jb-qartist">{d.artist || '—'}</div>
+                    <div className="jb-qartist">
+                      {d.artist || '—'}
+                      {r.source === 'Request' && <span className="jb-qtag">ØNSKET</span>}
+                    </div>
                   </div>
                 </li>
               )

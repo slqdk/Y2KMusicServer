@@ -224,3 +224,12 @@
   border: 1px solid var(--jb-accent); border-radius: 12px; cursor: pointer;
 }
 .jb-backbig:active { transform: translateY(1px); }
+
+
+/* Marks a queue entry that a guest asked for, as opposed to one Auto DJ or the
+   DJ put there. */
+.jb-qtag {
+  margin-left: 8px; padding: 1px 7px; border-radius: 6px;
+  font-size: .62rem; font-weight: 800; letter-spacing: .06em;
+  color: #1a0d02; background: var(--jb-accent2); vertical-align: middle;
+}
