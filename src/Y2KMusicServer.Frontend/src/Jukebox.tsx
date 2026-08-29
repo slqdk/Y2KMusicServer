@@ -145,13 +145,21 @@ export default function Jukebox() {
     window.clearTimeout(debounce.current)
     const term = q.trim()
 
-    if (!term && chipId == null) { setResults([]); setTotal(0); return }
-
     debounce.current = window.setTimeout(() => {
       const params = new URLSearchParams()
-      if (term) params.set('q', term)
-      if (!term && chipId != null) params.set('playlist', String(chipId))
-      params.set('take', '0')          // 0 = everything that matched
+      if (term) {
+        params.set('q', term)
+        params.set('take', '0')        // 0 = everything that matched
+      } else if (chipId != null) {
+        params.set('playlist', String(chipId))
+        params.set('take', '0')
+      } else {
+        // Nothing typed and no playlist chosen: show what the library learned
+        // about most recently rather than an empty screen. A guest who walks up
+        // to the tablet has something to press immediately.
+        params.set('newest', 'true')
+        params.set('take', '40')
+      }
 
       setBusy(true)
       fetch(`/api/search?${params.toString()}`)
@@ -265,19 +273,21 @@ export default function Jukebox() {
             </>
           )}
 
-          {(q.trim() || chipId != null) && (
-            <h2 className="jb-sect">
-              {browsing ? (chipName ?? 'Afspilningsliste') : 'RESULTATER'}
+          <h2 className="jb-sect">
+              {browsing ? (chipName ?? 'Afspilningsliste')
+                : q.trim() ? 'RESULTATER'
+                  : 'NYESTE NUMRE'}
               {total > 0 && <span className="jb-count"> · {total}</span>}
               {browsing && (
                 <button className="jb-back" onClick={() => setChipId(null)}>← Tilbage</button>
               )}
-            </h2>
-          )}
+          </h2>
 
           {busy && visible.length === 0 && <p className="jb-empty">Søger…</p>}
-          {!busy && (q.trim() || chipId != null) && visible.length === 0 && (
-            <p className="jb-empty">Ingen sange fundet. Prøv et andet ord.</p>
+          {!busy && visible.length === 0 && (
+            <p className="jb-empty">
+              {q.trim() ? 'Ingen sange fundet. Prøv et andet ord.' : 'Ingen numre at vise endnu.'}
+            </p>
           )}
 
           <ul className="jb-list">
@@ -354,6 +364,11 @@ export default function Jukebox() {
         <button
           className="jb-skip"
           onClick={async () => {
+            // Hide it immediately. allowNext only refreshes on the 5s poll, so
+            // the button otherwise sits there looking pressable for several
+            // seconds after the skip has already happened — long enough for a
+            // second guest to skip the song that just started.
+            setCanSkip(false)
             try {
               const r = await fetch('/api/next', { method: 'POST' })
               say(r.ok ? 'Skifter til næste sang…' : 'Kan ikke skippe lige nu')
