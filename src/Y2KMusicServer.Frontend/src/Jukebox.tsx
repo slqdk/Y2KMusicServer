@@ -86,6 +86,11 @@ export default function Jukebox() {
   const [nameRequired, setNameRequired] = useState(false)
 
   const debounce = useRef<number | undefined>(undefined)
+  // Every search gets a number; only the newest one is allowed to write the
+  // results. Tapping a chip while the default "newest" query is still in flight
+  // otherwise ends with the slower reply landing last and replacing the
+  // playlist the guest just opened — the list appearing and vanishing again.
+  const reqSeq = useRef(0)
   const bannerTimer = useRef<number | undefined>(undefined)
 
   // One timer drives the countdown text and the bar.
@@ -152,7 +157,7 @@ export default function Jukebox() {
         params.set('take', '0')        // 0 = everything that matched
       } else if (chipId != null) {
         params.set('playlist', String(chipId))
-        params.set('take', '0')
+        params.set('take', '200')      // browse paths want a real number
       } else {
         // Nothing typed and no playlist chosen: show what the library learned
         // about most recently rather than an empty screen. A guest who walks up
@@ -161,16 +166,18 @@ export default function Jukebox() {
         params.set('take', '40')
       }
 
+      const mine = ++reqSeq.current
       setBusy(true)
       fetch(`/api/search?${params.toString()}`)
         .then(r => r.ok ? r.json() : { items: [] })
         .then(d => {
+          if (mine !== reqSeq.current) return          // a newer query has won
           setResults(Array.isArray(d?.items) ? d.items : [])
           setTotal(d?.total ?? (d?.items?.length ?? 0))
           setShown(PAGE)
         })
-        .catch(() => { setResults([]); setTotal(0) })
-        .finally(() => setBusy(false))
+        .catch(() => { if (mine === reqSeq.current) { setResults([]); setTotal(0) } })
+        .finally(() => { if (mine === reqSeq.current) setBusy(false) })
     }, 300)
 
     return () => window.clearTimeout(debounce.current)
@@ -282,6 +289,12 @@ export default function Jukebox() {
                 <button className="jb-back" onClick={() => setChipId(null)}>← Tilbage</button>
               )}
           </h2>
+
+          {browsing && (
+            <button className="jb-backbig" onClick={() => setChipId(null)}>
+              ← Tilbage til forslag
+            </button>
+          )}
 
           {busy && visible.length === 0 && <p className="jb-empty">Søger…</p>}
           {!busy && visible.length === 0 && (

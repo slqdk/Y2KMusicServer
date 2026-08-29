@@ -212,3 +212,15 @@
 
 /* The toast sits above the skip button rather than under it. */
 .jb-toast { bottom: 88px; }
+
+
+/* Leaving a playlist has to be obvious on a tablet: the small link in the
+   heading is easy to miss with a thumb hovering over the list. */
+.jb-backbig {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin: 0 0 12px; padding: 12px 20px;
+  font: inherit; font-size: 1rem; font-weight: 600;
+  color: var(--jb-text); background: #1b1b20;
+  border: 1px solid var(--jb-accent); border-radius: 12px; cursor: pointer;
+}
+.jb-backbig:active { transform: translateY(1px); }
