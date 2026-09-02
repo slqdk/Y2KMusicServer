@@ -233,3 +233,39 @@
   font-size: .62rem; font-weight: 800; letter-spacing: .06em;
   color: #1a0d02; background: var(--jb-accent2); vertical-align: middle;
 }
+
+/* ── Speakers panel ──────────────────────────────────────────────────────
+   Sits under the queue card in the same column, which was empty below the
+   fold on a tablet. */
+.jb-speakers { margin-top: 14px; }
+.jb-splist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.jb-sp {
+  display: grid; grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center; gap: 10px; width: 100%;
+  padding: 12px 12px; font: inherit; text-align: left; cursor: pointer;
+  color: var(--jb-text); background: #1b1b20;
+  border: 1px solid var(--jb-line); border-radius: 12px;
+}
+.jb-sp:disabled { opacity: .5; cursor: default; }
+.jb-sp.is-on { border-color: var(--jb-accent); background: #24180e; }
+.jb-sp-icon { font-size: 1.1rem; }
+.jb-sp-name {
+  font-size: .98rem; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.jb-sp-state { font-size: .78rem; color: var(--jb-faint); }
+.jb-sp.is-on .jb-sp-state { color: var(--jb-accent2); font-weight: 700; }
+
+/* The right column holds two stacked cards now. Without explicit placement the
+   second <aside> would flow into the RESULTS column on the next row instead of
+   sitting under the queue. Sticky also comes off: two sticky siblings overlap
+   each other as the page scrolls. */
+.jb-body { align-items: start; grid-auto-flow: row; }
+.jb-main { grid-column: 1; grid-row: 1 / span 2; }
+.jb-side { grid-column: 2; position: static; align-self: start; }
+
+@media (max-width: 1000px) {
+  /* Single column: let both cards flow normally under the results again. */
+  .jb-main { grid-column: 1; grid-row: auto; }
+  .jb-side { grid-column: 1; }
+}

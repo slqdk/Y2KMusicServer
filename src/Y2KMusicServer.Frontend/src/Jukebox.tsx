@@ -35,6 +35,10 @@ type QueueRow = {
  *  why a single playlist looked like a stray card. */
 type PlaylistChip = { id: number; name: string; count: number; activeNow?: boolean }
 
+/** Only speakers the operator has marked guest-allowed reach this endpoint, so
+ *  the page can show everything it is given. */
+type Speaker = { id: string; name: string; casting: boolean }
+
 const PAGE = 60
 
 function fmt(sec: number): string {
@@ -90,6 +94,8 @@ export default function Jukebox() {
   const [cool, setCool] = useState<{ until: number; total: number } | null>(null)
   const [, tick] = useState(0)
   const [canSkip, setCanSkip] = useState(false)
+  const [speakers, setSpeakers] = useState<Speaker[]>([])
+  const [spBusy, setSpBusy] = useState(false)
   const [nameRequired, setNameRequired] = useState(false)
 
   const debounce = useRef<number | undefined>(undefined)
@@ -152,6 +158,11 @@ export default function Jukebox() {
       fetch('/api/playlist')
         .then(r => r.ok ? r.json() : [])
         .then(d => setQueue(Array.isArray(d) ? d : []))
+        .catch(() => { /* keep the last good list */ })
+
+      fetch('/api/cast/speakers')
+        .then(r => r.ok ? r.json() : null)
+        .then(d => setSpeakers(Array.isArray(d?.speakers) ? d.speakers : []))
         .catch(() => { /* keep the last good list */ })
 
       fetch('/api/nowplaying')
@@ -255,6 +266,28 @@ export default function Jukebox() {
     const idx = onAirId != null ? queue.findIndex(r => r.trackId === onAirId) : -1
     return (idx >= 0 ? queue.slice(idx + 1) : queue).slice(0, 4)
   })()
+
+  // Same two endpoints the listener page uses: one press starts casting to a
+  // speaker, a second stops it. The server owns the exclusivity rules.
+  const castTo = async (sp: Speaker) => {
+    setSpBusy(true)
+    try {
+      const r = await fetch(sp.casting ? '/api/cast/stop' : '/api/cast/play', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId: sp.id })
+      })
+      const d = await r.json().catch(() => null)
+      say(r.ok
+        ? (sp.casting ? `Stoppet på ${sp.name}` : `Spiller på ${sp.name}`)
+        : (d?.error ?? 'Højttaleren svarede ikke'))
+      loadLive()
+    } catch {
+      say('Højttaleren kunne ikke nås')
+    } finally {
+      setSpBusy(false)
+    }
+  }
 
   const clearAll = () => { setQ(''); setChipId(null); setResults([]); setTotal(0) }
 
@@ -417,6 +450,34 @@ export default function Jukebox() {
           </ol>
 
           <div className="jb-lock">🔒 Køen styres automatisk</div>
+        </aside>
+
+        {/* Speakers, in the space under the queue. Only devices the operator
+            has released to guests appear, so an empty list means "none shared"
+            rather than "none found" — say so instead of showing a bare box. */}
+        <aside className="jb-side jb-speakers">
+          <h2 className="jb-sidehead">HØJTTALERE</h2>
+          <p className="jb-sidesub">Spil musikken i et andet rum</p>
+
+          {speakers.length === 0 ? (
+            <p className="jb-empty">Ingen højttalere er delt lige nu.</p>
+          ) : (
+            <ul className="jb-splist">
+              {speakers.map(sp => (
+                <li key={sp.id}>
+                  <button
+                    className={`jb-sp${sp.casting ? ' is-on' : ''}`}
+                    disabled={spBusy}
+                    onClick={() => castTo(sp)}
+                  >
+                    <span className="jb-sp-icon">{sp.casting ? '🔊' : '🔈'}</span>
+                    <span className="jb-sp-name">{sp.name}</span>
+                    <span className="jb-sp-state">{sp.casting ? 'Spiller' : 'Tilslut'}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </aside>
       </div>
 
