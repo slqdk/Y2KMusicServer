@@ -56,6 +56,42 @@ public static class YouTubeDownloadIndex
         => Load(cfg).Entries.FirstOrDefault(
             e => string.Equals(e.VideoId, videoId, StringComparison.Ordinal));
 
+    /// <summary>
+    /// Rewrites every recorded landing spot under <paramref name="fromPrefix"/>
+    /// (with trailing separator) to the same place under <paramref name="to"/>.
+    /// Without this a relocated library would look like it had never downloaded
+    /// anything — the dedupe checks the recorded file exists — and re-pasting a
+    /// link would fetch a duplicate. Returns how many entries changed.
+    /// </summary>
+    public static int Relocate(IConfiguration cfg, string fromPrefix, string to)
+    {
+        var path = DataPaths.YouTubeDownloadsIndexPath(cfg);
+        lock (Gate)
+        {
+            Index idx;
+            try
+            {
+                if (!File.Exists(path)) return 0;
+                idx = JsonSerializer.Deserialize<Index>(File.ReadAllText(path)) ?? new Index();
+            }
+            catch { return 0; }
+            idx.Entries ??= new List<Entry>();
+
+            int changed = 0;
+            foreach (var e in idx.Entries)
+            {
+                if (!e.FilePath.StartsWith(fromPrefix, StringComparison.OrdinalIgnoreCase)) continue;
+                e.FilePath = to.TrimEnd('\\', '/') + "\\" + e.FilePath.Substring(fromPrefix.Length);
+                changed++;
+            }
+            if (changed == 0) return 0;
+
+            try { File.WriteAllText(path, JsonSerializer.Serialize(idx, Indented)); }
+            catch { return 0; }
+            return changed;
+        }
+    }
+
     /// <summary>Records (or replaces) where a downloaded video landed.</summary>
     public static void Record(IConfiguration cfg, string videoId, string filePath,
                               string? title, string? artist)

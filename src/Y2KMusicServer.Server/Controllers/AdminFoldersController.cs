@@ -121,6 +121,42 @@ public sealed class AdminFoldersController : ControllerBase
         return Ok(new { removed = entry.Path, removedTracks });
     }
 
+    public sealed record RelocateBody(string? From, string? To, bool DryRun);
+
+    /// <summary>
+    /// The music moved (new drive letter, new machine, new share): rewrites the
+    /// path of every track under <c>From</c> to the same place under <c>To</c>,
+    /// keeping track ids — so playlists, the queue and analysis carry over.
+    /// <c>DryRun</c> reports what would change and spot-checks that the files
+    /// are really at the new location, writing nothing.
+    /// </summary>
+    [HttpPost("relocate")]
+    public async Task<IActionResult> Relocate([FromBody] RelocateBody? body, CancellationToken ct)
+    {
+        if (body == null) return UnprocessableEntity(new { error = "from and to are required" });
+
+        if (!body.DryRun)
+        {
+            // No scan may add rows at the new paths, and no analysis pass may walk
+            // a snapshot of paths, while they are being rewritten.
+            _scanner.CancelAll();
+            _analysis.CancelAll();
+        }
+
+        var r = await FolderRelocation.RunAsync(_dbf, _cfg, body.From, body.To,
+            apply: !body.DryRun, _log, ct);
+
+        if (!body.DryRun)
+        {
+            // Tracks that were unreachable before the move had no analysis; pick
+            // them up now. Art misses cached while the files were missing go too.
+            _analysis.TryStart(reanalyzeAll: false, folderId: null);
+            if (r.Applied) PublicController.ForgetMissingArt();
+        }
+
+        return r.Error != null && !body.DryRun ? UnprocessableEntity(r) : Ok(r);
+    }
+
     /// <summary>Rescans one folder (FIFO behind any running scan).</summary>
     [HttpPost("{id:int}/rescan")]
     public IActionResult Rescan(int id)

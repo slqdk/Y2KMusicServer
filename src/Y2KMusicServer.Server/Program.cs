@@ -59,6 +59,12 @@ public static class Program
 
             var builder = WebApplication.CreateBuilder(args);
 
+            // A confirmed instance import (File → Move / backup) replaces the
+            // database and the JSON stores. That can only happen here, before
+            // anything has opened them; the replaced data is moved aside, not
+            // deleted. No pending import → returns immediately.
+            InstanceBackup.ApplyPendingImport(builder.Configuration);
+
             // Run as Windows Service when launched by the SCM.
             builder.Host.UseWindowsService(opts =>
             {

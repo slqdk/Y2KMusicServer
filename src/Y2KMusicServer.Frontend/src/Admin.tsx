@@ -5,6 +5,7 @@ import { useHub } from './admin/useHub'
 import SettingsDialog from './admin/SettingsDialog'
 import SpeakersDialog from './admin/SpeakersDialog'
 import YouTubeDialog from './admin/YouTubeDialog'
+import BackupDialog from './admin/BackupDialog'
 import LibraryBrowser from './admin/LibraryBrowser'
 import PlaylistPanel from './admin/PlaylistPanel'
 import DeckPanel from './admin/DeckPanel'
@@ -28,6 +29,7 @@ export default function Admin() {
   const [logOpen, setLogOpen] = useState(false)
   const [ytOpen, setYtOpen] = useState(false)
   const [speakersOpen, setSpeakersOpen] = useState(false)
+  const [backupOpen, setBackupOpen] = useState(false)
   const [theme, setTheme] = useState<string>(readTheme)
   const [status, setStatus] = useState<api.PlaybackStatus | null>(null)
   // The Crossfade and Mixing section toggles on the deck panel; both live in the
@@ -102,7 +104,8 @@ export default function Admin() {
       </div>
 
       <div className="w-menubar">
-        <button disabled title="Menu actions land with later ships">File</button>
+        <button onClick={() => setBackupOpen(true)}
+          title="Export this install, or import one from another machine">File</button>
         <button onClick={() => setSettingsOpen(true)}>Settings</button>
         <button onClick={() => setLogOpen(o => !o)}>Log</button>
         <button onClick={() => setYtOpen(true)}>YouTube</button>
@@ -139,6 +142,7 @@ export default function Admin() {
       {ytOpen && <YouTubeDialog onClose={() => setYtOpen(false)} onPlayNow={playNow} />}
 
       {speakersOpen && <SpeakersDialog onClose={() => setSpeakersOpen(false)} />}
+      {backupOpen && <BackupDialog onClose={() => setBackupOpen(false)} />}
     </div>
   )
 }

@@ -16,7 +16,7 @@ export default function FoldersDialog({ onClose, onChanged }:
   const [busy, setBusy] = useState(false)
   // Which field the folder browser is filling: the Add box, or the YouTube
   // download destination below the list.
-  const [browsing, setBrowsing] = useState<'add' | 'youtube' | null>(null)
+  const [browsing, setBrowsing] = useState<'add' | 'youtube' | 'relocate' | null>(null)
   // The YouTube download destination. Server-resolved, so a blank stored value
   // still shows the default path it will actually use; ytNote carries the
   // advisory when the folder sits inside (or around) a Music folder.
@@ -31,6 +31,13 @@ export default function FoldersDialog({ onClose, onChanged }:
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<{ folder: api.ScanFolderDto; kind: 'clear' | 'remove' } | null>(null)
+  // Relocate: the music now lives somewhere else (new drive letter, new
+  // machine, new share). preview is the dry run for exactly these two paths;
+  // editing either field invalidates it, so Move only ever applies what was
+  // checked.
+  const [reloc, setReloc] = useState<{ from: string; to: string } | null>(null)
+  const [relocPreview, setRelocPreview] = useState<api.RelocateResult | null>(null)
+  const [relocBusy, setRelocBusy] = useState(false)
 
   const refresh = () => api.getScanFolders().then(r => setFolders(r.folders)).catch(() => {})
   useEffect(() => { refresh() }, [])
@@ -71,11 +78,12 @@ export default function FoldersDialog({ onClose, onChanged }:
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       if (confirm) setConfirm(null)
+      else if (reloc) setReloc(null)
       else onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, confirm])
+  }, [onClose, confirm, reloc])
 
   const act = async (fn: () => Promise<unknown>, done?: string) => {
     setBusy(true); setErr(null)
@@ -90,6 +98,39 @@ export default function FoldersDialog({ onClose, onChanged }:
     act(async () => { await api.addScanFolder(p); setNewPath('') }, 'Folder added — scanning…')
   }
 
+  const openRelocate = (from: string) => {
+    setReloc({ from, to: '' })
+    setRelocPreview(null)
+    setErr(null)
+  }
+  const editReloc = (patch: Partial<{ from: string; to: string }>) => {
+    setReloc(r => (r ? { ...r, ...patch } : r))
+    setRelocPreview(null)
+  }
+  const checkRelocate = async () => {
+    if (!reloc) return
+    setRelocBusy(true)
+    try { setRelocPreview(await api.relocateLibrary(reloc.from, reloc.to, true)) }
+    catch { setRelocPreview(null); setErr('Could not check that move — no reply from the server.') }
+    finally { setRelocBusy(false) }
+  }
+  const runRelocate = async () => {
+    if (!reloc) return
+    setRelocBusy(true); setErr(null)
+    try {
+      const r = await api.relocateLibrary(reloc.from, reloc.to, false)
+      if (r.error) { setRelocPreview(r); return }
+      setReloc(null); setRelocPreview(null)
+      await refresh(); onChanged()
+      setMsg(`Moved ${r.tracks} track${r.tracks === 1 ? '' : 's'} to ${r.to}` +
+        (r.duplicates > 0 ? ` (${r.duplicates} duplicate${r.duplicates === 1 ? '' : 's'} merged)` : '') +
+        ' — playlists and history kept.')
+    } catch { setErr('The move failed — no reply from the server.') }
+    finally { setRelocBusy(false) }
+  }
+  const relocReady = !!relocPreview && !relocPreview.error && relocPreview.targetExists
+    && relocPreview.from.toLowerCase() === (reloc?.from ?? '').trim().replace(/[\\/]+$/, '').toLowerCase()
+
   const runConfirm = () => {
     if (!confirm) return
     const { folder, kind } = confirm
@@ -103,7 +144,7 @@ export default function FoldersDialog({ onClose, onChanged }:
   return (
     <div className="w-overlay" onMouseDown={onClose}>
       <div className="w-dialog w-raised" onMouseDown={e => e.stopPropagation()}
-        style={{ width: 620, maxWidth: '94vw' }}>
+        style={{ width: 680, maxWidth: '94vw' }}>
         <div className="w-titlebar">
           <span className="w-app">Music folders</span>
           <span style={{ flex: 1 }} />
@@ -128,7 +169,7 @@ export default function FoldersDialog({ onClose, onChanged }:
           <div className="w-listwrap w-sunken" style={{ maxHeight: 260, marginTop: 6 }}>
             <table className="w-table">
               <thead>
-                <tr><th>Path</th><th className="w-num">Tracks</th><th style={{ width: 236 }} /></tr>
+                <tr><th>Path</th><th className="w-num">Tracks</th><th style={{ width: 290 }} /></tr>
               </thead>
               <tbody>
                 {folders.map(f => (
@@ -149,6 +190,9 @@ export default function FoldersDialog({ onClose, onChanged }:
                       </button>{' '}
                       <button className="w-btn" disabled={busy} title="Scan this folder for new files"
                         onClick={() => act(() => api.rescanScanFolder(f.id), 'Rescan queued.')}>↻</button>{' '}
+                      <button className="w-btn" disabled={busy}
+                        title="The music moved (new drive letter, new machine, new share): point this folder at its new location, keeping playlists and history"
+                        onClick={() => openRelocate(f.path)}>Move…</button>{' '}
                       <button className="w-btn" disabled={busy} title="Remove this folder's tracks from the library (keeps the folder assigned)"
                         onClick={() => setConfirm({ folder: f, kind: 'clear' })}>Clear</button>{' '}
                       <button className="w-btn" disabled={busy} title="Remove the folder and its tracks"
@@ -162,6 +206,14 @@ export default function FoldersDialog({ onClose, onChanged }:
               </tbody>
             </table>
           </div>
+
+          {folders.some(f => !f.exists) && (
+            <div className="w-muted" style={{ marginTop: 4 }}>
+              A folder that is <span className="w-err">not reachable</span> usually means the music
+              moved — use <b>Move…</b> to point it at the new location. Don’t Clear or Remove it: that
+              deletes its tracks from every playlist.
+            </div>
+          )}
 
           {/* The YouTube destination is a folder choice, so it lives here with the
               other folder choices rather than in Settings. It is NOT a scan
@@ -227,10 +279,97 @@ export default function FoldersDialog({ onClose, onChanged }:
           </div>
         )}
 
+        {reloc && (
+          <div className="w-overlay" onMouseDown={() => !relocBusy && setReloc(null)}>
+            <div className="w-dialog w-raised" onMouseDown={e => e.stopPropagation()} style={{ width: 560, maxWidth: '92vw' }}>
+              <div className="w-titlebar">
+                <span className="w-app">Move music to a new location</span>
+                <span style={{ flex: 1 }} />
+                <button className="w-btn" disabled={relocBusy} onClick={() => setReloc(null)}
+                  style={{ minHeight: 16, padding: '0 7px' }}>✕</button>
+              </div>
+              <div className="w-dialog-body">
+                <div className="w-muted" style={{ marginBottom: 8 }}>
+                  For when the files themselves moved — a new drive letter, a new machine, a new share.
+                  Every track under the old location is pointed at the same place under the new one.
+                  Tracks keep their identity, so playlists, the queue, history and analysis all carry over.
+                  Nothing on disk is moved or changed.
+                </div>
+
+                <div className="w-formrow">
+                  <label style={{ width: 70 }}>Old:</label>
+                  <input type="text" value={reloc.from} style={{ flex: 1 }} spellCheck={false} disabled={relocBusy}
+                    onChange={e => editReloc({ from: e.target.value })} />
+                </div>
+                <div className="w-muted" style={{ margin: '0 0 6px 74px' }}>
+                  Shorten it to move several folders at once — e.g. <code>D:\Music</code> covers every folder under it.
+                </div>
+                <div className="w-formrow">
+                  <label style={{ width: 70 }}>New:</label>
+                  <input type="text" value={reloc.to} style={{ flex: 1 }} spellCheck={false} disabled={relocBusy}
+                    placeholder="E:\Music"
+                    onChange={e => editReloc({ to: e.target.value })}
+                    onKeyDown={e => { if (e.key === 'Enter') checkRelocate() }} />
+                  <button className="w-btn" disabled={relocBusy} onClick={() => setBrowsing('relocate')}>Browse…</button>
+                </div>
+
+                {relocPreview && (
+                  <div className="w-sunken" style={{ padding: '6px 8px', margin: '8px 0', background: 'var(--w-field, #fff)' }}>
+                    {relocPreview.error
+                      ? <div className="w-err">{relocPreview.error}</div>
+                      : <>
+                          <div>
+                            <b>{relocPreview.tracks}</b> track{relocPreview.tracks === 1 ? '' : 's'}
+                            {relocPreview.folders > 0 && <> in <b>{relocPreview.folders}</b> folder{relocPreview.folders === 1 ? '' : 's'}</>}
+                            {' '}will point at <code>{relocPreview.to}</code>.
+                          </div>
+                          {!relocPreview.targetExists && (
+                            <div className="w-err">{relocPreview.to} can’t be reached from the server.</div>
+                          )}
+                          {relocPreview.sampled > 0 && (
+                            <div className={relocPreview.sampleFound === 0 ? 'w-err'
+                              : relocPreview.sampleFound < relocPreview.sampled ? undefined : 'w-muted'}>
+                              Spot check: {relocPreview.sampleFound} of {relocPreview.sampled} files found at the new location
+                              {relocPreview.sampleFound === 0 ? ' — is this the right folder?'
+                                : relocPreview.sampleFound < relocPreview.sampled ? ' — some are missing; they stay unplayable until they turn up.'
+                                : '.'}
+                            </div>
+                          )}
+                          {relocPreview.duplicates > 0 && (
+                            <div className="w-muted">
+                              {relocPreview.duplicates} of them were already scanned at the new location; each pair is
+                              merged into the original, so playlists keep working and nothing appears twice.
+                            </div>
+                          )}
+                          {(relocPreview.youTubeFolder || relocPreview.youTubeEntries > 0) && (
+                            <div className="w-muted">
+                              The YouTube {relocPreview.youTubeFolder ? 'download folder and ' : ''}download records move with it.
+                            </div>
+                          )}
+                        </>}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 8 }}>
+                  <button className="w-btn" disabled={relocBusy} onClick={() => setReloc(null)}>Cancel</button>
+                  <button className="w-btn" disabled={relocBusy || !reloc.from.trim() || !reloc.to.trim()}
+                    onClick={checkRelocate}>{relocBusy && !relocReady ? 'Checking…' : 'Check'}</button>
+                  <button className="w-btn w-primary" disabled={relocBusy || !relocReady} onClick={runRelocate}
+                    title={relocReady ? undefined : 'Check the move first'}>
+                    {relocBusy && relocReady ? 'Moving…' : 'Move'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {browsing && (
           <FolderBrowser
             onSelect={p => {
-              if (browsing === 'youtube') setYtFolder(p); else setNewPath(p)
+              if (browsing === 'youtube') setYtFolder(p)
+              else if (browsing === 'relocate') editReloc({ to: p })
+              else setNewPath(p)
               setBrowsing(null)
             }}
             onClose={() => setBrowsing(null)} />

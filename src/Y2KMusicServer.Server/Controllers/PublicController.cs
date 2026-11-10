@@ -824,6 +824,13 @@ public sealed class PublicController : ControllerBase
         catch { return RememberMiss(trackId); }
     }
 
+    /// <summary>
+    /// Forgets every remembered miss. Called after a library relocation: tracks
+    /// whose files were unreachable were remembered as "no art", and would stay
+    /// that way until the next restart even though the file is back.
+    /// </summary>
+    internal static void ForgetMissingArt() => NoArtTracks.Clear();
+
     private IActionResult RememberMiss(int trackId)
     {
         if (NoArtTracks.Count > 5000) NoArtTracks.Clear();

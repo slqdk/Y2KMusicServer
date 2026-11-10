@@ -114,6 +114,47 @@ public static class ScanFolderStore
     }
 
     /// <summary>
+    /// Re-homes every folder at or under <paramref name="from"/> to the same
+    /// place under <paramref name="to"/> (the music moved: a new drive letter, a
+    /// new machine, a new share). Ids and the Active flag are kept, so
+    /// folder-scoped operations and search visibility carry over.
+    ///
+    /// If a rewritten path is already listed — the operator added the new
+    /// location by hand before relocating — the hand-added entry is dropped and
+    /// the original (re-homed) one kept. Returns how many entries were re-homed.
+    /// </summary>
+    public static int Relocate(IConfiguration cfg, string from, string to)
+    {
+        var fromNorm = from.Trim().TrimEnd('\\', '/');
+        var toNorm = to.Trim().TrimEnd('\\', '/');
+        var fromPrefix = FolderScope.Prefix(fromNorm);
+
+        lock (Gate)
+        {
+            var c = LoadUnlocked(cfg);
+            var moved = new List<ScanFolder>();
+            foreach (var f in c.Folders)
+            {
+                if (string.Equals(f.Path, fromNorm, StringComparison.OrdinalIgnoreCase))
+                    f.Path = toNorm;
+                else if (f.Path.StartsWith(fromPrefix, StringComparison.OrdinalIgnoreCase))
+                    f.Path = toNorm + "\\" + f.Path.Substring(fromPrefix.Length);
+                else
+                    continue;
+                moved.Add(f);
+            }
+            if (moved.Count == 0) return 0;
+
+            // Collapse duplicates the move created, keeping the re-homed entry.
+            c.Folders.RemoveAll(f => !moved.Contains(f) && moved.Any(
+                m => string.Equals(m.Path, f.Path, StringComparison.OrdinalIgnoreCase)));
+
+            SaveUnlocked(cfg, c);
+            return moved.Count;
+        }
+    }
+
+    /// <summary>
     /// A predicate telling whether a track's file path is HIDDEN from
     /// search/browse, or null when every folder is active (the common case —
     /// callers skip filtering entirely). Ownership follows the usual

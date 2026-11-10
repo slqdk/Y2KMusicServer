@@ -451,6 +451,94 @@ export const rescanScanFolder = (id: number) =>
 export const clearScanFolder = (id: number) =>
   req<{ removed: number }>(`/api/admin/folders/${id}/clear-data`, { method: 'POST' })
 
+// ── Relocate: the music moved (new drive letter / machine / share) ───────
+// Rewrites track paths in place, so ids — and with them every playlist, the
+// queue and the analysis — carry over. dryRun previews and spot-checks.
+export interface RelocateResult {
+  from: string
+  to: string
+  targetExists: boolean
+  tracks: number
+  folders: number
+  youTubeEntries: number
+  youTubeFolder: boolean
+  duplicates: number
+  sampled: number
+  sampleFound: number
+  applied: boolean
+  error: string | null
+}
+// 422 carries the same shape with error set, so it is read rather than thrown.
+export const relocateLibrary = async (from: string, to: string, dryRun: boolean): Promise<RelocateResult> => {
+  const r = await fetch('/api/admin/folders/relocate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from, to, dryRun }),
+  })
+  if (r.ok || r.status === 422) return (await r.json()) as RelocateResult
+  throw new ApiError(r.status, `${r.status} ${r.statusText}`)
+}
+
+// ── Move / backup: export and import a whole instance ───────────────────
+export interface BackupManifest {
+  format: string
+  formatVersion: number
+  appVersion: string
+  exportedUtc: string
+  machine: string
+  dataPath: string
+  tracks: number
+  playlists: number
+  folders: string[]
+  youTubeFolder: string
+  includesYouTubeFiles: boolean
+  stores: string[]
+}
+export interface StagedImport {
+  manifest: BackupManifest
+  folders: { path: string; foundHere: boolean }[]
+  youTubeFiles: number
+}
+export const exportInstanceUrl = '/api/admin/backup/export'
+
+export const getPendingImport = async (): Promise<StagedImport | null> => {
+  const r = await fetch('/api/admin/backup/import')
+  if (r.status === 204) return null
+  if (!r.ok) throw new ApiError(r.status, `${r.status} ${r.statusText}`)
+  return (await r.json()) as StagedImport
+}
+// The zip goes up as the raw body, not a form: large exports pass the default
+// multipart limits, and the server streams it straight to disk.
+export const uploadImport = async (file: File): Promise<StagedImport> => {
+  const r = await fetch('/api/admin/backup/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/zip' },
+    body: file,
+  })
+  const d = await r.json().catch(() => null)
+  if (!r.ok) {
+    const msg = d?.error
+      ?? (r.status === 413
+        ? 'The file is too large for the connection — upload it from the server’s own address on the local network.'
+        : `${r.status} ${r.statusText}`)
+    throw new ApiError(r.status, msg)
+  }
+  return d as StagedImport
+}
+export const discardImport = () => req<void>('/api/admin/backup/import', { method: 'DELETE' })
+export const applyImport = () =>
+  req<{ restarting: boolean }>('/api/admin/backup/import/apply', { method: 'POST' })
+
+/** When the server process started — a change means it has restarted. */
+export const getServiceStartedAt = async (): Promise<string | null> => {
+  try {
+    const r = await fetch('/api/admin/service/status', { cache: 'no-store' })
+    if (!r.ok) return null
+    const d = await r.json()
+    return typeof d?.startedAtUtc === 'string' ? d.startedAtUtc : null
+  } catch { return null }
+}
+
 // ── Filesystem browse (folder picker) ───────────────────────────────────
 export interface FsEntry { name: string; path: string }
 export interface FsListing {
